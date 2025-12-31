@@ -88,7 +88,7 @@ export default defineConfig({
             dest: '_locales',
           },
           {
-            src: '../../test-scripts/test-rules.json',
+            src: '../../../test-scripts/test-rules.json',
             dest: '.',
           },
         ],
@@ -96,7 +96,7 @@ export default defineConfig({
     ],
     build: {
       // 我们的构建产物需要兼容到es6
-      target: 'es2015',
+      target: 'es2020',
       // 非生产环境下生成sourcemap
       sourcemap: env.mode !== 'production',
       // 禁用gzip 压缩大小报告，因为压缩大型文件可能会很慢

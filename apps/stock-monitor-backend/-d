@@ -1,1 +1,0 @@
-{"success":false,"message":"请求参数验证失败","error_code":"VALIDATION_ERROR","details":{"validation_errors":[{"type":"missing","loc":["body"],"msg":"Field required","input":null,"url":"https://errors.pydantic.dev/2.5/v/missing"}]}}

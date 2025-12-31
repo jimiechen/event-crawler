@@ -70,7 +70,7 @@ class StockTagRelation(BaseModelOnlyCreated):
     __table_args__ = (
         UniqueConstraint("stock_code", "tag_id", name="uk_stock_tag"),
         Index("idx_stock_code", "stock_code"),
-        Index("idx_tag_id", "tag_id"),
+        Index("idx_stock_tag_id", "tag_id"),
         {"comment": "股票标签关联表"}
     )
     
