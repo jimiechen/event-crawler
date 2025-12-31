@@ -1,0 +1,106 @@
+{
+  "parsingRules": [
+    {
+      "name": "matchContainer",
+      "fieldName": "matchContainer",
+      "regex": "<div[^>]*class=\"[^\"]*clearfix center listItem ctrl_eachmatch[^\"]*\"[^>]*>[\\s\\S]*?</div></div></div>",
+      "description": "比赛容器"
+    },
+    {
+      "name": "matchNumber",
+      "fieldName": "matchNumber",
+      "regex": "<p[^>]*class=\"xuhao\"[^>]*>\\s*([^<\\s]+)\\s*</p>",
+      "description": "比赛编号"
+    },
+    {
+      "name": "matchId",
+      "fieldName": "matchId",
+      "regex": "MatchID=([0-9]+)",
+      "description": "提取比赛ID"
+    },
+    {
+      "name": "matchDate",
+      "fieldName": "matchDate",
+      "regex": "<p[^>]*class=\"listtoptxt fl font12\"[^>]*>[\\s\\S]*?&nbsp;&nbsp;([0-9]{4}-[0-9]{2}-[0-9]{2})&nbsp;&nbsp;",
+      "description": "比赛日期"
+    },
+    {
+      "name": "league",
+      "fieldName": "league",
+      "regex": "<a[^>]*class=\"liansai\"[^>]*>[\\s]*([^<]+?)[\\s]*</a>",
+      "description": "联赛名称"
+    },
+    {
+      "name": "matchTime",
+      "fieldName": "matchTime",
+      "regex": "<time[^>]*class=\"timetxt\"[^>]*>(\\d{2}:\\d{2})</time>",
+      "description": "比赛时间"
+    },
+    {
+      "name": "homeTeam",
+      "fieldName": "homeTeam",
+      "regex": "<em[^>]*class=\"ctrl_homename\"[^>]*>([^<]+)</em>",
+      "description": "主队名称"
+    },
+    {
+      "name": "homeRank",
+      "fieldName": "homeRank",
+      "regex": "<cite class=\"pm\">\\[([^\\]]+)\\]([^<]*)</cite><em class=\"ctrl_homename\">",
+      "description": "主队排名"
+    },
+    {
+      "name": "awayTeam",
+      "fieldName": "awayTeam",
+      "regex": "<em[^>]*class=\"ctrl_awayname\"[^>]*>([^<]+)</em>",
+      "description": "客队名称"
+    },
+    {
+      "name": "awayRank",
+      "fieldName": "awayRank",
+      "regex": "<em class=\"ctrl_awayname\">[^<]+</em>\\s*<cite class=\"pm\">\\[([^\\]]+)\\]([^<]*)</cite>",
+      "description": "客队排名"
+    },
+    {
+      "name": "oddsWin",
+      "fieldName": "oddsWin",
+      "regex": "betway=\"0\"[\\s\\S]*?<div[^>]*[^>]*>[\\s]*<p[^>]*>胜</p>[\\s]*<p[^>]*>([0-9.]+)</p>",
+      "description": "胜赔率"
+    },
+    {
+      "name": "oddsDraw",
+      "fieldName": "oddsDraw",
+      "regex": "betway=\"0\"[\\s\\S]*?<div[^>]*[^>]*>[\\s]*<p[^>]*>平</p>[\\s]*<p[^>]*>([0-9.]+)</p>",
+      "description": "平赔率"
+    },
+    {
+      "name": "oddsLose",
+      "fieldName": "oddsLose",
+      "regex": "betway=\"0\"[\\s\\S]*?<div[^>]*[^>]*>[\\s]*<p[^>]*>负</p>[\\s]*<p[^>]*>([0-9.]+)</p>",
+      "description": "负赔率"
+    },
+    {
+      "name": "handicapValue",
+      "fieldName": "handicapValue",
+      "regex": "<em[^>]*class=\"rangqiu[^>]*ctrl_special\"[^>]*>([+-]?[0-9]+)</em>",
+      "description": "让球数"
+    },
+    {
+      "name": "handicapWin",
+      "fieldName": "handicapWin",
+      "regex": "betway=\"1\"[\\s\\S]*?<div[^>]*[^>]*>[\\s]*<p[^>]*>胜</p>[\\s]*<p[^>]*>([0-9.]+)</p>",
+      "description": "让球胜赔率"
+    },
+    {
+      "name": "handicapDraw",
+      "fieldName": "handicapDraw",
+      "regex": "betway=\"1\"[\\s\\S]*?<div[^>]*[^>]*>[\\s]*<p[^>]*>平</p>[\\s]*<p[^>]*>([0-9.]+)</p>",
+      "description": "让球平赔率"
+    },
+    {
+      "name": "handicapLose",
+      "fieldName": "handicapLose",
+      "regex": "betway=\"1\"[\\s\\S]*?<div[^>]*[^>]*>[\\s]*<p[^>]*>负</p>[\\s]*<p[^>]*>([0-9.]+)</p>",
+      "description": "让球负赔率"
+    }
+  ]
+}

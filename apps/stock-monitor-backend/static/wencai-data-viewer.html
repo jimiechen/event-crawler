@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>问财抓取批次监控</title>
+    <script src="/static/js/navbar.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #2c3e50;
+            font-size: 2.2em;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .header .subtitle {
+            color: #7f8c8d;
+            font-size: 1.1em;
+            margin-bottom: 20px;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        .controls {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .control-group label {
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.9em;
+        }
+
+        input, select, button {
+            padding: 10px 15px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            min-width: 120px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .data-table-container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            border-radius: 10px;
+            border: 1px solid #e1e8ed;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th, td {
+            padding: 15px;
+            text-align: left;
+            border-bottom: 1px solid #e1e8ed;
+        }
+
+        th {
+            background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+            font-weight: 600;
+            color: #2c3e50;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        tr:hover {
+            background-color: #f8f9fa;
+        }
+
+        .url-cell {
+            max-width: 300px;
+            word-break: break-all;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85em;
+        }
+
+        .timestamp-cell {
+            white-space: nowrap;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.85em;
+        }
+
+        .expand-btn {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.8em;
+            min-width: auto;
+        }
+
+        .expand-btn:hover {
+            background: #2980b9;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .response-details {
+            background: #f8f9fa;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 10px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+            font-size: 1.1em;
+        }
+
+        .loading::after {
+            content: '';
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e1e8ed;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+            font-size: 1.1em;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-active {
+            background: #27ae60;
+            box-shadow: 0 0 10px rgba(39, 174, 96, 0.5);
+        }
+
+        .status-inactive {
+            background: #e74c3c;
+        }
+
+        .batch-detail-row {
+            background-color: #f8f9fa;
+        }
+
+        .detail-table {
+            margin: 10px 0;
+            width: 95%;
+            margin-left: auto;
+            margin-right: auto;
+            border: 1px solid #ddd;
+        }
+    </style>
+<script src="/static/js/custom-alert.js"></script>
+</head>
+<body>
+    <div class="container">
+        <!-- 页面头部 -->
+        <div class="header">
+            <h1>
+                📦 问财抓取批次监控
+            </h1>
+            <div class="subtitle">实时监控问财数据抓取批次及关联股票</div>
+            
+            <!-- 统计信息 -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalCount">0</div>
+                    <div class="stat-label">总批次数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="filteredCount">0</div>
+                    <div class="stat-label">显示条数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="successCount">0</div>
+                    <div class="stat-label">成功批次</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="lastUpdate">--</div>
+                    <div class="stat-label">最后更新</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 问财抓取批次内容 -->
+        <div id="wencaiTab">
+            <div class="controls">
+                <div class="controls-row">
+                    <div class="control-group">
+                        <label>状态过滤</label>
+                        <select id="batchStatusFilter">
+                            <option value="">全部状态</option>
+                            <option value="completed">完成</option>
+                            <option value="failed">失败</option>
+                            <option value="processing">进行中</option>
+                        </select>
+                    </div>
+                    <div class="control-group">
+                        <label>日期过滤</label>
+                        <input type="date" id="dateFilter">
+                    </div>
+                    <div class="control-group">
+                        <label>操作</label>
+                        <button id="refreshBatchBtn">🔄 刷新批次</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="data-table-container">
+                <div class="table-wrapper">
+                    <table id="batchTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>批次名称</th>
+                                <th>query_condition</th>
+                                <th>日期</th>
+                                <th>标签</th>
+                                <th>状态</th>
+                                <th>总数</th>
+                                <th>成功/失败</th>
+                                <th>开始时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="batchTableBody">
+                            <tr>
+                                <td colspan="10" class="loading">点击刷新加载数据...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- 同步任务日志 -->
+        <div id="syncLogsSection" style="margin-top: 30px;">
+            <div class="header" style="padding: 15px; margin-bottom: 15px;">
+                <h2 style="font-size: 1.5em; color: #2c3e50; display: flex; align-items: center; gap: 10px;">
+                    📝 同步任务日志
+                    <button id="refreshLogsBtn" style="font-size: 0.6em; padding: 4px 8px; cursor: pointer; border: 1px solid #ddd; border-radius: 4px; background: white;">🔄 刷新</button>
+                </h2>
+            </div>
+            
+            <div class="data-table-container">
+                <div class="table-wrapper">
+                    <table id="syncLogsTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>任务类型</th>
+                                <th>关联批次</th>
+                                <th>状态</th>
+                                <th>处理/插入/错误</th>
+                                <th>开始时间</th>
+                                <th>耗时</th>
+                                <th>详情</th>
+                            </tr>
+                        </thead>
+                        <tbody id="syncLogsTableBody">
+                            <tr>
+                                <td colspan="8" class="loading">点击刷新加载数据...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class WencaiBatchManager {
+            constructor() {
+                this.batches = [];
+                this.expandedBatches = new Set();
+                this.batchSelections = {};
+                this.initializeElements();
+                this.bindEvents();
+                this.loadBatches();
+            }
+
+            initializeElements() {
+                this.elements = {
+                    totalCount: document.getElementById('totalCount'),
+                    filteredCount: document.getElementById('filteredCount'),
+                    successCount: document.getElementById('successCount'),
+                    lastUpdate: document.getElementById('lastUpdate'),
+                    statusFilter: document.getElementById('batchStatusFilter'),
+                    dateFilter: document.getElementById('dateFilter'),
+                    refreshBtn: document.getElementById('refreshBatchBtn'),
+                    tableBody: document.getElementById('batchTableBody')
+                };
+            }
+
+            bindEvents() {
+                this.elements.statusFilter.addEventListener('change', () => this.loadBatches());
+                this.elements.dateFilter.addEventListener('change', () => this.loadBatches());
+                this.elements.refreshBtn.addEventListener('click', () => this.loadBatches());
+            }
+
+            async loadDateOptions() {
+                try {
+                    const response = await fetch('/api/v1/wencai/batches/dates');
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.data && Array.isArray(result.data)) {
+                            const select = this.elements.dateFilter;
+                            // 保留第一个选项（全部日期）
+                            select.innerHTML = '<option value="">全部日期</option>';
+                            
+                            result.data.forEach(date => {
+                                const option = document.createElement('option');
+                                option.value = date;
+                                option.textContent = date;
+                                select.appendChild(option);
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('加载日期选项失败:', error);
+                }
+            }
+
+            async loadBatches() {
+                try {
+                    const status = this.elements.statusFilter.value;
+                    const date = this.elements.dateFilter.value;
+                    
+                    let url = '/api/v1/wencai/batches?limit=100';
+                    if (status) {
+                        url += `&status_filter=${status}`;
+                    }
+                    if (date) {
+                        // 使用query_date来筛选特定日期
+                        url += `&query_date=${date}`;
+                    }
+                    
+                    this.elements.tableBody.innerHTML = '<tr><td colspan="9" class="loading">加载中...</td></tr>';
+                    
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.success) {
+                            this.batches = result.data || [];
+                            this.renderBatches();
+                            this.updateStats();
+                        } else {
+                            throw new Error(result.message);
+                        }
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('加载批次失败:', error);
+                    this.elements.tableBody.innerHTML = '<tr><td colspan="9" class="no-data">加载失败: ' + error.message + '</td></tr>';
+                }
+            }
+
+            renderBatches() {
+                if (this.batches.length === 0) {
+                    this.elements.tableBody.innerHTML = '<tr><td colspan="10" class="no-data">暂无数据</td></tr>';
+                    return;
+                }
+
+                this.elements.tableBody.innerHTML = this.batches.map(batch => {
+                    const isExpanded = this.expandedBatches.has(batch.id);
+                    const statusClass = batch.status === 'completed' ? 'status-active' : 'status-inactive';
+                    const statusText = {
+                        'completed': '完成',
+                        'failed': '失败',
+                        'processing': '进行中',
+                        'completed_with_errors': '完成(有误)'
+                    }[batch.status] || batch.status;
+                    
+                    // 优先使用 query_date，否则使用 created_at
+                    let dateStr = '-';
+                    if (batch.query_date) {
+                        dateStr = batch.query_date;
+                    } else if (batch.created_at) {
+                        const createdDate = new Date(batch.created_at);
+                        dateStr = createdDate.toLocaleDateString();
+                    }
+
+                    // 渲染标签
+                    let tagsHtml = '-';
+                    if (batch.tags && batch.tags.length > 0) {
+                        tagsHtml = batch.tags.map(tag => {
+                            let style = 'background: #e2e8f0; color: #475569;';
+                            if (tag.tag_type === 'date') style = 'background: #dbeafe; color: #1e40af;';
+                            if (tag.tag_type === 'volume') style = 'background: #fce7f3; color: #9d174d;';
+                            return `<span style="display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; margin-right: 4px; margin-bottom: 4px; ${style}">${tag.name}</span>`;
+                        }).join('');
+                    }
+
+                    let html = `
+                        <tr>
+                            <td>${batch.id}</td>
+                            <td>${batch.batch_name || '-'}</td>
+                            <td class="url-cell" title="${batch.query_condition || ''}">${batch.query_condition || '-'}</td>
+                            <td>${dateStr}</td>
+                            <td>${tagsHtml}</td>
+                            <td><span class="status-indicator ${batch.status === 'completed' ? 'status-active' : 'status-inactive'}"></span>${statusText}</td>
+                            <td>${batch.total_count || batch.total_records || 0}</td>
+                            <td>${batch.success_count || batch.success_records || 0} / ${batch.failed_count || batch.failed_records || 0}</td>
+                            <td class="timestamp-cell">${new Date(batch.started_at).toLocaleString()}</td>
+                            <td>
+                                <button class="expand-btn" onclick="window.wencaiManager.toggleDetails(${batch.id})">
+                                    ${isExpanded ? '收起' : '查看股票'}
+                                </button>
+                                <button class="expand-btn" style="background: #27ae60; margin-left: 5px;" onclick="window.wencaiManager.syncBatch(${batch.id}, this)">
+                                    同步到股票池
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+
+                    if (isExpanded) {
+                        html += `
+                            <tr class="batch-detail-row">
+                                <td colspan="10" id="batch-detail-${batch.id}">
+                                    <div class="loading">正在加载关联股票...</div>
+                                </td>
+                            </tr>
+                        `;
+                        // Trigger load details after render
+                        setTimeout(() => this.loadBatchDetails(batch.id), 0);
+                    }
+
+                    return html;
+                }).join('');
+            }
+
+            async syncBatch(batchId, btnElement) {
+                if (!confirm(`确认将批次 ${batchId} 的所有股票同步到股票池吗？\n这将自动关联日期标签和"三倍量"标签。`)) {
+                    return;
+                }
+                
+                const originalText = btnElement.textContent;
+                btnElement.textContent = '同步中...';
+                btnElement.disabled = true;
+                
+                try {
+                    const response = await fetch(`/api/v1/wencai/batches/${batchId}/sync_to_pool`, {
+                        method: 'POST'
+                    });
+                    
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.success) {
+                            alert(`同步成功！\n总数: ${result.data.total}\n成功: ${result.data.success}\n失败: ${result.data.failed}`);
+                        } else {
+                            alert('同步失败: ' + result.message);
+                        }
+                    } else {
+                        alert('同步请求失败: HTTP ' + response.status);
+                    }
+                } catch (error) {
+                    console.error('同步失败:', error);
+                    alert('同步失败: ' + error.message);
+                } finally {
+                    btnElement.textContent = originalText;
+                    btnElement.disabled = false;
+                    // Refresh to show new tags
+                    this.loadBatches();
+                }
+            }
+
+            async toggleDetails(batchId) {
+                if (this.expandedBatches.has(batchId)) {
+                    this.expandedBatches.delete(batchId);
+                } else {
+                    this.expandedBatches.add(batchId);
+                }
+                this.renderBatches();
+            }
+
+            async loadBatchDetails(batchId) {
+                const container = document.getElementById(`batch-detail-${batchId}`);
+                if (!container) return;
+
+                try {
+                    const response = await fetch(`/api/v1/wencai/batches/${batchId}/dedup_records?limit=500`);
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.success) {
+                            const records = result.data;
+                            if (records.length === 0) {
+                                container.innerHTML = '<div class="no-data">该批次没有关联的股票数据</div>';
+                                return;
+                            }
+
+                            // Initialize selection set for this batch if not exists
+                            if (!this.batchSelections[batchId]) {
+                                this.batchSelections[batchId] = new Set();
+                            }
+
+                            let tableHtml = `
+                                <div class="response-details">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                        <h4>关联股票数据 (${records.length}条)</h4>
+                                        <div class="action-buttons">
+                                            <button class="action-btn csv-sync-btn" onclick="window.wencaiManager.syncBatchCsv(${batchId})" style="padding: 5px 10px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">CSV数据同步</button>
+                                            <button class="action-btn tushare-sync-btn" onclick="window.wencaiManager.syncBatchTushare(${batchId})" style="padding: 5px 10px; background: #2ecc71; color: white; border: none; border-radius: 4px; cursor: pointer;">Tushare增量同步</button>
+                                            <button class="action-btn volume-analysis-btn" onclick="window.wencaiManager.runBatchVolumeAnalysis(${batchId})" style="padding: 5px 10px; background: #9b59b6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px;">批量异动分析</button>
+                                        </div>
+                                    </div>
+                                    <table class="detail-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 80px;">
+                                                    <input type="checkbox" onchange="window.wencaiManager.toggleSelectAll(${batchId}, this.checked)" id="select-all-${batchId}" title="全选/取消">
+                                                    <button onclick="window.wencaiManager.invertSelection(${batchId})" style="padding: 1px 4px; font-size: 0.7em; background: #95a5a6; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 3px;" title="反选">反</button>
+                                                </th>
+                                                <th>股票代码</th>
+                                                <th>股票名称</th>
+                                                <th>最新价</th>
+                                                <th>涨跌幅</th>
+                                                <th>去重哈希</th>
+                                                <th>抓取时间</th>
+                                                <th>操作</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                            `;
+
+                            tableHtml += records.map(record => {
+                                // 优先使用数据库中的字段
+                                let name = record.stock_name;
+                                let price = record.current_price;
+                                let change = record.change_percent;
+                                
+                                // 如果数据库字段为空，尝试从 original_data 解析 (兼容旧数据)
+                                if (!name || !price || !change) {
+                                    let stockData = {};
+                                    try {
+                                        if (typeof record.original_data === 'string') {
+                                            stockData = JSON.parse(record.original_data);
+                                        } else {
+                                            stockData = record.original_data || {};
+                                        }
+                                    } catch (e) {
+                                        stockData = {};
+                                    }
+                                    
+                                    if (!name) name = stockData['股票简称'] || stockData['股票名称'] || record.stock_code;
+                                    if (!price) price = stockData['最新价'] || '-';
+                                    if (!change) change = stockData['涨跌幅'] || '-';
+                                }
+
+                                // 格式化
+                                if (price !== '-' && price !== null) price = Number(price).toFixed(2);
+                                if (change !== '-' && change !== null) change = Number(change).toFixed(2) + '%';
+                                
+                                const changeColor = parseFloat(change) > 0 ? '#e74c3c' : (parseFloat(change) < 0 ? '#27ae60' : 'inherit');
+                                const isChecked = this.batchSelections[batchId].has(record.stock_code) ? 'checked' : '';
+
+                                return `
+                                    <tr>
+                                        <td><input type="checkbox" class="stock-checkbox-${batchId}" value="${record.stock_code}" ${isChecked} onchange="window.wencaiManager.toggleSelectStock(${batchId}, '${record.stock_code}', this.checked)"></td>
+                                        <td>${record.stock_code}</td>
+                                        <td>${name || '-'}</td>
+                                        <td>${price || '-'}</td>
+                                        <td style="color: ${changeColor}">${change || '-'}</td>
+                                        <td class="url-cell">${record.data_hash}</td>
+                                        <td class="timestamp-cell">${new Date(record.created_at).toLocaleString()}</td>
+                                        <td>
+                                            <button onclick="window.wencaiManager.syncSingleCsv(${batchId}, '${record.stock_code}')" style="padding: 2px 5px; font-size: 0.8em; background: #3498db; color: white; border: none; border-radius: 3px; cursor: pointer; margin-right: 5px;">CSV</button>
+                                            <button onclick="window.wencaiManager.syncSingleTushare(${batchId}, '${record.stock_code}')" style="padding: 2px 5px; font-size: 0.8em; background: #2ecc71; color: white; border: none; border-radius: 3px; cursor: pointer;">Tushare</button>
+                                            <button onclick="window.wencaiManager.runSingleVolumeAnalysis(${batchId}, '${record.stock_code}')" style="padding: 2px 5px; font-size: 0.8em; background: #9b59b6; color: white; border: none; border-radius: 3px; cursor: pointer; margin-left: 5px;">异动</button>
+                                        </td>
+                                    </tr>
+                                `;
+                            }).join('');
+
+                            tableHtml += `
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `;
+                            container.innerHTML = tableHtml;
+                        } else {
+                            container.innerHTML = `<div class="error">加载失败: ${result.message}</div>`;
+                        }
+                    }
+                } catch (error) {
+                    container.innerHTML = `<div class="error">加载失败: ${error.message}</div>`;
+                }
+            }
+
+            toggleSelectAll(batchId, checked) {
+                const checkboxes = document.querySelectorAll(`.stock-checkbox-${batchId}`);
+                checkboxes.forEach(cb => {
+                    cb.checked = checked;
+                    this.toggleSelectStock(batchId, cb.value, checked);
+                });
+            }
+
+            invertSelection(batchId) {
+                const checkboxes = document.querySelectorAll(`.stock-checkbox-${batchId}`);
+                checkboxes.forEach(cb => {
+                    cb.checked = !cb.checked;
+                    this.toggleSelectStock(batchId, cb.value, cb.checked);
+                });
+            }
+
+            toggleSelectStock(batchId, code, checked) {
+                if (!this.batchSelections[batchId]) {
+                    this.batchSelections[batchId] = new Set();
+                }
+                
+                if (checked) {
+                    this.batchSelections[batchId].add(code);
+                } else {
+                    this.batchSelections[batchId].delete(code);
+                }
+                
+                // Update header checkbox state
+                const allCheckbox = document.getElementById(`select-all-${batchId}`);
+                if (allCheckbox) {
+                    const checkboxes = document.querySelectorAll(`.stock-checkbox-${batchId}`);
+                    if (checkboxes.length > 0) {
+                        const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+                        allCheckbox.checked = allChecked;
+                        allCheckbox.indeterminate = !allChecked && Array.from(checkboxes).some(cb => cb.checked);
+                    }
+                }
+            }
+
+            async runSingleVolumeAnalysis(batchId, code) {
+                if (!confirm(`确定要对 ${code} 进行成交量异动分析吗？`)) return;
+                
+                try {
+                    const btn = event.target;
+                    const originalText = btn.textContent;
+                    btn.disabled = true;
+                    btn.textContent = '分析中...';
+                    
+                    const response = await fetch(`/api/v1/volume-analysis/run/${code}`, {
+                        method: 'GET'
+                    });
+                    
+                    const result = await response.json();
+                    if (result.success) {
+                        alert(`分析完成!\n代码: ${code}\n结果: 异动分 ${result.data.anomaly_score}`);
+                    } else {
+                        alert('分析失败: ' + result.message);
+                    }
+                    
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                } catch (error) {
+                    console.error('分析失败:', error);
+                    alert('分析失败: ' + error.message);
+                    if (event.target) {
+                        event.target.disabled = false;
+                        event.target.textContent = '异动';
+                    }
+                }
+            }
+
+            async runBatchVolumeAnalysis(batchId, codes = null) {
+                let targetCodes = codes;
+                let message = '确定要进行成交量异动分析吗？';
+                
+                if (!targetCodes && this.batchSelections[batchId] && this.batchSelections[batchId].size > 0) {
+                    targetCodes = Array.from(this.batchSelections[batchId]);
+                    message = `确定要对选中的 ${targetCodes.length} 个股票进行成交量异动分析吗？`;
+                }
+
+                if (!confirm(message)) return;
+                
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '分析中...';
+                
+                try {
+                    // If targetCodes is null, we might need to get all codes for the batch.
+                    // But for now, if not provided and no selection, we can't proceed easily without a batch endpoint.
+                    // Let's assume the user MUST select for now, or we just fail gracefully.
+                    if (!targetCodes) {
+                         alert("请先选择要分析的股票");
+                         btn.disabled = false;
+                         btn.textContent = originalText;
+                         return;
+                    }
+                    
+                    let successCount = 0;
+                    let failCount = 0;
+                    
+                    for (let i = 0; i < targetCodes.length; i++) {
+                        const code = targetCodes[i];
+                        btn.textContent = `分析中 ${i + 1}/${targetCodes.length}`;
+                        try {
+                            const res = await fetch(`/api/v1/volume-analysis/run/${code}`, { method: 'GET' });
+                            const json = await res.json();
+                            if (json.success) successCount++;
+                            else failCount++;
+                        } catch (e) {
+                            failCount++;
+                        }
+                    }
+                    
+                    alert(`批量分析完成\n成功: ${successCount}\n失败: ${failCount}`);
+                    
+                } catch (e) {
+                    alert("批量分析出错: " + e.message);
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                }
+            }
+
+            async syncSingleCsv(batchId, code) {
+                await this.syncBatchCsv(batchId, [code]);
+            }
+
+            async syncSingleTushare(batchId, code) {
+                await this.syncBatchTushare(batchId, [code]);
+            }
+
+            async syncBatchCsv(batchId, codes = null) {
+                let targetCodes = codes;
+                let message = '确定要同步该批次的CSV数据吗？(2025-12-22日前250天)';
+                
+                // If no specific codes passed, check selection
+                if (!targetCodes && this.batchSelections[batchId] && this.batchSelections[batchId].size > 0) {
+                    targetCodes = Array.from(this.batchSelections[batchId]);
+                    message = `确定要同步选中的 ${targetCodes.length} 个股票的CSV数据吗？`;
+                }
+
+                if (!confirm(message)) return;
+                
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '同步中...';
+
+                try {
+                     if (!targetCodes) {
+                         // If still no target codes, maybe we should warn or handle differently.
+                         // But previous logic relied on POST batch. Now we loop.
+                         // If no selection, we can't loop easily unless we know all codes.
+                         // The original code allowed syncing the WHOLE batch via POST if no codes were sent.
+                         // Since we removed the POST batch support (or rather, we are changing to GET single),
+                         // we need a list of codes.
+                         // However, if the user clicks "Sync All" without selection, we don't have the list client-side easily
+                         // unless we fetch it or it's in the DOM.
+                         // The `renderStocks` renders all stocks. We can grab them from DOM.
+                         const checkboxes = document.querySelectorAll(`.stock-checkbox-${batchId}`);
+                         targetCodes = Array.from(checkboxes).map(cb => cb.value);
+                         if (targetCodes.length === 0) {
+                             alert("未找到股票代码");
+                             btn.disabled = false;
+                             btn.textContent = originalText;
+                             return;
+                         }
+                         message = `确定要同步本页/本批次 ${targetCodes.length} 个股票的CSV数据吗？`;
+                         // Re-confirm if we auto-selected all
+                         // if (!confirm(message)) { // Already confirmed once, but maybe count changed?
+                         //    btn.disabled = false;
+                         //    btn.textContent = originalText;
+                         //    return;
+                         // }
+                    }
+
+                    let successCount = 0;
+                    let failCount = 0;
+                    let totalProcessed = 0;
+                    let totalInserted = 0;
+                    let totalErrors = 0;
+
+                    for (let i = 0; i < targetCodes.length; i++) {
+                        const code = targetCodes[i];
+                        btn.textContent = `同步中 ${i + 1}/${targetCodes.length}`;
+                        try {
+                            const response = await fetch(`/api/v1/stock/sync/csv/${code}?batch_id=${batchId}`, {
+                                method: 'GET'
+                            });
+                            const result = await response.json();
+                            
+                            if (result.success) {
+                                successCount++;
+                                totalProcessed += result.data.processed || 0;
+                                totalInserted += result.data.inserted || 0;
+                                totalErrors += result.data.errors || 0;
+                            } else {
+                                failCount++;
+                                totalErrors++;
+                            }
+                        } catch (error) {
+                            failCount++;
+                            totalErrors++;
+                            console.error(`Sync CSV failed for ${code}:`, error);
+                        }
+                    }
+                    
+                    alert(`同步完成!\n成功请求: ${successCount}\n失败请求: ${failCount}\n总处理: ${totalProcessed}\n总插入: ${totalInserted}\n总错误: ${totalErrors}`);
+                    
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    if(window.syncLogManager) window.syncLogManager.loadLogs();
+                } catch (error) {
+                    console.error('同步CSV失败:', error);
+                    alert('同步失败: ' + error.message);
+                    if (event.target) {
+                        event.target.disabled = false;
+                        event.target.textContent = originalText || 'CSV数据同步';
+                    }
+                    if(window.syncLogManager) window.syncLogManager.loadLogs();
+                }
+            }
+
+            async syncBatchTushare(batchId, codes = null) {
+                let targetCodes = codes;
+                let message = '确定要进行Tushare增量同步吗？(2025-12-22日之后)';
+                
+                // If no specific codes passed, check selection
+                if (!targetCodes && this.batchSelections[batchId] && this.batchSelections[batchId].size > 0) {
+                    targetCodes = Array.from(this.batchSelections[batchId]);
+                    message = `确定要进行选中的 ${targetCodes.length} 个股票的Tushare增量同步吗？`;
+                }
+
+                if (!confirm(message)) return;
+                
+                const btn = event.target;
+                const originalText = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '同步中...';
+                
+                try {
+                     if (!targetCodes) {
+                         const checkboxes = document.querySelectorAll(`.stock-checkbox-${batchId}`);
+                         targetCodes = Array.from(checkboxes).map(cb => cb.value);
+                         if (targetCodes.length === 0) {
+                             alert("未找到股票代码");
+                             btn.disabled = false;
+                             btn.textContent = originalText;
+                             return;
+                         }
+                    }
+
+                    let successCount = 0;
+                    let failCount = 0;
+                    let totalProcessed = 0;
+                    let totalInserted = 0;
+                    let totalCsvAppended = 0;
+                    let totalErrors = 0;
+
+                    for (let i = 0; i < targetCodes.length; i++) {
+                        const code = targetCodes[i];
+                        btn.textContent = `同步中 ${i + 1}/${targetCodes.length}`;
+                        try {
+                            const response = await fetch(`/api/v1/stock/sync/tushare/${code}`, {
+                                method: 'GET'
+                            });
+                            const result = await response.json();
+                            
+                            if (result.success) {
+                                successCount++;
+                                totalProcessed += result.data.processed || 0;
+                                totalInserted += result.data.inserted || 0;
+                                totalCsvAppended += result.data.csv_appended || 0;
+                                totalErrors += result.data.errors || 0;
+                            } else {
+                                failCount++;
+                                totalErrors++;
+                            }
+                        } catch (error) {
+                            failCount++;
+                            totalErrors++;
+                            console.error(`Sync Tushare failed for ${code}:`, error);
+                        }
+                    }
+                    
+                    alert(`同步完成!\n成功请求: ${successCount}\n失败请求: ${failCount}\n总处理: ${totalProcessed}\n总插入: ${totalInserted}\nCSV追加: ${totalCsvAppended}\n总错误: ${totalErrors}`);
+                    
+                    btn.disabled = false;
+                    btn.textContent = originalText;
+                    if(window.syncLogManager) window.syncLogManager.loadLogs();
+                } catch (error) {
+                    console.error('同步Tushare失败:', error);
+                    alert('同步失败: ' + error.message);
+                    if (event.target) {
+                        event.target.disabled = false;
+                        event.target.textContent = originalText || 'Tushare增量同步';
+                    }
+                    if(window.syncLogManager) window.syncLogManager.loadLogs();
+                }
+            }
+
+            updateStats(batches) {
+                const data = batches || this.batches;
+                if (!data) return;
+                
+                // 更新顶部统计卡片
+                if (this.elements.totalCount) this.elements.totalCount.textContent = data.length;
+                if (this.elements.filteredCount) this.elements.filteredCount.textContent = data.length;
+                
+                const successBatches = data.filter(b => b.status === 'completed').length;
+                if (this.elements.successCount) this.elements.successCount.textContent = successBatches;
+                
+                if (this.elements.lastUpdate) this.elements.lastUpdate.textContent = new Date().toLocaleTimeString();
+            }
+        }
+
+        class SyncLogManager {
+            constructor() {
+                this.tableBody = document.getElementById('syncLogsTableBody');
+                this.refreshBtn = document.getElementById('refreshLogsBtn');
+                this.bindEvents();
+                this.loadLogs();
+            }
+
+            bindEvents() {
+                if(this.refreshBtn) {
+                    this.refreshBtn.addEventListener('click', () => this.loadLogs());
+                }
+            }
+
+            async loadLogs() {
+                try {
+                    this.tableBody.innerHTML = '<tr><td colspan="8" class="loading">加载中...</td></tr>';
+                    const response = await fetch('/api/v1/stock/sync/logs?limit=20');
+                    if (response.ok) {
+                        const result = await response.json();
+                        if (result.success) {
+                            this.renderLogs(result.data);
+                        } else {
+                            this.tableBody.innerHTML = `<tr><td colspan="8" class="error">加载失败: ${result.message}</td></tr>`;
+                        }
+                    } else {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('加载日志失败:', error);
+                    this.tableBody.innerHTML = `<tr><td colspan="8" class="error">加载失败: ${error.message}</td></tr>`;
+                }
+            }
+
+            renderLogs(logs) {
+                if (!logs || logs.length === 0) {
+                    this.tableBody.innerHTML = '<tr><td colspan="8" class="no-data">暂无日志</td></tr>';
+                    return;
+                }
+
+                this.tableBody.innerHTML = logs.map(log => {
+                    const statusColor = {
+                        'success': '#27ae60',
+                        'failed': '#e74c3c',
+                        'running': '#3498db',
+                        'pending': '#f39c12'
+                    }[log.status] || '#333';
+
+                    const duration = log.end_time ? 
+                        ((new Date(log.end_time) - new Date(log.start_time)) / 1000).toFixed(2) + 's' : 
+                        '-';
+
+                    return `
+                        <tr>
+                            <td>${log.id}</td>
+                            <td>${log.task_type}</td>
+                            <td>${log.batch_id || '-'}</td>
+                            <td style="color: ${statusColor}; font-weight: bold;">${log.status}</td>
+                            <td>${log.processed_count} / ${log.inserted_count} / ${log.error_count}</td>
+                            <td class="timestamp-cell">${new Date(log.start_time).toLocaleString()}</td>
+                            <td>${duration}</td>
+                            <td title="${log.message || ''}">${log.message ? (log.message.length > 30 ? log.message.substring(0, 30) + '...' : log.message) : '-'}</td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+        }
+
+        // 初始化应用
+        document.addEventListener('DOMContentLoaded', () => {
+            window.wencaiManager = new WencaiBatchManager();
+            window.syncLogManager = new SyncLogManager();
+        });
+    </script>
+</body>
+</html>

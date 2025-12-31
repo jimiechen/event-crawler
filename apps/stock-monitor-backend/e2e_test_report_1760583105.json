@@ -1,0 +1,72 @@
+[
+  {
+    "test_name": "健康检查",
+    "success": true,
+    "message": "状态码: 200",
+    "timestamp": "2025-10-16T10:51:42.283106",
+    "data": {
+      "success": true,
+      "message": "系统运行正常",
+      "data": {
+        "status": "healthy",
+        "timestamp": "2025-10-16T10:51:42.278351",
+        "version": "1.0.0",
+        "uptime": 1760583102.278358,
+        "database": null,
+        "services": null
+      }
+    }
+  },
+  {
+    "test_name": "静态文件访问",
+    "success": true,
+    "message": "状态码: 200, 内容长度: 16464",
+    "timestamp": "2025-10-16T10:51:42.307916",
+    "data": null
+  },
+  {
+    "test_name": "Chrome插件数据提交",
+    "success": true,
+    "message": "状态码: 200",
+    "timestamp": "2025-10-16T10:51:43.329695",
+    "data": {
+      "success": true,
+      "message": "批量提交完成: 成功2条, 失败0条, 重复0条",
+      "data": {
+        "success": 2,
+        "failed": 0,
+        "duplicated": 0,
+        "total": 2,
+        "errors": []
+      }
+    }
+  },
+  {
+    "test_name": "股票信息创建",
+    "success": false,
+    "message": "成功创建 0/2 条记录",
+    "timestamp": "2025-10-16T10:51:44.375624",
+    "data": null
+  },
+  {
+    "test_name": "股票搜索API",
+    "success": false,
+    "message": "通过 2/3 个测试用例",
+    "timestamp": "2025-10-16T10:51:45.620277",
+    "data": null
+  },
+  {
+    "test_name": "股票列表API",
+    "success": true,
+    "message": "状态码: 200, 返回 9 条记录",
+    "timestamp": "2025-10-16T10:51:45.842096",
+    "data": null
+  },
+  {
+    "test_name": "数据流完整性",
+    "success": false,
+    "message": "Chrome插件 -> 数据库 -> API -> HTML页面",
+    "timestamp": "2025-10-16T10:51:45.842200",
+    "data": null
+  }
+]

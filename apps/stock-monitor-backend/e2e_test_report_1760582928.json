@@ -1,0 +1,70 @@
+[
+  {
+    "test_name": "健康检查",
+    "success": true,
+    "message": "状态码: 200",
+    "timestamp": "2025-10-16T10:48:45.543860",
+    "data": {
+      "success": true,
+      "message": "系统运行正常",
+      "data": {
+        "status": "healthy",
+        "timestamp": "2025-10-16T10:48:45.540794",
+        "version": "1.0.0",
+        "uptime": 1760582925.540801,
+        "database": null,
+        "services": null
+      }
+    }
+  },
+  {
+    "test_name": "静态文件访问",
+    "success": true,
+    "message": "状态码: 200, 内容长度: 16464",
+    "timestamp": "2025-10-16T10:48:45.576427",
+    "data": null
+  },
+  {
+    "test_name": "Chrome插件数据提交",
+    "success": false,
+    "message": "状态码: 500",
+    "timestamp": "2025-10-16T10:48:45.639624",
+    "data": {
+      "success": false,
+      "message": "服务器内部错误",
+      "error_code": "INTERNAL_SERVER_ERROR",
+      "details": {
+        "path": "http://localhost:8001/api/v1/stocks/data/batch",
+        "exception_type": "TypeError"
+      }
+    }
+  },
+  {
+    "test_name": "股票信息创建",
+    "success": false,
+    "message": "成功创建 0/2 条记录",
+    "timestamp": "2025-10-16T10:48:46.687429",
+    "data": null
+  },
+  {
+    "test_name": "股票搜索API",
+    "success": false,
+    "message": "通过 2/3 个测试用例",
+    "timestamp": "2025-10-16T10:48:48.020419",
+    "data": null
+  },
+  {
+    "test_name": "股票列表API",
+    "success": true,
+    "message": "状态码: 200, 返回 7 条记录",
+    "timestamp": "2025-10-16T10:48:48.107936",
+    "data": null
+  },
+  {
+    "test_name": "数据流完整性",
+    "success": false,
+    "message": "Chrome插件 -> 数据库 -> API -> HTML页面",
+    "timestamp": "2025-10-16T10:48:48.108014",
+    "data": null
+  }
+]

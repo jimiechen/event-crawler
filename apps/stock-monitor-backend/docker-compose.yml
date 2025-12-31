@@ -1,0 +1,86 @@
+version: '3.3'
+
+services:
+  mysql:
+    image: mysql:8.0.35
+    container_name: stock_monitor_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: stock_monitor
+      MYSQL_USER: stock_user
+      MYSQL_PASSWORD: stock123456
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - stock_monitor_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+      interval: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: stock_monitor_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./docker/redis/conf/redis.conf:/usr/local/etc/redis/redis.conf
+    networks:
+      - stock_monitor_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      timeout: 10s
+      retries: 5
+      interval: 30s
+    command: redis-server /usr/local/etc/redis/redis.conf
+
+  # 可选：添加phpMyAdmin用于数据库管理
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: stock_monitor_phpmyadmin
+    restart: unless-stopped
+    environment:
+      PMA_HOST: mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: root123456
+      MYSQL_ROOT_PASSWORD: root123456
+    ports:
+      - "8080:80"
+    networks:
+      - stock_monitor_network
+    depends_on:
+      - mysql
+
+  # 可选：添加Redis Commander用于Redis管理
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: stock_monitor_redis_commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    ports:
+      - "8081:8081"
+    networks:
+      - stock_monitor_network
+    depends_on:
+      - redis
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  stock_monitor_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

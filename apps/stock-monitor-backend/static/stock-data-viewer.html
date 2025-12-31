@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票数据监控面板</title>
+    <script src="/static/js/navbar.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 300;
+        }
+
+        .header p {
+            opacity: 0.8;
+            font-size: 1.1rem;
+        }
+
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .search-box {
+            flex: 1;
+            min-width: 250px;
+            position: relative;
+        }
+
+        .search-box input {
+            width: 100%;
+            padding: 12px 45px 12px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        .search-box input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .search-icon {
+            position: absolute;
+            right: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6c757d;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-danger {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+            color: white;
+        }
+
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.4);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #51cf66 0%, #40c057 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(81, 207, 102, 0.4);
+        }
+
+        .stats {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .stat-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #6c757d;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .table-container {
+            overflow-x: auto;
+            margin: 0 30px 30px;
+        }
+
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .data-table th {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 15px 12px;
+            text-align: left;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s ease;
+            position: relative;
+        }
+
+        .data-table th:hover {
+            background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+        }
+
+        .data-table th.sortable::after {
+            content: '↕';
+            position: absolute;
+            right: 8px;
+            opacity: 0.5;
+        }
+
+        .data-table th.sort-asc::after {
+            content: '↑';
+            opacity: 1;
+        }
+
+        .data-table th.sort-desc::after {
+            content: '↓';
+            opacity: 1;
+        }
+
+        .data-table td {
+            padding: 12px;
+            border-bottom: 1px solid #e9ecef;
+            transition: background 0.3s ease;
+        }
+
+        .data-table tr:hover td {
+            background: #f8f9fa;
+        }
+
+        .data-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .price-positive {
+            color: #51cf66;
+            font-weight: bold;
+        }
+
+        .price-negative {
+            color: #ff6b6b;
+            font-weight: bold;
+        }
+
+        .price-neutral {
+            color: #6c757d;
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 60px 20px;
+            color: #6c757d;
+        }
+
+        .no-data-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .error-message {
+            background: #fff5f5;
+            border: 1px solid #fed7d7;
+            color: #c53030;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 30px;
+        }
+
+        /* Logs Console Styles */
+        .logs-section {
+            margin: 30px 30px;
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+        .logs-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #4a5568;
+            padding-bottom: 10px;
+        }
+        .logs-header h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #cbd5e0;
+            margin: 0;
+        }
+        .logs-controls {
+            display: flex;
+            gap: 10px;
+        }
+        .logs-container {
+            height: 200px;
+            overflow-y: auto;
+            font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+        .log-entry {
+            margin-bottom: 4px;
+            border-bottom: 1px solid #4a5568;
+            padding-bottom: 4px;
+        }
+        .log-entry:last-child {
+            border-bottom: none;
+        }
+        .log-time { color: #a0aec0; margin-right: 8px; }
+        .log-action { color: #ecc94b; font-weight: bold; margin-right: 8px; }
+        .log-details { color: #e2e8f0; }
+        .btn-text { background: none; border: none; cursor: pointer; font-size: 0.85rem; }
+        .btn-text-danger { color: #fc8181; }
+        .btn-text-danger:hover { color: #feb2b2; }
+        .btn-text-primary { color: #63b3ed; }
+        .btn-text-primary:hover { color: #90cdf4; }
+        
+        /* Operation Button */
+        .btn-sim {
+            background: none;
+            border: 1px solid #9f7aea;
+            color: #9f7aea;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.2s;
+        }
+        .btn-sim:hover {
+            background: #9f7aea;
+            color: white;
+        }
+
+
+
+        /* Scenario Modal Styles */
+        .scenario-item {
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 15px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: #f8fafc;
+        }
+        .scenario-item:hover {
+            border-color: #cbd5e0;
+            transform: translateY(-2px);
+        }
+        .scenario-item.selected {
+            border-color: #667eea;
+            background: #ebf4ff;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
+        }
+        .scenario-title {
+            font-weight: bold;
+            color: #2d3748;
+            margin-bottom: 5px;
+        }
+        .scenario-desc {
+            font-size: 0.85rem;
+            color: #718096;
+        }
+
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .search-box {
+                min-width: auto;
+            }
+
+            .button-group {
+                justify-content: center;
+            }
+
+            .stats {
+                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                gap: 15px;
+            }
+
+            .data-table {
+                font-size: 0.9rem;
+            }
+
+            .data-table th,
+            .data-table td {
+                padding: 8px 6px;
+            }
+        }
+    </style>
+<script src="/static/js/custom-alert.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📈 股票数据监控面板</h1>
+            <p>实时监控同花顺股票数据</p>
+        </div>
+
+        <div class="controls">
+            <div class="search-box">
+                <input type="text" id="searchInput" placeholder="搜索股票代码或名称...">
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="button-group">
+                <button class="btn btn-primary" onclick="refreshData()">
+                    🔄 刷新数据
+                </button>
+                <button class="btn btn-danger" onclick="clearAllData()">
+                    🗑️ 清空数据
+                </button>
+                <button class="btn btn-success" onclick="exportData()">
+                    📊 导出数据
+                </button>
+            </div>
+        </div>
+
+        <!-- 时间戳筛选控件 -->
+        <div class="controls">
+            <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <label style="color: #495057; font-weight: 500;">时间筛选:</label>
+                <input type="datetime-local" id="startTimestamp" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <span style="color: #6c757d;">至</span>
+                <input type="datetime-local" id="endTimestamp" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                <button class="btn btn-primary" onclick="filterByTimestamp()" style="padding: 8px 16px;">
+                    🔍 筛选
+                </button>
+                <button class="btn" onclick="clearTimestampFilter()" style="padding: 8px 16px; background: #f8f9fa; color: #495057;">
+                    ✖️ 清除
+                </button>
+            </div>
+        </div>
+
+        <div class="stats" id="statsContainer">
+            <div class="stat-card">
+                <div class="stat-number" id="totalStocks">-</div>
+                <div class="stat-label">总股票数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="lastUpdate">-</div>
+                <div class="stat-label">最后更新</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="avgPrice">-</div>
+                <div class="stat-label">平均价格</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="totalVolume">-</div>
+                <div class="stat-label">总成交量</div>
+            </div>
+        </div>
+
+        <div id="loadingContainer" class="loading">
+            <div class="loading-spinner"></div>
+            <div>正在加载股票数据...</div>
+        </div>
+
+        <div id="errorContainer" class="error-message" style="display: none;">
+            <strong>错误：</strong><span id="errorMessage"></span>
+        </div>
+
+        <div class="table-container" id="tableContainer" style="display: none;">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th class="sortable" data-sort="symbol">股票代码</th>
+                        <th class="sortable" data-sort="name">股票名称</th>
+                        <th class="sortable" data-sort="current_price">当前价格</th>
+                        <th class="sortable" data-sort="change_percent">涨跌幅</th>
+                        <th class="sortable" data-sort="change_amount">涨跌额</th>
+                        <th class="sortable" data-sort="volume">成交量</th>
+                        <th class="sortable" data-sort="turnover">成交额</th>
+                        <th class="sortable" data-sort="request_timestamp">更新时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="dataTableBody">
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div class="pagination-controls" id="paginationControls" style="display: none; padding: 20px 30px; background: white; border-top: 1px solid #e9ecef; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+            <div class="pagination-info" style="color: #6c757d; font-size: 0.9rem;">
+                显示 <span id="startRecord">0</span> - <span id="endRecord">0</span> 条，共 <span id="totalRecords">0</span> 条
+            </div>
+            <div class="pagination-actions" style="display: flex; gap: 10px; align-items: center;">
+                <select id="pageSizeSelect" style="padding: 6px 12px; border: 1px solid #ced4da; border-radius: 4px; color: #495057;" onchange="changePageSize()">
+                    <option value="50">50 条/页</option>
+                    <option value="100">100 条/页</option>
+                    <option value="200">200 条/页</option>
+                </select>
+                <button class="btn btn-outline" id="prevPageBtn" onclick="prevPage()" disabled style="padding: 6px 12px; border: 1px solid #ced4da; background: white; border-radius: 4px; cursor: pointer;">上一页</button>
+                <span id="currentPageDisplay" style="padding: 6px 12px; background: #e9ecef; border-radius: 4px; font-weight: bold;">1</span>
+                <button class="btn btn-outline" id="nextPageBtn" onclick="nextPage()" disabled style="padding: 6px 12px; border: 1px solid #ced4da; background: white; border-radius: 4px; cursor: pointer;">下一页</button>
+            </div>
+        </div>
+
+        <div id="noDataContainer" class="no-data" style="display: none;">
+            <div class="no-data-icon">📊</div>
+            <h3>暂无数据</h3>
+            <p>当前没有股票数据，请等待数据更新或检查数据源</p>
+        </div>
+
+        <!-- Scenario Selection Modal -->
+        <div id="scenarioModal" class="modal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.4);">
+            <div class="modal-content" style="background-color: #fefefe; margin: 15% auto; padding: 20px; border: 1px solid #888; width: 50%; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                    <h2 style="margin: 0; color: #2d3748;">选择模拟场景</h2>
+                    <span class="close" onclick="closeScenarioModal()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+                </div>
+                
+                <div style="margin-bottom: 20px; color: #4a5568;">
+                    正在对 <strong id="modalStockCode" style="color: #667eea;"></strong> (<span id="modalStockName"></span>) 触发模拟
+                </div>
+                
+                <div style="margin-bottom: 20px; padding: 15px; background: #f8fafc; border-radius: 8px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+                        <div>
+                            <label style="display: block; font-size: 0.8rem; color: #718096; margin-bottom: 5px;">当前价格 (元)</label>
+                            <input type="number" step="0.01" id="inputOverridePrice" style="width: 100%; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.8rem; color: #718096; margin-bottom: 5px;">成交量 (手)</label>
+                            <input type="number" id="inputOverrideVolume" style="width: 100%; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 0.8rem; color: #718096; margin-bottom: 5px;">日期 (YYYY-MM-DD)</label>
+                            <input type="date" id="inputOverrideDate" style="width: 100%; padding: 8px; border: 1px solid #cbd5e0; border-radius: 4px;">
+                        </div>
+                    </div>
+                    <div style="font-size: 0.75rem; color: #a0aec0; margin-top: 8px;">
+                        * 留空则使用默认/当前数据。填写后将强制使用该值进行计算。
+                    </div>
+                </div>
+
+                <div id="scenarioList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-bottom: 25px; max-height: 200px; overflow-y: auto;">
+                    <!-- Scenarios will be injected here -->
+                    <div style="text-align: center; padding: 20px; color: #718096;">加载场景中...</div>
+                </div>
+
+                <div style="text-align: right; padding-top: 15px; border-top: 1px solid #eee;">
+                    <button class="btn" onclick="closeScenarioModal()" style="margin-right: 10px; background: #e2e8f0; color: #4a5568;">取消</button>
+                    <button id="btnConfirmTrigger" class="btn btn-primary" onclick="triggerSelectedScenario()" disabled>确认触发</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- System Logs Console -->
+        <div class="logs-section">
+            <div class="logs-header">
+                <h3>系统日志控制台组件</h3>
+                <div class="logs-controls">
+                    <button id="btnClearLogs" class="btn-text btn-text-danger">清空</button>
+                    <button id="btnRefreshLogs" class="btn-text btn-text-primary">刷新</button>
+                </div>
+            </div>
+            <div id="logsContainer" class="logs-container">
+                <!-- Logs will be inserted here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let stockData = [];
+        let filteredData = [];
+        let sortColumn = '';
+        let sortDirection = 'asc';
+        
+        // Pagination state
+        let currentPage = 1;
+        let pageSize = 50;
+        let totalRecords = 0;
+
+
+        // 初始化页面
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStockData();
+            setupEventListeners();
+        });
+
+        // 设置事件监听器
+        function setupEventListeners() {
+            // 搜索功能
+            document.getElementById('searchInput').addEventListener('input', debounce(function(e) {
+                currentPage = 1; // Reset to first page on search
+                loadStockData();
+            }, 500));
+
+            // 表格排序
+            document.querySelectorAll('.sortable').forEach(header => {
+                header.addEventListener('click', function() {
+                    const column = this.dataset.sort;
+                    sortData(column);
+                });
+            });
+        }
+        
+        // 防抖函数
+        function debounce(func, wait) {
+            let timeout;
+            return function(...args) {
+                clearTimeout(timeout);
+                timeout = setTimeout(() => func.apply(this, args), wait);
+            };
+        }
+
+        // 加载股票数据
+        async function loadStockData() {
+            try {
+                showLoading(true);
+                
+                // Construct URL with parameters
+                const offset = (currentPage - 1) * pageSize;
+                let url = `/api/v1/stocks/tonghuashun/raw-data?limit=${pageSize}&offset=${offset}`;
+                
+                // Add search/filter parameters
+                const searchInput = document.getElementById('searchInput').value.trim();
+                if (searchInput) {
+                    url += `&stock_code=${encodeURIComponent(searchInput)}`;
+                }
+                
+                const startTimestamp = document.getElementById('startTimestamp').value;
+                if (startTimestamp) {
+                    url += `&start_timestamp=${encodeURIComponent(startTimestamp)}`;
+                }
+                
+                const endTimestamp = document.getElementById('endTimestamp').value;
+                if (endTimestamp) {
+                    url += `&end_timestamp=${encodeURIComponent(endTimestamp)}`;
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                console.log('API响应:', result);
+                
+                if (result.success && result.data && result.data.stocks) {
+                    stockData = result.data.stocks;
+                    // For backend pagination, filteredData is just what we received
+                    filteredData = [...stockData]; 
+                    totalRecords = result.data.total_count || 0;
+                    
+                    updateDisplay();
+                    updateStats();
+                    updatePaginationControls();
+                } else {
+                    throw new Error(result.message || '数据格式错误');
+                }
+                
+            } catch (error) {
+                console.error('加载数据失败:', error);
+                showError('加载数据失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+        
+        // Pagination Functions
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                loadStockData();
+            }
+        }
+        
+        function nextPage() {
+            const maxPage = Math.ceil(totalRecords / pageSize);
+            if (currentPage < maxPage) {
+                currentPage++;
+                loadStockData();
+            }
+        }
+        
+        function changePageSize() {
+            pageSize = parseInt(document.getElementById('pageSizeSelect').value);
+            currentPage = 1; // Reset to first page
+            loadStockData();
+        }
+        
+        function updatePaginationControls() {
+            const maxPage = Math.ceil(totalRecords / pageSize) || 1;
+            
+            document.getElementById('currentPageDisplay').textContent = currentPage;
+            document.getElementById('totalRecords').textContent = totalRecords;
+            
+            const startRecord = totalRecords === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+            const endRecord = Math.min(currentPage * pageSize, totalRecords);
+            
+            document.getElementById('startRecord').textContent = startRecord;
+            document.getElementById('endRecord').textContent = endRecord;
+            
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= maxPage;
+            
+            document.getElementById('paginationControls').style.display = totalRecords > 0 ? 'flex' : 'none';
+        }
+
+        // Filter by Timestamp Button
+        function filterByTimestamp() {
+            currentPage = 1;
+            loadStockData();
+        }
+        
+        function clearTimestampFilter() {
+            document.getElementById('startTimestamp').value = '';
+            document.getElementById('endTimestamp').value = '';
+            currentPage = 1;
+            loadStockData();
+        }
+
+        // 显示加载状态
+        function showLoading() {
+            document.getElementById('loadingContainer').style.display = 'block';
+            document.getElementById('tableContainer').style.display = 'none';
+            document.getElementById('noDataContainer').style.display = 'none';
+        }
+
+        // 隐藏加载状态
+        function hideLoading() {
+            document.getElementById('loadingContainer').style.display = 'none';
+        }
+
+        // 显示错误信息
+        function showError(message) {
+            document.getElementById('errorMessage').textContent = message;
+            document.getElementById('errorContainer').style.display = 'block';
+        }
+
+        // 隐藏错误信息
+        function hideError() {
+            document.getElementById('errorContainer').style.display = 'none';
+        }
+
+        // 更新显示
+        function updateDisplay() {
+            const tbody = document.getElementById('dataTableBody');
+            
+            if (filteredData.length === 0) {
+                document.getElementById('tableContainer').style.display = 'none';
+                document.getElementById('noDataContainer').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('tableContainer').style.display = 'block';
+            document.getElementById('noDataContainer').style.display = 'none';
+
+            tbody.innerHTML = filteredData.map((stock, index) => {
+                const changeClass = stock.change_percent > 0 ? 'price-positive' : 
+                                  stock.change_percent < 0 ? 'price-negative' : 'price-neutral';
+                
+                // Fix zero turnover issue
+                let turnover = stock.turnover;
+                if ((!turnover || turnover === 0) && stock.volume > 0 && stock.price > 0) {
+                    turnover = stock.volume * stock.price;
+                }
+
+                return `
+                    <tr>
+                        <td><strong>${stock.stock_code || '-'}</strong></td>
+                        <td>${stock.stock_name || '-'}</td>
+                        <td><strong>¥${formatNumber(stock.price)}</strong></td>
+                        <td class="${changeClass}">${formatPercent(stock.change_percent)}%</td>
+                        <td class="${changeClass}">${formatNumber(stock.change_amount)}</td>
+                        <td>${formatVolume(stock.volume)}</td>
+                        <td>${formatNumber(turnover)}</td>
+                        <td>${formatTimestamp(stock.request_timestamp)}</td>
+                        <td>
+                            <button onclick="copyRowData(${index})" class="btn-sim" style="margin-right: 5px;">复制</button>
+                            <button onclick="openTriggerModal(${index})" class="btn-sim">触发</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 更新统计信息
+        function updateStats() {
+            const totalStocks = stockData.length;
+            const avgPrice = totalStocks > 0 ? 
+                stockData.reduce((sum, stock) => sum + (stock.price || 0), 0) / totalStocks : 0;
+            const totalVolume = stockData.reduce((sum, stock) => sum + (stock.volume || 0), 0);
+            const lastUpdate = stockData.length > 0 ? 
+                stockData.map(stock => stock.request_timestamp).filter(t => t).sort().pop() : null;
+
+            document.getElementById('totalStocks').textContent = totalStocks;
+            document.getElementById('avgPrice').textContent = '¥' + formatNumber(avgPrice);
+            document.getElementById('totalVolume').textContent = formatVolume(totalVolume);
+            document.getElementById('lastUpdate').textContent = lastUpdate ? formatTimestamp(lastUpdate) : '-';
+        }
+
+        // 过滤数据
+        function filterData(searchTerm) {
+            const term = searchTerm.toLowerCase().trim();
+            
+            if (!term) {
+                filteredData = [...stockData];
+            } else {
+                filteredData = stockData.filter(stock => 
+                    (stock.stock_code && stock.stock_code.toLowerCase().includes(term)) ||
+                    (stock.stock_name && stock.stock_name.toLowerCase().includes(term))
+                );
+            }
+            
+            updateDisplay();
+        }
+
+        // 排序数据
+        function sortData(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+
+            // 更新表头样式
+            document.querySelectorAll('.sortable').forEach(header => {
+                header.classList.remove('sort-asc', 'sort-desc');
+            });
+            
+            const currentHeader = document.querySelector(`[data-sort="${column}"]`);
+            currentHeader.classList.add(sortDirection === 'asc' ? 'sort-asc' : 'sort-desc');
+
+            // 排序数据
+            filteredData.sort((a, b) => {
+                let aVal = a[column];
+                let bVal = b[column];
+                
+                // 处理数字类型
+                if (typeof aVal === 'number' && typeof bVal === 'number') {
+                    return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+                }
+                
+                // 处理字符串类型
+                aVal = String(aVal || '').toLowerCase();
+                bVal = String(bVal || '').toLowerCase();
+                
+                if (sortDirection === 'asc') {
+                    return aVal.localeCompare(bVal);
+                } else {
+                    return bVal.localeCompare(aVal);
+                }
+            });
+
+            updateDisplay();
+        }
+
+        // 刷新数据
+        function refreshData() {
+            loadStockData();
+        }
+
+        // 时间戳筛选功能
+        async function filterByTimestamp() {
+            const startTimestamp = document.getElementById('startTimestamp').value;
+            const endTimestamp = document.getElementById('endTimestamp').value;
+            
+            if (!startTimestamp && !endTimestamp) {
+                alert('请选择开始时间或结束时间');
+                return;
+            }
+            
+            try {
+                showLoading(true);
+                
+                let url = '/api/v1/stocks/tonghuashun/raw-data?limit=1000';
+                
+                if (startTimestamp) {
+                    url += `&start_timestamp=${encodeURIComponent(startTimestamp)}`;
+                }
+                if (endTimestamp) {
+                    url += `&end_timestamp=${encodeURIComponent(endTimestamp)}`;
+                }
+                
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const result = await response.json();
+                console.log('时间筛选API响应:', result);
+                
+                if (result.success && result.data && result.data.stocks) {
+                    stockData = result.data.stocks;
+                    filteredData = [...stockData];
+                    updateDisplay();
+                    updateStats();
+                } else {
+                    throw new Error(result.message || '数据格式错误');
+                }
+                
+            } catch (error) {
+                console.error('时间筛选失败:', error);
+                showError('时间筛选失败: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // 清除时间戳筛选
+        function clearTimestampFilter() {
+            document.getElementById('startTimestamp').value = '';
+            document.getElementById('endTimestamp').value = '';
+            loadStockData(); // 重新加载所有数据
+        }
+
+        // 清空所有数据
+        async function clearAllData() {
+            if (!confirm('确定要清空所有股票数据吗？此操作不可恢复！')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/v1/stocks/test-data/clear', {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    stockData = [];
+                    filteredData = [];
+                    updateDisplay();
+                    updateStats();
+                    alert('数据清空成功！');
+                } else {
+                    throw new Error('清空数据失败');
+                }
+            } catch (error) {
+                console.error('清空数据失败:', error);
+                alert('清空数据失败: ' + error.message);
+            }
+        }
+
+        // 导出数据
+        function exportData() {
+            if (stockData.length === 0) {
+                alert('没有数据可以导出');
+                return;
+            }
+
+            const csvContent = [
+                ['股票代码', '股票名称', '当前价格', '涨跌幅', '涨跌额', '成交量', '成交额', '时间戳'],
+                ...stockData.map(stock => [
+                    stock.symbol,
+                    stock.name || '',
+                    stock.current_price || 0,
+                    stock.change_percent || 0,
+                    stock.change_amount || 0,
+                    stock.volume || 0,
+                    stock.turnover || 0,
+                    formatTimestamp(stock.request_timestamp)
+                ])
+            ].map(row => row.join(',')).join('\n');
+
+            const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `股票数据_${new Date().toISOString().slice(0, 10)}.csv`;
+            link.click();
+        }
+
+
+
+        // 格式化数字
+        function formatNumber(num) {
+            if (num === null || num === undefined || isNaN(num)) return '-';
+            return Number(num).toFixed(2);
+        }
+
+        // 格式化百分比
+        function formatPercent(num) {
+            if (num === null || num === undefined || isNaN(num)) return '-';
+            const formatted = Number(num).toFixed(2);
+            return num > 0 ? `+${formatted}` : formatted;
+        }
+
+        // 格式化成交量
+        function formatVolume(num) {
+            if (num === null || num === undefined || isNaN(num)) return '-';
+            
+            const value = Number(num);
+            if (value >= 100000000) {
+                return (value / 100000000).toFixed(2) + '亿';
+            } else if (value >= 10000) {
+                return (value / 10000).toFixed(2) + '万';
+            } else {
+                return value.toLocaleString();
+            }
+        }
+
+        // 格式化时间戳
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            
+            // 尝试解析ISO格式的时间戳
+            let date;
+            if (typeof timestamp === 'string') {
+                date = new Date(timestamp);
+            } else {
+                date = new Date(Number(timestamp));
+            }
+            
+            if (isNaN(date.getTime())) return '-';
+            
+            return date.toLocaleString('zh-CN', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+        }
+
+        // 页面卸载时停止自动刷新
+        
+        // System Logs Logic
+        let logCounter = 0;
+        function addSystemLog(action, details) {
+            const container = document.getElementById('logsContainer');
+            if (!container) return;
+            
+            logCounter++;
+            const time = new Date().toLocaleTimeString();
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            div.innerHTML = `
+                <span class="log-time">[${time}]</span>
+                <span style="color: #718096; margin-right: 8px; font-weight: bold;">#${logCounter}</span>
+                <span class="log-action">${action}</span>
+                <span class="log-details">${details}</span>
+            `;
+            // Append to bottom (Standard log flow)
+            container.appendChild(div);
+            // Auto-scroll to bottom
+            container.scrollTop = container.scrollHeight;
+        }
+
+        const btnClearLogs = document.getElementById('btnClearLogs');
+        if (btnClearLogs) {
+            btnClearLogs.addEventListener('click', () => {
+                const container = document.getElementById('logsContainer');
+                if (container) container.innerHTML = '';
+                logCounter = 0; // Reset counter
+            });
+        }
+
+        const btnRefreshLogs = document.getElementById('btnRefreshLogs');
+        if (btnRefreshLogs) {
+            btnRefreshLogs.addEventListener('click', () => {
+                addSystemLog('INFO', 'Log console ready.');
+            });
+        }
+
+        // --- Scenario & Trigger Logic ---
+        let currentTriggerIndex = -1;
+        let selectedScenarioId = null;
+        let scenariosCache = null;
+
+        async function loadScenarios() {
+            const listEl = document.getElementById('scenarioList');
+            if (scenariosCache) {
+                renderScenarios(scenariosCache);
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/v1/debug/scenarios');
+                if (!response.ok) throw new Error('Failed to load scenarios');
+                const data = await response.json();
+                scenariosCache = data;
+                renderScenarios(data);
+            } catch (error) {
+                console.error('Load scenarios error:', error);
+                listEl.innerHTML = `<div style="color: #e53e3e; text-align: center; padding: 20px;">加载失败: ${error.message}</div>`;
+            }
+        }
+
+        function renderScenarios(scenarios) {
+            const listEl = document.getElementById('scenarioList');
+            listEl.innerHTML = scenarios.map(s => `
+                <div class="scenario-item" onclick="selectScenario('${s.id}', this)">
+                    <div class="scenario-title">${s.name}</div>
+                    <div class="scenario-desc">${s.description}</div>
+                </div>
+            `).join('');
+        }
+
+        function selectScenario(id, el) {
+            selectedScenarioId = id;
+            // Update UI
+            document.querySelectorAll('.scenario-item').forEach(item => item.classList.remove('selected'));
+            el.classList.add('selected');
+            document.getElementById('btnConfirmTrigger').disabled = false;
+        }
+
+        function openTriggerModal(index) {
+            currentTriggerIndex = index;
+            const item = filteredData[index];
+            if (!item) return;
+
+            document.getElementById('modalStockCode').textContent = item.stock_code || item.symbol;
+            document.getElementById('modalStockName').textContent = item.stock_name || item.name || '-';
+            
+            // Auto-fill inputs with current data if available
+            document.getElementById('inputOverridePrice').value = item.price || item.current_price || '';
+            document.getElementById('inputOverrideVolume').value = item.volume || '';
+            
+            // Default date to today
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('inputOverrideDate').value = today;
+
+            const modal = document.getElementById('scenarioModal');
+            modal.style.display = 'block';
+            
+            // Reset selection
+            selectedScenarioId = null;
+            document.getElementById('btnConfirmTrigger').disabled = false; // Enabled by default now because we can use manual inputs
+            
+            loadScenarios();
+        }
+
+        function closeScenarioModal() {
+            document.getElementById('scenarioModal').style.display = 'none';
+        }
+
+        async function triggerSelectedScenario() {
+            if (currentTriggerIndex === -1) return;
+            
+            // If no scenario selected, default to 'manual_input' if fields are filled, or alert user?
+            // Backend handles 'manual_input' or just overrides.
+            // But we need a scenario_id to pass validation unless we change backend model.
+            // Backend requires scenario_id. We can use 'manual_input' as a dummy ID if user didn't select one.
+            const finalScenarioId = selectedScenarioId || 'manual_input';
+            
+            const item = filteredData[currentTriggerIndex];
+            const stockCode = item.stock_code || item.symbol;
+            
+            const overridePrice = document.getElementById('inputOverridePrice').value;
+            const overrideVolume = document.getElementById('inputOverrideVolume').value;
+            const overrideDate = document.getElementById('inputOverrideDate').value;
+            
+            closeScenarioModal();
+            addSystemLog('TRIGGER', `Triggering [${finalScenarioId}] for ${stockCode} with Price:${overridePrice || 'Default'}, Vol:${overrideVolume || 'Default'}...`);
+            
+            try {
+                const payload = {
+                    code: stockCode,
+                    scenario_id: finalScenarioId
+                };
+                
+                if (overridePrice) payload.override_price = parseFloat(overridePrice);
+                if (overrideVolume) payload.override_volume = parseFloat(overrideVolume);
+                if (overrideDate) payload.override_date = overrideDate;
+
+                const response = await fetch('/api/v1/debug/trigger', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    addSystemLog('SUCCESS', `Scenario triggered successfully!`);
+                    
+                    // Display Logs
+                    if (result.logs && result.logs.length > 0) {
+                        result.logs.forEach(log => {
+                            const status = log.match ? '✅ MATCH' : '❌ MISS';
+                            addSystemLog('RULE', `${status} [${log.rule}]: ${log.details}`);
+                        });
+                    } else {
+                        addSystemLog('INFO', 'No rule logs returned.');
+                    }
+                    
+                    // Display Alerts & Browser Notification
+                    if (result.alerts && result.alerts.length > 0) {
+                        result.alerts.forEach(alert => {
+                            addSystemLog('ALERT', `🔔 [${alert.type}]: ${alert.message}`);
+                            
+                            // Browser Notification
+                            if (Notification.permission === "granted") {
+                                new Notification(`股票异动提醒: ${stockCode}`, {
+                                    body: alert.message,
+                                    icon: '/static/favicon.ico' // Assuming exists or browser default
+                                });
+                            } else if (Notification.permission !== "denied") {
+                                Notification.requestPermission().then(permission => {
+                                    if (permission === "granted") {
+                                        new Notification(`股票异动提醒: ${stockCode}`, {
+                                            body: alert.message
+                                        });
+                                    }
+                                });
+                            }
+                        });
+                    }
+                    
+                    setTimeout(() => loadStockData(), 1000);
+                } else {
+                    addSystemLog('ERROR', `Trigger failed: ${result.message || result.detail}`);
+                }
+            } catch (error) {
+                console.error('Trigger error:', error);
+                addSystemLog('ERROR', `Network error: ${error.message}`);
+            }
+        }
+        
+        function copyRowData(index) {
+            const item = filteredData[index];
+            if (!item) return;
+            const text = JSON.stringify(item, null, 2);
+            navigator.clipboard.writeText(text).then(() => {
+                alert('数据已复制到剪贴板');
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                alert('复制失败，请查看控制台');
+            });
+        }
+        
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            const modal = document.getElementById('scenarioModal');
+            if (event.target == modal) {
+                closeScenarioModal();
+            }
+        }
+    </script>
+</body>
+</html>

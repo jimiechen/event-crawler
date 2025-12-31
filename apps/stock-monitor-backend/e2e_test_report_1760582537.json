@@ -1,0 +1,118 @@
+[
+  {
+    "test_name": "健康检查",
+    "success": true,
+    "message": "状态码: 200",
+    "timestamp": "2025-10-16T10:42:15.134395",
+    "data": {
+      "success": true,
+      "message": "系统运行正常",
+      "data": {
+        "status": "healthy",
+        "timestamp": "2025-10-16T10:42:15.129208",
+        "version": "1.0.0",
+        "uptime": 1760582535.129217,
+        "database": null,
+        "services": null
+      }
+    }
+  },
+  {
+    "test_name": "静态文件访问",
+    "success": true,
+    "message": "状态码: 200, 内容长度: 16464",
+    "timestamp": "2025-10-16T10:42:15.153793",
+    "data": null
+  },
+  {
+    "test_name": "Chrome插件数据提交",
+    "success": false,
+    "message": "状态码: 422",
+    "timestamp": "2025-10-16T10:42:15.164979",
+    "data": {
+      "success": false,
+      "message": "请求参数验证失败",
+      "error_code": "VALIDATION_ERROR",
+      "details": {
+        "validation_errors": [
+          {
+            "type": "missing",
+            "loc": [
+              "body",
+              "data_list",
+              0,
+              "stock_code"
+            ],
+            "msg": "Field required",
+            "input": {
+              "symbol": "TEST001",
+              "price": 15.67,
+              "close_price": 15.67,
+              "open_price": 15.56,
+              "high_price": 15.89,
+              "low_price": 15.45,
+              "volume": 1234567,
+              "amount": 19345678.9,
+              "change_percent": 2.34,
+              "trade_date": "2025-10-16",
+              "data_time": "2025-10-16T10:42:15.154180"
+            },
+            "url": "https://errors.pydantic.dev/2.5/v/missing"
+          },
+          {
+            "type": "missing",
+            "loc": [
+              "body",
+              "data_list",
+              1,
+              "stock_code"
+            ],
+            "msg": "Field required",
+            "input": {
+              "symbol": "TEST002",
+              "price": 8.23,
+              "close_price": 8.23,
+              "open_price": 8.34,
+              "high_price": 8.45,
+              "low_price": 8.12,
+              "volume": 987654,
+              "amount": 8123456.78,
+              "change_percent": -1.23,
+              "trade_date": "2025-10-16",
+              "data_time": "2025-10-16T10:42:15.154211"
+            },
+            "url": "https://errors.pydantic.dev/2.5/v/missing"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "test_name": "股票信息创建",
+    "success": false,
+    "message": "成功创建 0/2 条记录",
+    "timestamp": "2025-10-16T10:42:16.190614",
+    "data": null
+  },
+  {
+    "test_name": "股票搜索API",
+    "success": false,
+    "message": "通过 2/3 个测试用例",
+    "timestamp": "2025-10-16T10:42:17.433099",
+    "data": null
+  },
+  {
+    "test_name": "股票列表API",
+    "success": true,
+    "message": "状态码: 200, 返回 7 条记录",
+    "timestamp": "2025-10-16T10:42:17.593497",
+    "data": null
+  },
+  {
+    "test_name": "数据流完整性",
+    "success": false,
+    "message": "Chrome插件 -> 数据库 -> API -> HTML页面",
+    "timestamp": "2025-10-16T10:42:17.593598",
+    "data": null
+  }
+]

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>调试测试页面</title>
+</head>
+<body>
+    <h1>调试测试页面</h1>
+    <button onclick="runTest()">运行测试</button>
+    <div id="output"></div>
+    
+    <script>
+        // 简单的测试函数
+        function extractSingleValue(htmlContent, regex) {
+            try {
+                console.log('🔍 extractSingleValue called with:', {
+                    htmlContentLength: htmlContent ? htmlContent.length : 0,
+                    regexType: typeof regex,
+                    regexPattern: regex instanceof RegExp ? regex.source : regex
+                });
+                
+                if (!regex || typeof regex.exec !== 'function') {
+                    console.error('❌ Invalid regex object:', regex);
+                    return "-";
+                }
+                
+                if (!htmlContent || typeof htmlContent !== 'string') {
+                    console.error('❌ Invalid HTML content:', typeof htmlContent);
+                    return "-";
+                }
+                
+                regex.lastIndex = 0;
+                const match = regex.exec(htmlContent);
+                const result = (match && match[1]) ? match[1].trim() : "-";
+                
+                console.log('✅ extractSingleValue result:', {
+                    found: match ? true : false,
+                    matchLength: match ? match.length : 0,
+                    result: result
+                });
+                
+                return result;
+            } catch (error) {
+                console.error('❌ Error in extractSingleValue:', error);
+                return "-";
+            }
+        }
+        
+        function runTest() {
+            console.log('🚀 开始测试...');
+            
+            // 测试数据
+            const testHtml = '<div>测试内容 <span>123456</span> 结束</div>';
+            const testRegex = /<span>(\d+)<\/span>/;
+            
+            console.log('📄 测试HTML:', testHtml);
+            console.log('🔍 测试正则:', testRegex);
+            
+            // 正确的参数顺序测试
+            const result = extractSingleValue(testHtml, testRegex);
+            console.log('🎯 测试结果:', result);
+            
+            document.getElementById('output').innerHTML = `
+                <h2>测试结果</h2>
+                <p>提取结果: ${result}</p>
+                <p>期望结果: 123456</p>
+                <p>测试状态: ${result === '123456' ? '✅ 成功' : '❌ 失败'}</p>
+            `;
+        }
+    </script>
+</body>
+</html>
