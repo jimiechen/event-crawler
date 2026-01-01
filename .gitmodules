@@ -1,0 +1,15 @@
+[submodule "outModules/MineplanetGo"]
+	path = outModules/MineplanetGo
+	url = https://8533173147577566@codeup.aliyun.com/5f9a8a071858a17210469d15/MineplanetGo.git
+[submodule "outModules/open-citycloud"]
+	path = outModules/open-citycloud
+	url = https://8533173147577566@codeup.aliyun.com/5f9a8a071858a17210469d15/open-citycloud.git
+[submodule "outModules/protocols"]
+	path = outModules/protocols
+	url = https://8533173147577566@codeup.aliyun.com/5f9a8a071858a17210469d15/protocols.git
+[submodule "outModules/protocols-n8n"]
+	path = outModules/protocols-n8n
+	url = https://8533173147577566@codeup.aliyun.com/5f9a8a071858a17210469d15/protocols-n8n.git
+[submodule "outModules/testCases"]
+	path = outModules/testCases
+	url = https://8533173147577566@codeup.aliyun.com/5f9a8a071858a17210469d15/testCases.git
