@@ -13,3 +13,6 @@
 [submodule "outModules/testCases"]
 	path = outModules/testCases
 	url = https://8533173147577566@codeup.aliyun.com/5f9a8a071858a17210469d15/testCases.git
+[submodule "outModules/TorFApp"]
+	path = outModules/TorFApp
+	url = https://8533173147577566@codeup.aliyun.com/5f9a8a071858a17210469d15/TorFApp.git
