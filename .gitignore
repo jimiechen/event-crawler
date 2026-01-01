@@ -40,4 +40,4 @@ debug/
 temp/
 tmp/
 .pytest_cache/
-outModules/
+
