@@ -74,27 +74,26 @@
 
 ## 3. 系统架构图 (System Topology)
 
-```HTML
+```mermaid
 graph TD
-    User[真实用户] -->|上传 Key / 订阅| WebGateway
-    User -->|玩游戏| GameGateway
+    User[真实用户] -->|上传 Key / 订阅| GoGateway[Go 业务网关]
+    User -->|玩游戏 / 对话| RustGateway[Rust AI 网关]
 
-    subgraph "核心业务层 (Go/Rust)"
-        GameGateway[游戏网关 (WebSocket)]
-        KeyVault[Key 算力银行]
-        EconomyServer[微观经济引擎]
-        WorldServer[世界模拟服务器 (ECS)]
+    subgraph "核心业务层 (Go/Tars)"
+        GoGateway --> KeyVault[Key 算力银行]
+        GoGateway --> EconomyServer[微观经济引擎]
+        GoGateway --> WorldServer[世界模拟服务器 (ECS)]
     end
 
     subgraph "AI 算力层 (Python Cluster)"
-        Dispatcher[任务分发器]
+        RustGateway --> Dispatcher[任务分发器 (gRPC)]
         
         subgraph "LOD 3: DeepSeek Cluster"
-            DeepSeekWorker[DeepSeek API 调用器]
+        DeepSeekWorker[DeepSeek API 调用器]
         end
         
         subgraph "LOD 2: SLM Cluster"
-            LocalLLM[本地小模型 (vLLM/Ollama)]
+        LocalLLM[本地小模型 (vLLM/Ollama)]
         end
         
         MemoryDB[(Vector DB - Chroma)]
@@ -115,9 +114,15 @@ graph TD
 
 ## 4. 技术栈选型建议
 
-* **仿真内核 (World Server)**: **Go** (基于现有 `module-building` 扩展) 或 **Rust** (如果追求极致性能)。推荐使用 **ECS (Entity Component System)** 架构来管理百万实体。
+*   **高性能接入网关**: **Rust (Tonic + Axum/Salvo)**。
+    *   作为 AI 流量的统一入口，负责处理长连接 (SSE/WebSocket) 和高并发 `MessagePacket` 解析。
+    *   替代原有的 TarsPython 网关方案，彻底解决 Python 在 I/O 密集型场景下的性能瓶颈。
 
-* **AI 服务网格**: **Python (FastAPI + Celery/Ray)**。Python 是 AI 生态的一等公民，适合处理 LLM 调用、向量检索。
+*   **仿真内核 (World Server)**: **Go** (基于现有 `module-building` 扩展)。推荐使用 **ECS (Entity Component System)** 架构来管理百万实体。
+
+*   **AI 服务网格**: **Python (gRPC + Celery/Ray)**。
+    *   移除 Tars 协议，改用标准的 **gRPC** 与 Rust 网关通信。
+    *   Python 专注于 LLM 调用、向量检索等计算密集型任务。
 
 * **前端**: **React + WebGL (Three.js/PixiJS)** 或 **Unity WebGL**。`MineplanetGo` 若为 React 项目，建议引入 **PixiJS** 处理大量 2D 精灵的渲染。
 

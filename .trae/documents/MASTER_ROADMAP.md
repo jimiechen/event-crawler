@@ -6,36 +6,39 @@
 
 ## 2. 总体架构设计
 
-平台严格遵循 **Tars 微服务架构**。所有内部服务调用通过 Tars 协议（Go/Python 互通），对外统一通过网关提供 **Protobuf** 接口。
+平台采用 **双网关架构 (Dual-Gateway)**。
+*   **Go Gateway**: 负责传统 REST/Tars 业务请求（User, Group, Topic）。
+*   **Rust Gateway**: 负责 AI 实时交互与 SSE 流式推送（Chat, Oasis）。
+*   内部通信：Go 服务之间使用 **Tars**，Go 与 Python 之间及 Python 内部使用 **gRPC**。
 
 ### 2.1 架构分层图
 
 ```mermaid
 graph TD
-    Client[Flutter App (Mobile)] -->|Protobuf| Gateway[统一网关 (Go/Tars)]
-    
+    Client[Flutter App (Mobile)] -->|Protobuf| GoGateway[统一网关 (Go/Tars)]
+    Client -->|Protobuf/SSE| RustGateway[AI 网关 (Rust/gRPC)]
+
     subgraph Infrastructure [核心业务层 (Go/Tars)]
-        Gateway --> UserServer[用户服务]
-        Gateway --> GroupServer[社交关系服务1]
-        Gateway --> TopicServer[内容话题服务]
-        Gateway --> BuildingServer[模拟经营服务 (New)]
+        GoGateway --> UserServer[用户服务]
+        GoGateway --> GroupServer[社交关系服务]
+        GoGateway --> TopicServer[内容话题服务]
+        GoGateway --> BuildingServer[模拟经营服务]
     end
     
     subgraph Operations [运营管理层 (Go/Gin)]
-        AdminServer[管理后台 (admin-server)] -->|审核/管理| TopicServer
+        AdminServer[管理后台] -->|审核| TopicServer
         AdminServer -->|管理| BuildingServer
-        AdminServer -->|监控| AILayer
     end
     
-    subgraph AILayer [AI 智能层 (Python/Tars)]
+    subgraph AILayer [AI 智能层 (Python/gRPC)]
         direction TB
-        Gateway --> AICharacter[AI 角色服务]
-        Gateway --> OASIS[微观仿真服务]
-        Gateway --> MacroEngine[宏观预测服务]
+        RustGateway --> AICharacter[AI 角色服务]
+        RustGateway --> OASIS[微观仿真服务]
+        RustGateway --> MacroEngine[宏观预测服务]
         
-        OASIS -.->|Tars RPC| GroupServer
-        OASIS -.->|Tars RPC| TopicServer
-        OASIS -.->|Tars RPC| BuildingServer
+        OASIS -.->|gRPC| GroupServer
+        OASIS -.->|gRPC| TopicServer
+        OASIS -.->|gRPC| BuildingServer
         
         AICharacter --> DeepSeek[DeepSeek API]
     end
@@ -89,23 +92,28 @@ graph TD
 
 | 模块名称              | 角色    | 对应路径/仓库                                                         | 技术栈     | 接入方式            |
 | :---------------- | :---- | :-------------------------------------------------------------- | :------ | :-------------- |
-| **Gateway**       | 统一入口  | `mineplanet/Gateway`                                            | Go      | Tars/Protobuf   |
+| **Go Gateway**    | 业务网关  | `mineplanet/Gateway`                                            | Go      | Tars/Protobuf   |
+| **Rust Gateway**  | AI 网关 | `mineplanet/AiGateway`                                          | Rust    | gRPC/SSE        |
 | **Core Services** | 社交/内容 | `mineplanet/{user,group,topic}-server`                          | Go      | Tars            |
 | **App Client**    | 用户端   | `outModules/TorFApp/true_or_false_app`                          | Flutter | Protobuf Client |
-| **AI Services**   | 智能驱动  | `open-citycloud/modules/module-{ai-character,oasis,collective}` | Python  | TarsPython      |
+| **AI Services**   | 智能驱动  | `open-citycloud/modules/module-{ai-character,oasis,collective}` | Python  | gRPC            |
 | **Admin**         | 运营审核  | `admin-server`                                                  | Go      | HTTP/Gin        |
 
 ## 4. 3个月内测冲刺路线图 (Beta Roadmap)
 
 ### 第 1 个月：基础打通 (Infrastructure & Bridge)
 
-**目标**: 实现 App 与 AI 服务的端到端联通。
+**目标**: 实现 App 与 AI 服务的端到端联通（引入 Rust 网关）。
 
-* **网关**: 在 Gateway 引入 AI Tars 定义，发布 Protobuf 接口。
+*   **网关**: 
+    *   搭建 `AiGateway` (Rust)，实现 `MessagePacket` 解析与 SSE 推送。
+    *   发布 `ai_service.proto` 定义。
 
-* **AI 服务**: 完成 `module-ai-character` 的 TarsPython 实现，跑通 `chatCompletion`。
+*   **AI 服务**: 
+    *   移除 TarsPython，将 `ai-character-server` 改造为 gRPC 服务。
+    *   跑通 `Client -> RustGateway -> AI` 的 `chatCompletion` 链路。
 
-* **客户端**: Flutter App 生成 AI 模块的 Protobuf 代码，实现与 AI 角色的基础对话 UI。
+*   **客户端**: Flutter App 集成 Rust 网关接口，实现打字机效果（SSE）。
 
 ### 第 2 个月：微观融合 (Micro-Simulation Integration)
 
@@ -134,9 +142,12 @@ graph TD
 
 ## 5. 关键技术决策
 
-1. **数据归一化**: 无论是人产生的社交数据，还是 AI 产生的，**必须**统一存储在 `group-server` 和 `topic-server`。AI 层不维护独立的社交数据库。
-2. **协议强约束**: 客户端只认 Gateway 的 Protobuf 接口。Gateway 负责将请求路由到 Go 服务或 Python 服务。
-3. **审核前置**: AI 产生的高风险内容（如帖子）在写入 `topic-server` 前，应经过敏感词过滤或人工审核标记（由 Admin Server 配置策略）。
+1.  **双网关隔离**: 
+    *   使用 **Go Gateway** 保持现有 Tars 业务的稳定性。
+    *   引入 **Rust Gateway** 处理高并发 AI 实时流（SSE），规避 TarsPython 废弃问题，并提供更好的流式体验。
+2.  **数据归一化**: 无论是人产生的社交数据，还是 AI 产生的，**必须**统一存储在 `group-server` 和 `topic-server`。AI 层不维护独立的社交数据库。
+3.  **协议强约束**: 客户端统一使用 Protobuf。Go 网关处理 Request/Response，Rust 网关处理 Stream。
+4.  **审核前置**: AI 产生的高风险内容（如帖子）在写入 `topic-server` 前，应经过敏感词过滤或人工审核标记。
 
 ## 6. 下一步行动
 
