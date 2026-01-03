@@ -1,0 +1,16 @@
+# Chrome Extension Private Key - 不要提交到版本控制
+extension-private-key.pem
+
+# Build outputs
+.output/
+dist/
+
+# Node modules
+node_modules/
+
+# Environment files
+.env.local
+
+# Temporary files
+*.tmp
+*.log

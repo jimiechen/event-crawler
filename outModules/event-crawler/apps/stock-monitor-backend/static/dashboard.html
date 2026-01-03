@@ -1,0 +1,876 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>首页 - 同花顺股票监控系统</title>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Axios -->
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <!-- Tailwind CSS (Loaded by navbar.js, but adding here as backup/explicit) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        [v-cloak] { display: none; }
+        .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+        .fade-enter-from, .fade-leave-to { opacity: 0; }
+    </style>
+    <!-- Navbar -->
+    <script src="/static/js/navbar.js"></script>
+<script src="/static/js/custom-alert.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+    
+    <div id="app" v-cloak class="container mx-auto px-4 py-8">
+        
+        <!-- Statistics Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <!-- Card 1: Total Stocks -->
+            <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-blue-500 hover:shadow-lg transition-shadow">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium uppercase">总股票数</p>
+                        <p class="text-3xl font-bold text-gray-800 mt-2">{{ stats.total_stocks.toLocaleString() }}</p>
+                    </div>
+                    <div class="p-3 bg-blue-100 rounded-full text-blue-600">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 2: Active Stocks -->
+            <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-green-500 hover:shadow-lg transition-shadow">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium uppercase">活跃股票</p>
+                        <p class="text-3xl font-bold text-gray-800 mt-2">{{ stats.active_stocks.toLocaleString() }}</p>
+                    </div>
+                    <div class="p-3 bg-green-100 rounded-full text-green-600">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 3: Today's Wencai Data -->
+            <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-purple-500 hover:shadow-lg transition-shadow">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium uppercase">今日问财数据</p>
+                        <p class="text-3xl font-bold text-gray-800 mt-2">{{ stats.today_wencai_count.toLocaleString() }}</p>
+                    </div>
+                    <div class="p-3 bg-purple-100 rounded-full text-purple-600">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Card 4: Last Update -->
+            <div class="bg-white rounded-lg shadow-md p-6 border-l-4 border-orange-500 hover:shadow-lg transition-shadow">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium uppercase">最后更新时间</p>
+                        <p class="text-lg font-bold text-gray-800 mt-2">{{ formatDateTime(stats.last_update_time) }}</p>
+                    </div>
+                    <div class="p-3 bg-orange-100 rounded-full text-orange-600">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ranking Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Growth Ranking -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-800">积分增长排名</h3>
+                    <div class="flex space-x-2 items-center">
+                        <input type="date" v-model="rankingStats.growthStartDate" class="border rounded px-2 py-1 text-xs">
+                        <span class="text-gray-400">-</span>
+                        <input type="date" v-model="rankingStats.growthEndDate" class="border rounded px-2 py-1 text-xs">
+                        <button @click="fetchGrowthRanking" class="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700">查询</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto max-h-96">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">排名</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">代码</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">增长分</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">详情</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            <tr v-for="(item, index) in rankingStats.growthList" :key="item.code" 
+                                @click="navigateToTestTool(item.code, item.date)"
+                                class="hover:bg-blue-50 cursor-pointer transition-colors">
+                                <td class="px-4 py-2 text-sm text-gray-500">{{ index + 1 }}</td>
+                                <td class="px-4 py-2 text-sm font-medium text-blue-600">{{ item.code }}</td>
+                                <td class="px-4 py-2 text-sm text-gray-900">{{ item.name }}</td>
+                                <td class="px-4 py-2 text-sm font-bold text-green-600">+{{ item.growth.toFixed(2) }}</td>
+                                <td class="px-4 py-2 text-xs text-gray-500 max-w-xs truncate" :title="formatRuleScores(item.rule_scores)">
+                                    {{ formatRuleScores(item.rule_scores) }}
+                                </td>
+                            </tr>
+                            <tr v-if="rankingStats.growthList.length === 0">
+                                <td colspan="5" class="px-4 py-8 text-center text-gray-500 text-sm">暂无数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Total Score Ranking -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold text-gray-800">总分排名 (250日)</h3>
+                    <div class="flex space-x-2 items-center">
+                        <span class="text-xs text-gray-500">截止:</span>
+                        <input type="date" v-model="rankingStats.totalDate" class="border rounded px-2 py-1 text-xs">
+                        <button @click="fetchTotalRanking" class="bg-purple-600 text-white px-3 py-1 rounded text-xs hover:bg-purple-700">查询</button>
+                    </div>
+                </div>
+                <div class="overflow-x-auto max-h-96">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">排名</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">代码</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">总分</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-200">
+                            <tr v-for="(item, index) in rankingStats.totalList" :key="item.code"
+                                @click="navigateToTestTool(item.code, item.date)"
+                                class="hover:bg-blue-50 cursor-pointer transition-colors">
+                                <td class="px-4 py-2 text-sm text-gray-500">{{ index + 1 }}</td>
+                                <td class="px-4 py-2 text-sm font-medium text-blue-600">{{ item.code }}</td>
+                                <td class="px-4 py-2 text-sm text-gray-900">{{ item.name }}</td>
+                                <td class="px-4 py-2 text-sm font-bold text-purple-600">{{ item.score.toFixed(2) }}</td>
+                            </tr>
+                            <tr v-if="rankingStats.totalList.length === 0">
+                                <td colspan="4" class="px-4 py-8 text-center text-gray-500 text-sm">暂无数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- Main Content -->
+        <div class="bg-white rounded-lg shadow-lg overflow-hidden min-h-[500px]">
+            <!-- Tabs Header -->
+            <div class="flex border-b border-gray-200">
+                <button 
+                    @click="activeTab = 'stocks'"
+                    :class="{'border-b-2 border-blue-500 text-blue-600 bg-blue-50': activeTab === 'stocks', 'text-gray-500 hover:text-gray-700': activeTab !== 'stocks'}"
+                    class="flex-1 py-4 px-6 font-medium text-center transition-colors duration-200 focus:outline-none">
+                    股票列表 (stock_info)
+                </button>
+                <button 
+                    @click="activeTab = 'wencai'"
+                    :class="{'border-b-2 border-blue-500 text-blue-600 bg-blue-50': activeTab === 'wencai', 'text-gray-500 hover:text-gray-700': activeTab !== 'wencai'}"
+                    class="flex-1 py-4 px-6 font-medium text-center transition-colors duration-200 focus:outline-none">
+                    问财数据 (wencai_stocks)
+                </button>
+            </div>
+
+            <!-- Tab 1: Stock List -->
+            <div v-if="activeTab === 'stocks'" class="p-6">
+                <!-- Filter Controls -->
+                <div class="mb-4 flex flex-wrap gap-4 items-center bg-gray-50 p-4 rounded-lg">
+                    <!-- Date Filter -->
+                    <div class="flex items-center space-x-2">
+                         <span class="text-sm text-gray-600">时间段:</span>
+                         <input type="date" v-model="stockList.startTime" class="border rounded px-2 py-1 text-sm">
+                         <span class="text-gray-400">-</span>
+                         <input type="date" v-model="stockList.endTime" class="border rounded px-2 py-1 text-sm">
+                    </div>
+
+                    <!-- Sort Controls -->
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-600">排序:</span>
+                        <select v-model="stockList.sortBy" class="border rounded px-2 py-1 text-sm">
+                            <option value="volume_anomaly_score">异动总分</option>
+                            <option value="score_update_time">更新时间</option>
+                            <option value="latest_price">最新价格</option>
+                            <option value="code">股票代码</option>
+                        </select>
+                        <select v-model="stockList.sortOrder" class="border rounded px-2 py-1 text-sm">
+                            <option value="desc">降序</option>
+                            <option value="asc">升序</option>
+                        </select>
+                    </div>
+
+                    <!-- Checkbox -->
+                    <label class="inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="stockList.activeOnly" class="form-checkbox h-4 w-4 text-blue-600">
+                        <span class="ml-2 text-sm text-gray-700">只显示活跃</span>
+                    </label>
+
+                    <!-- Search Button -->
+                    <button @click="fetchStockList(1)" class="bg-blue-600 text-white px-4 py-1.5 rounded text-sm hover:bg-blue-700">
+                        搜索
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">代码/名称</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">最新价</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">异动总分</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">加分项</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">TDX评分</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">持仓/活跃</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">同步状态</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">更新时间</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <tr v-for="stock in stockList.items" :key="stock.code" class="hover:bg-gray-50">
+                                <td class="px-6 py-4 whitespace-nowrap cursor-pointer hover:bg-blue-50 transition-colors" @click.stop="navigateToTestTool(stock.code)">
+                                    <div class="text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline">{{ stock.code }}</div>
+                                    <div class="text-sm text-gray-500">{{ stock.name }}</div>
+                                    <div class="text-xs text-gray-400">{{ stock.market }}</div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono">
+                                    <div class="flex items-center space-x-4">
+                                        <span class="font-bold">{{ stock.latest_price || '-' }}</span>
+                                        <!-- Sparkline -->
+                                        <div class="w-20 h-8 flex items-center justify-center bg-gray-50 rounded border border-gray-100" v-if="stock.extra">
+                                            <svg v-if="stock.extra.sparkline_data && stock.extra.sparkline_data.length > 1" width="80" height="32" class="w-full h-full" viewBox="0 0 60 20" preserveAspectRatio="none">
+                                                <path :d="getSparklinePath(stock.extra.sparkline_data)" fill="none" stroke="#2563EB" stroke-width="2" vector-effect="non-scaling-stroke" />
+                                            </svg>
+                                            <span v-else class="text-xs text-gray-300">无数据</span>
+                                        </div>
+                                        <div v-else class="w-20 h-8 bg-gray-50 animate-pulse rounded"></div>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-bold text-blue-600">
+                                    {{ stock.volume_anomaly_score || 0 }}
+                                </td>
+                                <td class="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" :title="formatBonusItems(stock.bonus_items)">
+                                    {{ formatBonusItems(stock.bonus_items) }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                                    {{ stock.tdx_plugin_score || 0 }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    <div class="flex flex-col space-y-1">
+                                        <span :class="stock.is_held ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full w-min">
+                                            {{ stock.is_held ? '持仓' : '未持' }}
+                                        </span>
+                                        <span :class="stock.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full w-min">
+                                            {{ stock.is_active ? '活跃' : '停用' }}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <div class="flex flex-col space-y-1">
+                                        <span :class="stock.sync_250d_kline ? 'text-green-600' : 'text-gray-400'" class="text-xs">
+                                            250日K: {{ stock.sync_250d_kline ? '已同步' : '未同步' }}
+                                        </span>
+                                        <span :class="stock.sync_incremental ? 'text-green-600' : 'text-gray-400'" class="text-xs">
+                                            增量: {{ stock.sync_incremental ? '开启' : '关闭' }}
+                                        </span>
+                                    </div>
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    {{ formatDateTime(stock.score_update_time) }}
+                                </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <button @click="toggleStockStatus(stock)" class="text-indigo-600 hover:text-indigo-900 mr-3 block">
+                                        {{ stock.is_active ? '停用' : '激活' }}
+                                    </button>
+                                    <button @click="moveToWencai(stock)" class="text-blue-600 hover:text-blue-900 block">
+                                        移动到问财
+                                    </button>
+                                    <button @click="syncTdx(stock)" class="text-green-600 hover:text-green-900 block mt-1">
+                                        同步TDX
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr v-if="stockList.items.length === 0">
+                                <td colspan="9" class="px-6 py-10 text-center text-gray-500">暂无数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination for Stocks -->
+                <div class="mt-6 flex justify-between items-center">
+                    <div class="text-sm text-gray-700">
+                        显示 <span class="font-medium">{{ (stockList.page - 1) * stockList.page_size + 1 }}</span> 到 <span class="font-medium">{{ Math.min(stockList.page * stockList.page_size, stockList.total) }}</span> 条，共 <span class="font-medium">{{ stockList.total }}</span> 条
+                    </div>
+                    <div class="flex space-x-2">
+                        <button 
+                            @click="changeStockPage(stockList.page - 1)" 
+                            :disabled="stockList.page <= 1"
+                            class="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                            上一页
+                        </button>
+                        <button 
+                            @click="changeStockPage(stockList.page + 1)" 
+                            :disabled="stockList.page * stockList.page_size >= stockList.total"
+                            class="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                            下一页
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: Wencai List -->
+            <div v-if="activeTab === 'wencai'" class="p-6">
+                <!-- Search -->
+                <div class="mb-4 flex gap-4">
+                    <input 
+                        v-model="wencaiTagFilter" 
+                        @keyup.enter="fetchWencaiList(1)"
+                        type="text" 
+                        placeholder="搜索标签 (如: 连板, 首板)" 
+                        class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                    <button 
+                        @click="fetchWencaiList(1)"
+                        class="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        搜索
+                    </button>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">问财ID</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">股票代码</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">股票名称</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期标签</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">标签/概念</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <tr v-for="item in wencaiList.items" :key="item.id" class="hover:bg-gray-50">
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ item.id }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{{ item.stock_code }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ item.stock_name }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ item.date_tag }}</td>
+                                <td class="px-6 py-4 text-sm text-gray-500 max-w-xs truncate" :title="item.tags">{{ item.tags }}</td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                    <button @click="moveToStockInfo(item)" class="text-green-600 hover:text-green-900">
+                                        移动到股票表
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr v-if="wencaiList.items.length === 0">
+                                <td colspan="6" class="px-6 py-10 text-center text-gray-500">暂无数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination for Wencai -->
+                <div class="mt-6 flex justify-between items-center">
+                    <div class="text-sm text-gray-700">
+                        显示 <span class="font-medium">{{ (wencaiList.page - 1) * wencaiList.page_size + 1 }}</span> 到 <span class="font-medium">{{ Math.min(wencaiList.page * wencaiList.page_size, wencaiList.total) }}</span> 条，共 <span class="font-medium">{{ wencaiList.total }}</span> 条
+                    </div>
+                    <div class="flex space-x-2">
+                        <button 
+                            @click="changeWencaiPage(wencaiList.page - 1)" 
+                            :disabled="wencaiList.page <= 1"
+                            class="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                            上一页
+                        </button>
+                        <button 
+                            @click="changeWencaiPage(wencaiList.page + 1)" 
+                            :disabled="wencaiList.page * wencaiList.page_size >= wencaiList.total"
+                            class="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+                            下一页
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Refresh Timer Info -->
+        <div class="mt-4 text-center text-gray-400 text-sm">
+            数据每5分钟自动刷新。下次刷新: {{ nextRefreshTime }}
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, onUnmounted, computed } = Vue;
+
+        createApp({
+            setup() {
+                // State
+                const stats = ref({
+                    total_stocks: 0,
+                    active_stocks: 0,
+                    today_wencai_count: 0,
+                    last_update_time: null
+                });
+
+                const activeTab = ref('stocks');
+                
+                // Stock List State
+                const stockList = ref({
+                    items: [],
+                    total: 0,
+                    page: 1,
+                    page_size: 20,
+                    activeOnly: false, // Default to false as per user request (or maybe true? User didn't specify, but "Is Active" field implies we might see inactive ones)
+                    startTime: '',
+                    endTime: '',
+                    sortBy: 'volume_anomaly_score',
+                    sortOrder: 'desc'
+                });
+
+                // Wencai List State
+                const wencaiList = ref({
+                    items: [],
+                    total: 0,
+                    page: 1,
+                    page_size: 15
+                });
+                const wencaiTagFilter = ref('');
+
+                // Ranking State
+                const rankingStats = ref({
+                    growthStartDate: '',
+                    growthEndDate: '',
+                    totalDate: '',
+                    growthList: [],
+                    totalList: []
+                });
+
+                // Auto Refresh
+                const refreshInterval = ref(null);
+                const nextRefreshTime = ref('');
+                const refreshTimer = ref(null);
+                const REFRESH_DELAY = 5 * 60 * 1000; // 5 minutes
+
+                // API Calls
+                const fetchStats = async () => {
+                    try {
+                        const res = await axios.get('/api/v1/dashboard/stats');
+                        if (res.data.success) {
+                            stats.value = res.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch stats:', error);
+                    }
+                };
+
+                const fetchStockList = async (page = 1) => {
+                    try {
+                        const res = await axios.get('/api/v1/dashboard/stocks', {
+                            params: { 
+                                page, 
+                                page_size: stockList.value.page_size,
+                                active_only: stockList.value.activeOnly,
+                                start_time: stockList.value.startTime || undefined,
+                                end_time: stockList.value.endTime || undefined,
+                                sort_by: stockList.value.sortBy,
+                                sort_order: stockList.value.sortOrder
+                            }
+                        });
+                        if (res.data.success) {
+                            // Keep current filter state
+                            const { activeOnly, startTime, endTime, sortBy, sortOrder } = stockList.value;
+                            stockList.value = { 
+                                ...res.data.data, 
+                                activeOnly,
+                                startTime,
+                                endTime,
+                                sortBy,
+                                sortOrder
+                            };
+                            // Fetch extra info (sparkline, scores, status)
+                            // Use setTimeout to ensure this runs after reactivity updates if needed, 
+                            // though synchronous call is usually fine.
+                            // Ensure fetchExtraInfo is defined/hoisted or available.
+                            if (typeof fetchExtraInfo === 'function') {
+                                fetchExtraInfo();
+                            } else {
+                                // If not yet defined (rare race condition in setup?), wait a tick
+                                setTimeout(() => {
+                                     if (typeof fetchExtraInfo === 'function') fetchExtraInfo();
+                                }, 0);
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch stock list:', error);
+                    }
+                };
+
+                const toggleStockStatus = async (stock) => {
+                    try {
+                        const newStatus = !stock.is_active;
+                        const res = await axios.post(`/api/v1/stocks/${stock.code}/toggle-status?is_active=${newStatus}`);
+                        if (res.data.success) {
+                            stock.is_active = newStatus;
+                            if (stockList.value.activeOnly && !newStatus) {
+                                fetchStockList(stockList.value.page);
+                            }
+                        } else {
+                            alert('操作失败: ' + res.data.message);
+                        }
+                    } catch (error) {
+                        console.error('Failed to toggle stock status:', error);
+                        alert('操作失败');
+                    }
+                };
+
+                const moveToWencai = async (stock) => {
+                    try {
+                        const res = await axios.post(`/api/v1/stocks/${stock.code}/move-to-wencai`);
+                        if (res.data.success) {
+                            alert('成功移动到问财表');
+                            if (activeTab.value === 'wencai') {
+                                fetchWencaiList(1);
+                            }
+                        } else {
+                            alert('操作失败: ' + res.data.message);
+                        }
+                    } catch (error) {
+                        console.error('Failed to move to wencai:', error);
+                        alert('操作失败');
+                    }
+                };
+
+                const moveToStockInfo = async (item) => {
+                    try {
+                        const res = await axios.post(`/api/v1/stocks/wencai/${item.id}/move-to-stock-info`);
+                        if (res.data.success) {
+                            alert('成功移动到股票表');
+                        } else {
+                            alert('操作失败: ' + res.data.message);
+                        }
+                    } catch (error) {
+                        console.error('Failed to move to stock info:', error);
+                        alert('操作失败');
+                    }
+                };
+
+                const fetchWencaiList = async (page = 1) => {
+                    try {
+                        const res = await axios.get('/api/v1/dashboard/wencai', {
+                            params: { 
+                                page, 
+                                page_size: wencaiList.value.page_size,
+                                tag: wencaiTagFilter.value || undefined
+                            }
+                        });
+                        if (res.data.success) {
+                            wencaiList.value = res.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch wencai list:', error);
+                    }
+                };
+
+                const initDates = () => {
+                    const now = new Date();
+                    const hour = now.getHours();
+                    let targetDate = new Date();
+                    
+                    if (hour < 14) {
+                        targetDate.setDate(targetDate.getDate() - 1);
+                    }
+                    
+                    const fmt = (d) => {
+                        const y = d.getFullYear();
+                        const m = String(d.getMonth() + 1).padStart(2, '0');
+                        const day = String(d.getDate()).padStart(2, '0');
+                        return `${y}-${m}-${day}`;
+                    };
+                    const dateStr = fmt(targetDate);
+                    
+                    rankingStats.value.growthStartDate = dateStr;
+                    rankingStats.value.growthEndDate = dateStr;
+                    rankingStats.value.totalDate = dateStr;
+                };
+
+                const fetchGrowthRanking = async () => {
+                    if (!rankingStats.value.growthStartDate || !rankingStats.value.growthEndDate) {
+                         // Attempt to init if missing
+                         initDates();
+                         if (!rankingStats.value.growthStartDate) return;
+                    }
+                    try {
+                        const res = await axios.get('/api/v1/rankings/growth', {
+                            params: {
+                                start_date: rankingStats.value.growthStartDate,
+                                end_date: rankingStats.value.growthEndDate,
+                                limit: 10
+                            }
+                        });
+                        if (res.data.success) {
+                            rankingStats.value.growthList = res.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch growth ranking:', error);
+                    }
+                };
+
+                const fetchTotalRanking = async () => {
+                    try {
+                        const res = await axios.get('/api/v1/rankings/total', {
+                            params: {
+                                target_date: rankingStats.value.totalDate,
+                                limit: 10
+                            }
+                        });
+                        if (res.data.success) {
+                            rankingStats.value.totalList = res.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Failed to fetch total ranking:', error);
+                    }
+                };
+
+                const fetchRankings = async () => {
+                    await Promise.all([fetchGrowthRanking(), fetchTotalRanking()]);
+                };
+
+                const navigateToTestTool = (code, date) => {
+                    const url = `/static/test-tool.html?stockCode=${code}&tagDates=${date}`;
+                    const title = `测试工具-${code}`;
+                    
+                    if (window.self !== window.top) {
+                        window.parent.postMessage({
+                            type: 'OPEN_TAB',
+                            url: url,
+                            title: title
+                        }, '*');
+                    } else if (window.OPEN_TAB_Function) {
+                        window.OPEN_TAB_Function(url, title);
+                    } else {
+                         window.location.href = url;
+                    }
+                };
+
+                // Helpers
+                const formatDateTime = (dateStr) => {
+                    if (!dateStr) return '-';
+                    const date = new Date(dateStr);
+                    return date.toLocaleString('zh-CN', {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+                };
+
+                const formatBonusItems = (itemsStr) => {
+                    if (!itemsStr) return '-';
+                    try {
+                        const items = JSON.parse(itemsStr);
+                        if (Array.isArray(items)) {
+                            return items.join(', ');
+                        }
+                        return itemsStr;
+                    } catch (e) {
+                        return itemsStr;
+                    }
+                };
+
+                const formatRuleScores = (scoresStr) => {
+                    if (!scoresStr) return '-';
+                    try {
+                        const scores = typeof scoresStr === 'string' ? JSON.parse(scoresStr) : scoresStr;
+                        if (!scores || typeof scores !== 'object') return '-';
+                        
+                        const parts = [];
+                        
+                        // Volume Multiplier
+                        if (scores.vol_3x) parts.push(`3倍量(5分)`);
+                        else if (scores.vol_2x) parts.push(`2倍量(3分)`);
+                        
+                        // Low Volume
+                        if (scores.low_vol_20) parts.push(`20日地量(1分)`);
+                        else if (scores.low_vol_10) parts.push(`10日地量(1分)`);
+                        else if (scores.low_vol_5) parts.push(`5日地量(1分)`);
+                        
+                        // Other tags
+                        for (const [key, val] of Object.entries(scores)) {
+                            if (key.startsWith('tag_') && val > 0) {
+                                const tagName = key.replace('tag_', '');
+                                parts.push(`${tagName}(${val}分)`);
+                            }
+                        }
+                        
+                        return parts.length > 0 ? parts.join(', ') : '-';
+                    } catch (e) {
+                        console.error('Error parsing rule scores:', e);
+                        return '-';
+                    }
+                };
+
+                const updateNextRefreshTime = () => {
+                    const now = new Date();
+                    const next = new Date(now.getTime() + REFRESH_DELAY); // This is approximate, ideally track last fetch time
+                    // But for display, we can just countdown or show static time.
+                    // Let's implement a simple countdown or just "Last updated: X, refreshing in Y"
+                    // Or simpler: just show time
+                };
+                
+                // Better refresh logic
+                let lastFetchTime = Date.now();
+                
+                const updateTimerDisplay = () => {
+                    const now = Date.now();
+                    const diff = REFRESH_DELAY - (now - lastFetchTime);
+                    if (diff > 0) {
+                        const minutes = Math.floor(diff / 60000);
+                        const seconds = Math.floor((diff % 60000) / 1000);
+                        nextRefreshTime.value = `${minutes}分${seconds}秒`;
+                    } else {
+                        nextRefreshTime.value = '即将刷新...';
+                    }
+                };
+
+                const refreshAll = async () => {
+                    lastFetchTime = Date.now();
+                    await Promise.all([
+                        fetchStats(),
+                        fetchStockList(stockList.value.page),
+                        fetchWencaiList(wencaiList.value.page),
+                        fetchRankings()
+                    ]);
+                };
+
+                // Methods exposed to template
+                const changeStockPage = (newPage) => {
+                    fetchStockList(newPage);
+                };
+
+                const changeWencaiPage = (newPage) => {
+                    fetchWencaiList(newPage);
+                };
+
+                // Extra Info Functions
+                const fetchExtraInfo = async () => {
+                    if (!stockList.value.items || stockList.value.items.length === 0) return;
+                    
+                    console.log('Fetching extra info for', stockList.value.items.length, 'stocks');
+                    
+                    // Fetch in parallel
+                    const promises = stockList.value.items.map(async (stock) => {
+                        try {
+                            const res = await axios.get('/api/v1/dashboard/stocks/extra', {
+                                params: { code: stock.code }
+                            });
+                            if (res.data.success) {
+                                // Update stock object reactively
+                                Object.assign(stock, {
+                                    extra: res.data.data, // Contains sparkline_data
+                                    tdx_plugin_score: res.data.data.tdx_plugin_score,
+                                    sync_250d_kline: res.data.data.has_history_data, 
+                                    sync_incremental: res.data.data.has_incremental_data
+                                });
+                                // console.log(`Loaded extra for ${stock.code}`, res.data.data);
+                            }
+                        } catch (error) {
+                            console.error(`Failed to fetch extra info for ${stock.code}:`, error);
+                        }
+                    });
+                    
+                    await Promise.all(promises);
+                    console.log('Finished fetching extra info');
+                };
+
+                const syncTdx = async (stock) => {
+                    try {
+                        const res = await axios.post(`/api/v1/dashboard/stocks/${stock.code}/sync-tdx`);
+                        if (res.data.success) {
+                            // Update score
+                            stock.tdx_plugin_score = res.data.data.score;
+                            alert(`同步成功，TDX评分: ${res.data.data.score}`);
+                        } else {
+                            alert('同步失败: ' + res.data.message);
+                        }
+                    } catch (error) {
+                        console.error('Failed to sync TDX:', error);
+                        alert('同步请求失败');
+                    }
+                };
+
+                const getSparklinePath = (data) => {
+                    if (!data || !Array.isArray(data) || data.length < 2) return '';
+                    const width = 60;
+                    const height = 20;
+                    const min = Math.min(...data);
+                    const max = Math.max(...data);
+                    const range = max - min || 1;
+                    
+                    // Points
+                    const points = data.map((val, i) => {
+                        const x = (i / (data.length - 1)) * width;
+                        const y = height - ((val - min) / range) * height;
+                        return `${x.toFixed(1)},${y.toFixed(1)}`;
+                    });
+                    
+                    return `M ${points.join(' L ')}`;
+                };
+
+                // Lifecycle
+                onMounted(() => {
+                    initDates();
+                    refreshAll();
+                    
+                    // Auto refresh data every 5 mins
+                    refreshInterval.value = setInterval(refreshAll, REFRESH_DELAY);
+                    
+                    // Update timer display every second
+                    refreshTimer.value = setInterval(updateTimerDisplay, 1000);
+                    updateTimerDisplay();
+                });
+
+                onUnmounted(() => {
+                    if (refreshInterval.value) clearInterval(refreshInterval.value);
+                    if (refreshTimer.value) clearInterval(refreshTimer.value);
+                });
+
+                return {
+                    stats,
+                    activeTab,
+                    stockList,
+                    wencaiList,
+                    wencaiTagFilter,
+                    rankingStats,
+                    toggleStockStatus,
+                    moveToWencai,
+                    moveToStockInfo,
+                    nextRefreshTime,
+                    fetchStats,
+                    fetchStockList,
+                    fetchWencaiList,
+                    fetchRankings,
+                    fetchGrowthRanking,
+                    fetchTotalRanking,
+                    navigateToTestTool,
+                    changeStockPage,
+                    changeWencaiPage,
+                    formatDateTime,
+                    formatBonusItems,
+                    formatRuleScores,
+                    getSparklinePath,
+                    syncTdx
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

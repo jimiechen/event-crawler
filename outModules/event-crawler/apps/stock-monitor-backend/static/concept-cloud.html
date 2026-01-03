@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>问财概念云图</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="/static/js/navbar.js"></script>
+    <style>
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 3px solid #3498db;
+            width: 20px;
+            height: 20px;
+            -webkit-animation: spin 2s linear infinite; /* Safari */
+            animation: spin 2s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hidden { display: none; }
+    </style>
+<script src="/static/js/custom-alert.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">问财概念云图</h1>
+                <p class="text-gray-600 mt-2">展示市场热点概念及关联股票</p>
+            </div>
+        </header>
+
+        <!-- Filters -->
+        <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <div class="flex flex-wrap gap-4 items-end">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">开始日期</label>
+                    <input type="date" id="filterStartDate" class="mt-1 block w-40 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">结束日期</label>
+                    <input type="date" id="filterEndDate" class="mt-1 block w-40 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">搜索概念</label>
+                    <input type="text" id="filterKeyword" placeholder="输入概念名称..." class="mt-1 block w-48 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm border p-2">
+                </div>
+                <button id="btnSearch" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded flex items-center">
+                    <span id="searchLoadingIcon" class="hidden spinner border-white mr-2" style="width:16px;height:16px;"></span>
+                    查询
+                </button>
+            </div>
+        </div>
+
+        <!-- Concept Cloud View -->
+        <div class="space-y-6">
+            <!-- Concept List Table -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="p-4 border-b bg-white flex justify-between items-center">
+                    <h2 class="text-xl font-semibold">概念列表 (<span id="listCount">0</span>)</h2>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">日期</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">概念名称</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">关联股票数量</th>
+                                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="conceptListBody" class="bg-white divide-y divide-gray-200">
+                            <!-- Rows inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Pagination -->
+                <div id="listPagination" class="p-4 border-t bg-gray-50 flex justify-between items-center hidden">
+                    <button id="btnPrevList" class="px-3 py-1 border rounded text-sm bg-white disabled:opacity-50">上一页</button>
+                    <span id="pageInfoList" class="text-sm text-gray-600">第 1 页</span>
+                    <button id="btnNextList" class="px-3 py-1 border rounded text-sm bg-white disabled:opacity-50">下一页</button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow p-6">
+                <div class="flex justify-between items-center mb-6">
+                    <h2 class="text-xl font-semibold flex items-center">
+                        <span class="text-red-500 mr-2">🏷️</span> 概念云图
+                    </h2>
+                </div>
+                
+                <div class="mb-4 text-sm text-gray-600 flex items-center space-x-4">
+                    <span>图例说明：</span>
+                    <span class="ml-4">圆圈大小代表关联股票数量</span>
+                </div>
+
+                <div id="cloudContainer" class="relative w-full h-[600px] border border-gray-100 rounded bg-gray-50 flex items-center justify-center overflow-hidden">
+                    <div id="cloudPlaceholder" class="text-gray-400">请点击"查询"获取概念云图</div>
+                    
+                    <!-- Loading Indicator -->
+                    <div id="cloudLoading" class="hidden absolute inset-0 flex items-center justify-center bg-white bg-opacity-75 z-20">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                    </div>
+
+                    <svg id="conceptCloudSvg" class="w-full h-full"></svg>
+                    
+                    <!-- Tooltip -->
+                    <div id="cloudTooltip" class="hidden absolute z-10 bg-black bg-opacity-80 text-white text-xs rounded p-2 pointer-events-none transform -translate-x-1/2 -translate-y-full mt-[-10px]"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Concept Detail Modal -->
+        <div id="conceptDetailModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full flex items-center justify-center z-50">
+            <div class="relative p-5 border w-full max-w-2xl shadow-lg rounded-md bg-white max-h-[80vh] flex flex-col">
+                <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                    <h3 class="text-lg font-medium text-gray-900" id="modalTitle">概念详情</h3>
+                    <button id="closeModal" class="text-gray-400 hover:text-gray-500 focus:outline-none">
+                        <svg class="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="overflow-y-auto flex-grow">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">代码</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modalTableBody" class="bg-white divide-y divide-gray-200"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State ---
+        let allConceptData = [];
+        let currentConceptPage = 1; // Not really used for cloud anymore if we show all? Or keep pagination? 
+                                    // User said "Tag Cloud tab", usually clouds show everything or top N.
+                                    // But previous implementation had pagination. I'll keep it for cloud if needed, but definitely for list.
+        const cloudPageSize = 50; // Show top 50 in cloud?
+        
+        let listPage = 1;
+        const listPageSize = 20;
+
+        // --- DOM Elements ---
+        const elFilterStartDate = document.getElementById('filterStartDate');
+        const elFilterEndDate = document.getElementById('filterEndDate');
+        const elFilterKeyword = document.getElementById('filterKeyword');
+        const elBtnSearch = document.getElementById('btnSearch');
+        const elSearchLoadingIcon = document.getElementById('searchLoadingIcon');
+        
+        const elCloudPlaceholder = document.getElementById('cloudPlaceholder');
+        const elCloudLoading = document.getElementById('cloudLoading');
+        const elConceptCloudSvg = document.getElementById('conceptCloudSvg');
+        const elCloudTooltip = document.getElementById('cloudTooltip');
+        
+        const elListCount = document.getElementById('listCount');
+        const elConceptListBody = document.getElementById('conceptListBody');
+        const elListPagination = document.getElementById('listPagination');
+        const elBtnPrevList = document.getElementById('btnPrevList');
+        const elBtnNextList = document.getElementById('btnNextList');
+        const elPageInfoList = document.getElementById('pageInfoList');
+        
+        const elConceptDetailModal = document.getElementById('conceptDetailModal');
+        const elModalTitle = document.getElementById('modalTitle');
+        const elModalTableBody = document.getElementById('modalTableBody');
+        const elCloseModal = document.getElementById('closeModal');
+
+        // --- Init ---
+        function init() {
+            // Set default dates to today
+            const today = new Date().toISOString().split('T')[0];
+            elFilterStartDate.value = today;
+            elFilterEndDate.value = today;
+            
+            // Initial load
+            loadData();
+        }
+
+        // --- API ---
+        async function apiCall(url, method = 'GET', body = null, params = null) {
+            let fullUrl = url;
+            if (params) {
+                const searchParams = new URLSearchParams();
+                for (const key in params) {
+                    if (params[key] !== null && params[key] !== undefined && params[key] !== '') {
+                        searchParams.append(key, params[key]);
+                    }
+                }
+                const queryString = searchParams.toString();
+                if (queryString) {
+                    fullUrl += '?' + queryString;
+                }
+            }
+            
+            const options = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            };
+            if (body) {
+                options.body = JSON.stringify(body);
+            }
+            
+            try {
+                const res = await fetch(fullUrl, options);
+                if (!res.ok) {
+                    const errorText = await res.text();
+                    throw new Error(`API Error (${res.status}): ${errorText}`);
+                }
+                return await res.json();
+            } catch (error) {
+                console.error(error);
+                alert('请求失败: ' + error.message);
+                throw error;
+            }
+        }
+
+        // --- Actions ---
+        async function loadData() {
+            elBtnSearch.disabled = true;
+            elSearchLoadingIcon.classList.remove('hidden');
+            elCloudLoading.classList.remove('hidden');
+            elCloudPlaceholder.classList.add('hidden');
+            
+            try {
+                const params = {
+                    startDate: elFilterStartDate.value,
+                    endDate: elFilterEndDate.value,
+                    keyword: elFilterKeyword.value.trim()
+                };
+                
+                const response = await apiCall('/api/v1/wencai/concepts', 'GET', null, params);
+                allConceptData = response.data || [];
+                
+                // Sort by time desc (batch_id desc) then count desc is already done by backend?
+                // Backend: result_list.sort(key=lambda x: (x['batch_id'], x['count']), reverse=True)
+                // User requirement: "associate date and concept, sort in reverse order" -> Done by backend.
+                
+                renderCloud(allConceptData.slice(0, 100)); // Limit cloud to top 100 to avoid clutter
+                renderList(1);
+                
+            } catch (e) {
+                console.error(e);
+                elCloudPlaceholder.innerText = '加载失败: ' + e.message;
+                elCloudPlaceholder.classList.remove('hidden');
+            } finally {
+                elBtnSearch.disabled = false;
+                elSearchLoadingIcon.classList.add('hidden');
+                elCloudLoading.classList.add('hidden');
+            }
+        }
+
+        async function hideConcept(conceptName) {
+            if (!confirm(`确定要隐藏概念 "${conceptName}" 吗？隐藏后将不再显示。`)) return;
+            
+            try {
+                await apiCall(`/api/v1/wencai/concepts/${encodeURIComponent(conceptName)}/hide`, 'POST');
+                // Remove from local data
+                allConceptData = allConceptData.filter(d => d.name !== conceptName);
+                renderCloud(allConceptData.slice(0, 100));
+                renderList(listPage);
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        // --- Rendering ---
+        function renderCloud(data) {
+            const svg = d3.select("#conceptCloudSvg");
+            svg.selectAll("*").remove();
+            
+            if (data.length === 0) {
+                elCloudPlaceholder.innerText = '暂无数据';
+                elCloudPlaceholder.classList.remove('hidden');
+                return;
+            }
+            
+            const width = svg.node().clientWidth || 800;
+            const height = svg.node().clientHeight || 600;
+            
+            // Pack layout
+            const pack = d3.pack()
+                .size([width, height])
+                .padding(3);
+            
+            // Hierarchy
+            const root = d3.hierarchy({children: data})
+                .sum(d => d.count)
+                .sort((a, b) => b.value - a.value);
+            
+            const nodes = pack(root).leaves();
+            
+            const g = svg.append("g");
+            
+            // Circles
+            const circles = g.selectAll("circle")
+                .data(nodes)
+                .join("circle")
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y)
+                .attr("r", d => d.r)
+                .attr("fill", "#60a5fa") // blue-400
+                .attr("fill-opacity", 0.7)
+                .attr("stroke", "#fff")
+                .attr("stroke-width", 1)
+                .style("cursor", "pointer")
+                .on("mouseover", function(event, d) {
+                    d3.select(this).attr("stroke", "#000").attr("stroke-width", 2);
+                    showTooltip(event, d.data);
+                })
+                .on("mouseout", function() {
+                    d3.select(this).attr("stroke", "#fff").attr("stroke-width", 1);
+                    hideTooltip();
+                })
+                .on("click", (event, d) => showConceptDetails(d.data));
+                
+            // Labels (only if radius is big enough)
+            g.selectAll("text")
+                .data(nodes)
+                .join("text")
+                .attr("x", d => d.x)
+                .attr("y", d => d.y)
+                .attr("text-anchor", "middle")
+                .attr("dominant-baseline", "middle")
+                .style("font-size", d => Math.min(d.r / 2, 14) + "px")
+                .style("fill", "#fff")
+                .style("pointer-events", "none")
+                .style("text-shadow", "1px 1px 2px #000")
+                .text(d => d.r > 15 ? d.data.name : "");
+        }
+        
+        function renderList(page) {
+            listPage = page;
+            const start = (page - 1) * listPageSize;
+            const end = start + listPageSize;
+            const pageData = allConceptData.slice(start, end);
+            
+            elConceptListBody.innerHTML = '';
+            elListCount.textContent = allConceptData.length;
+            
+            pageData.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.date || '-'}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 cursor-pointer hover:text-blue-600" onclick='showConceptDetails(${JSON.stringify(item).replace(/'/g, "&#39;")})'>${item.name}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${item.count}</td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        <button class="text-red-600 hover:text-red-900" onclick="hideConcept('${item.name}')">隐藏</button>
+                    </td>
+                `;
+                elConceptListBody.appendChild(tr);
+            });
+            
+            // Pagination
+            const totalPages = Math.ceil(allConceptData.length / listPageSize);
+            if (totalPages > 1) {
+                elListPagination.classList.remove('hidden');
+                elPageInfoList.textContent = `第 ${page} / ${totalPages} 页`;
+                elBtnPrevList.disabled = page <= 1;
+                elBtnNextList.disabled = page >= totalPages;
+            } else {
+                elListPagination.classList.add('hidden');
+            }
+        }
+        
+        // --- Tooltip & Modal ---
+        function openTestTool(code) {
+            const url = `/static/test-tool.html?stockCode=${code}&tab=baseline`;
+            const title = `测试工具-${code}`;
+            
+            if (window.self !== window.top) {
+                window.parent.postMessage({
+                    type: 'OPEN_TAB',
+                    url: url,
+                    title: title
+                }, '*');
+            } else if (window.OPEN_TAB_Function) {
+                window.OPEN_TAB_Function(url, title);
+            } else {
+                 window.open(url, '_blank');
+            }
+        }
+
+        function showTooltip(event, data) {
+            elCloudTooltip.innerHTML = `
+                <div class="font-bold">${data.name}</div>
+                <div>股票数: ${data.count}</div>
+                <div>日期: ${data.date}</div>
+            `;
+            elCloudTooltip.style.left = event.pageX + "px";
+            elCloudTooltip.style.top = event.pageY + "px";
+            elCloudTooltip.classList.remove('hidden');
+        }
+        
+        function hideTooltip() {
+            elCloudTooltip.classList.add('hidden');
+        }
+        
+        function showConceptDetails(data) {
+            elModalTitle.textContent = `${data.name} - 股票列表 (${data.stocks.length})`;
+            // Remove change column from modal as well since backend doesn't return it
+            const tableHead = elConceptDetailModal.querySelector('thead tr');
+            if (tableHead) {
+                tableHead.innerHTML = `
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">代码</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
+                `;
+            }
+
+            elModalTableBody.innerHTML = data.stocks.map(stock => {
+                return `
+                    <tr>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-blue-600 cursor-pointer hover:underline" onclick="openTestTool('${stock.code}')">${stock.code}</td>
+                        <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500">${stock.name}</td>
+                    </tr>
+                `;
+            }).join('');
+            elConceptDetailModal.classList.remove('hidden');
+        }
+        
+        // --- Event Listeners ---
+        elBtnSearch.addEventListener('click', loadData);
+        
+        elBtnPrevList.addEventListener('click', () => {
+            if (listPage > 1) renderList(listPage - 1);
+        });
+        
+        elBtnNextList.addEventListener('click', () => {
+            const totalPages = Math.ceil(allConceptData.length / listPageSize);
+            if (listPage < totalPages) renderList(listPage + 1);
+        });
+        
+        elCloseModal.addEventListener('click', () => {
+            elConceptDetailModal.classList.add('hidden');
+        });
+        
+        // Close modal when clicking outside
+        elConceptDetailModal.addEventListener('click', (e) => {
+            if (e.target === elConceptDetailModal) {
+                elConceptDetailModal.classList.add('hidden');
+            }
+        });
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

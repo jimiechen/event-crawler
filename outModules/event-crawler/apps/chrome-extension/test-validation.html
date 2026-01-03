@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>功能验证测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-result { margin: 10px 0; padding: 10px; border-radius: 5px; }
+        .success { background-color: #d4edda; border: 1px solid #c3e6cb; }
+        .error { background-color: #f8d7da; border: 1px solid #f5c6cb; }
+        pre { background: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>功能验证测试</h1>
+    
+    <div id="testResults"></div>
+    
+    <script>
+        // 测试数据
+        const testData = {
+            realExample: `<tr attr="15,1-1,180" data-lt="league" data-matchid="1280852" class="nolink">
+                <td class="gray6 pl10"><p style="width:50px;height:18px;overflow: hidden;margin:auto">世欧预</p><p class="gray9">25-09-05</p></td>
+                <td><div class="team-name-l"><b class="fontboldno">荷兰</b>
+                    <span>
+                        <i>世</i>
+                        <i>7</i>
+                    </span>
+                </div></td>
+                <td class="font14 team-score">
+                    <a href="/match/history.php?MatchID=1280852&from=%2Fjczq%2F">1-1</a>
+                </td>
+                <td><div class="team-name-r"><b class="fontbold fontblack">波兰</b>
+                    <span>
+                        <i>37</i>
+                        <i>世</i>
+                    </span>
+                </div></td>
+                <td class="panlu red">赢</td>
+            </tr>`,
+            
+            statsExample: `
+                <div class="team-stats">
+                    <p>荷兰队近期战绩：近10场3胜2平5负，主场3胜1平2负</p>
+                    <p>波兰队近期战绩：近10场2胜3平5负，主场1胜2平3负</p>
+                </div>
+            `
+        };
+
+        // 正则表达式配置（只测试关键字段）
+        const regexConfig = {
+            home_recent_match_id: /data-matchid="([^"]+)"/g,
+            home_recent_league: /<p style="width:50px;height:18px;overflow: hidden;margin:auto">([^<]+)<\/p>/g,
+            home_recent_date: /<p class="gray9">([^<]+)<\/p>/g,
+            home_recent_home_team: /<b class="fontboldno">([^<]+)<\/b>/g,
+            home_recent_away_team: /<b class="fontbold fontblack">([^<]+)<\/b>/g,
+            home_recent_score: /<a href="[^"]*">([^<]+)<\/a>/g,
+            home_recent_home_team_rank: /<div class="team-name-l">[\s\S]*?<span>[\s\S]*?<i>[^0-9]*<\/i>[\s\S]*?<i>(\d+)<\/i>/g,
+            home_recent_away_team_rank: /<div class="team-name-r">[\s\S]*?<span>[\s\S]*?<i>(\d+)<\/i>/g,
+            home_recent_asian_handicap_result: /<td class="panlu[^"]*">[\s\S]*?([赢走输])[\s\S]*?<\/td>/g,
+            home_team_recent_stats: /(近\d+场\d+胜\d+平\d+负)/g,
+            home_team_home_stats: /(主场\d+胜\d+平\d+负)/g
+        };
+
+        function runValidationTest() {
+            const input = Object.values(testData).join('\n\n');
+            const jsonData = {};
+            const results = [];
+            
+            // 测试每个字段是否返回单个值
+            Object.entries(regexConfig).forEach(([key, regex]) => {
+                let match;
+                regex.lastIndex = 0;
+                match = regex.exec(input);
+                
+                // 如果有匹配项，取第一个捕获组，否则设为默认值"-"
+                jsonData[key] = (match && match[1]) ? match[1].trim() : "-";
+            });
+            
+            // 验证结果
+            const expectedValues = {
+                home_recent_match_id: "1280852",
+                home_recent_league: "世欧预",
+                home_recent_date: "25-09-05",
+                home_recent_home_team: "荷兰",
+                home_recent_away_team: "波兰",
+                home_recent_score: "1-1",
+                home_recent_home_team_rank: "7",
+                home_recent_away_team_rank: "37",
+                home_recent_asian_handicap_result: "赢",
+                home_team_recent_stats: "近10场3胜2平5负",
+                home_team_home_stats: "主场3胜1平2负"
+            };
+            
+            // 检查每个字段
+            Object.entries(expectedValues).forEach(([key, expected]) => {
+                const actual = jsonData[key];
+                const isCorrect = actual === expected;
+                results.push({
+                    test: `${key} 字段值测试`,
+                    expected: expected,
+                    actual: actual,
+                    passed: isCorrect
+                });
+            });
+            
+            // 检查是否所有值都是字符串（不是数组）
+            const allStrings = Object.values(jsonData).every(value => typeof value === 'string');
+            results.push({
+                test: "所有字段值都是字符串（非数组）",
+                expected: "true",
+                actual: allStrings.toString(),
+                passed: allStrings
+            });
+            
+            // 检查缺省值
+            const missingFieldTest = regexConfig.home_recent_match_id.exec("no match here");
+            const defaultValue = missingFieldTest && missingFieldTest[1] ? missingFieldTest[1].trim() : "-";
+            results.push({
+                test: "缺省值为'-'",
+                expected: "-",
+                actual: defaultValue,
+                passed: defaultValue === "-"
+            });
+            
+            displayResults(results, jsonData);
+        }
+        
+        function displayResults(results, jsonData) {
+            const container = document.getElementById('testResults');
+            let html = '<h2>测试结果</h2>';
+            
+            results.forEach(result => {
+                const className = result.passed ? 'success' : 'error';
+                const status = result.passed ? '✅ 通过' : '❌ 失败';
+                html += `
+                    <div class="test-result ${className}">
+                        <strong>${result.test}</strong> ${status}<br>
+                        期望值: ${result.expected}<br>
+                        实际值: ${result.actual}
+                    </div>
+                `;
+            });
+            
+            html += '<h3>生成的JSON数据</h3>';
+            html += `<pre>${JSON.stringify(jsonData, null, 2)}</pre>`;
+            
+            container.innerHTML = html;
+        }
+        
+        // 页面加载时自动运行测试
+        window.onload = runValidationTest;
+    </script>
+</body>
+</html>

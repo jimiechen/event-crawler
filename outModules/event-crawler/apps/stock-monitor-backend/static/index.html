@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票监控系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        html, body {
+            height: 100%;
+            overflow: hidden; /* Prevent body scroll, handle in iframes */
+        }
+        #app-container {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 64px); /* Subtract navbar height */
+        }
+        #tabs-container {
+            flex: 0 0 auto;
+            overflow-x: auto;
+            scrollbar-width: thin;
+        }
+        #content-container {
+            flex: 1;
+            position: relative;
+            background-color: #f3f4f6;
+        }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .tab-item {
+            user-select: none;
+            transition: all 0.2s;
+        }
+        .tab-item.active {
+            background-color: white;
+            border-bottom: 2px solid #2563eb;
+            color: #1f2937;
+        }
+        .tab-item:not(.active) {
+            background-color: #f3f4f6;
+            color: #6b7280;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .tab-item:hover:not(.active) {
+            background-color: #e5e7eb;
+        }
+    </style>
+<script src="/static/js/custom-alert.js"></script>
+</head>
+<body class="bg-gray-100">
+    <!-- Navbar will be injected here by navbar.js -->
+
+    <div id="app-container">
+        <!-- Tabs Bar -->
+        <div id="tabs-container" class="flex items-end px-2 pt-2 bg-gray-200 border-b border-gray-300 gap-1">
+            <!-- Tabs will be injected here -->
+        </div>
+
+        <!-- Content Area -->
+        <div id="content-container">
+            <!-- Iframes will be injected here -->
+        </div>
+    </div>
+
+    <!-- Context Menu for Tabs -->
+    <div id="tab-context-menu" class="hidden fixed bg-white shadow-lg rounded-md py-1 z-50 border border-gray-200 text-sm">
+        <button id="close-tab-btn" class="block w-full text-left px-4 py-2 hover:bg-gray-100 text-red-600">关闭标签</button>
+        <button id="close-other-tabs-btn" class="block w-full text-left px-4 py-2 hover:bg-gray-100">关闭其他标签</button>
+        <button id="close-all-tabs-btn" class="block w-full text-left px-4 py-2 hover:bg-gray-100">关闭所有标签</button>
+        <button id="refresh-tab-btn" class="block w-full text-left px-4 py-2 hover:bg-gray-100">刷新标签</button>
+    </div>
+
+    <script>
+        // State
+        let tabs = [];
+        let activeTabId = null;
+
+        // DOM Elements
+        const tabsContainer = document.getElementById('tabs-container');
+        const contentContainer = document.getElementById('content-container');
+        const contextMenu = document.getElementById('tab-context-menu');
+
+        // Initialize
+        function init() {
+            // Open default tab
+            openTab('/static/dashboard.html', '首页', false); // false = not closable for home? Maybe allow closing but re-open if empty.
+            
+            // Setup global function for navbar.js
+            window.OPEN_TAB_Function = function(url, title) {
+                openTab(url, title);
+            };
+
+            // Listen for messages from iframes
+            window.addEventListener('message', function(event) {
+                if (event.data && event.data.type === 'OPEN_TAB') {
+                    openTab(event.data.url, event.data.title);
+                }
+            });
+
+            // Context Menu Logic
+            document.addEventListener('click', () => contextMenu.classList.add('hidden'));
+            
+            document.getElementById('close-tab-btn').onclick = () => {
+                if (contextMenu.targetTabId) closeTab(contextMenu.targetTabId);
+            };
+            document.getElementById('close-other-tabs-btn').onclick = () => {
+                if (contextMenu.targetTabId) closeOtherTabs(contextMenu.targetTabId);
+            };
+            document.getElementById('close-all-tabs-btn').onclick = () => {
+                closeAllTabs();
+            };
+            document.getElementById('refresh-tab-btn').onclick = () => {
+                if (contextMenu.targetTabId) refreshTab(contextMenu.targetTabId);
+            };
+        }
+
+        function generateId() {
+            return 'tab-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        }
+
+        function openTab(url, title, closable = true) {
+            // Check if tab with same URL already exists
+            const existingTab = tabs.find(t => t.url === url);
+            if (existingTab) {
+                activateTab(existingTab.id);
+                return;
+            }
+
+            const id = generateId();
+            const tab = { id, url, title, closable };
+            tabs.push(tab);
+            
+            renderTab(tab);
+            createIframe(tab);
+            activateTab(id);
+        }
+
+        function renderTab(tab) {
+            const el = document.createElement('div');
+            el.className = 'tab-item flex items-center px-4 py-2 rounded-t-lg cursor-pointer text-sm font-medium min-w-[120px] max-w-[200px] justify-between group';
+            el.dataset.id = tab.id;
+            el.innerHTML = `
+                <span class="truncate mr-2" title="${tab.title}">${tab.title}</span>
+                ${tab.closable ? `<span class="close-btn opacity-0 group-hover:opacity-100 hover:bg-gray-200 rounded-full p-0.5 transition-opacity text-gray-500 hover:text-red-500">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </span>` : ''}
+            `;
+
+            el.addEventListener('click', (e) => {
+                if (e.target.closest('.close-btn')) {
+                    e.stopPropagation();
+                    closeTab(tab.id);
+                } else {
+                    activateTab(tab.id);
+                }
+            });
+
+            el.addEventListener('contextmenu', (e) => {
+                e.preventDefault();
+                contextMenu.style.left = e.clientX + 'px';
+                contextMenu.style.top = e.clientY + 'px';
+                contextMenu.classList.remove('hidden');
+                contextMenu.targetTabId = tab.id;
+            });
+
+            tabsContainer.appendChild(el);
+        }
+
+        function createIframe(tab) {
+            const iframe = document.createElement('iframe');
+            iframe.src = tab.url;
+            iframe.dataset.id = tab.id;
+            iframe.style.display = 'none'; // Hidden by default
+            contentContainer.appendChild(iframe);
+        }
+
+        function activateTab(id) {
+            if (activeTabId === id) return;
+            activeTabId = id;
+
+            // Update UI
+            document.querySelectorAll('.tab-item').forEach(el => {
+                if (el.dataset.id === id) {
+                    el.classList.add('active');
+                    el.classList.remove('border-b', 'border-gray-300'); // Remove bottom border to merge with content
+                    
+                    // Scroll into view if needed
+                    el.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+
+            // Show Iframe
+            document.querySelectorAll('iframe').forEach(el => {
+                el.style.display = el.dataset.id === id ? 'block' : 'none';
+            });
+        }
+
+        function closeTab(id) {
+            const index = tabs.findIndex(t => t.id === id);
+            if (index === -1) return;
+            
+            // Prevent closing the last tab if you want, or handle empty state
+            // If it's the only tab, maybe redirect to home or keep it?
+            // Let's allow closing everything, but maybe auto-open home if empty?
+            
+            const tab = tabs[index];
+            if (!tab.closable && tabs.length > 1) {
+                // If trying to close non-closable (like Home), maybe don't allow unless it's the only one?
+                // Actually user requirement: "all pages open in new tab". Home might be closable too.
+                // Let's make everything closable for now except maybe the first one if we want strict logic.
+                // But user said "support multi-tab coexistence".
+            }
+
+            // Remove DOM
+            const tabEl = tabsContainer.querySelector(`.tab-item[data-id="${id}"]`);
+            if (tabEl) tabEl.remove();
+
+            const iframeEl = contentContainer.querySelector(`iframe[data-id="${id}"]`);
+            if (iframeEl) iframeEl.remove();
+
+            // Update State
+            tabs.splice(index, 1);
+
+            // Activate neighbor if active was closed
+            if (activeTabId === id) {
+                if (tabs.length > 0) {
+                    // Try right, then left
+                    const nextTab = tabs[index] || tabs[index - 1];
+                    activateTab(nextTab.id);
+                } else {
+                    activeTabId = null;
+                    // Auto open home if all closed?
+                    openTab('/static/dashboard.html', '首页', false);
+                }
+            }
+        }
+
+        function closeOtherTabs(id) {
+            const tabsToClose = tabs.filter(t => t.id !== id);
+            tabsToClose.forEach(t => closeTab(t.id));
+        }
+
+        function closeAllTabs() {
+            [...tabs].forEach(t => closeTab(t.id));
+        }
+        
+        function refreshTab(id) {
+            const iframe = contentContainer.querySelector(`iframe[data-id="${id}"]`);
+            if (iframe) {
+                iframe.contentWindow.location.reload();
+            }
+        }
+
+        // Run
+        init();
+
+    </script>
+    <script src="/static/js/navbar.js"></script>
+</body>
+</html>

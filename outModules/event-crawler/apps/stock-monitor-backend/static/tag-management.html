@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>标签管理系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/vue.global.js"></script>
+    <script src="/static/axios.min.js"></script>
+    <script src="/static/js/navbar.js"></script>
+    <style>
+        [v-cloak] { display: none; }
+        .modal-mask {
+            position: fixed;
+            z-index: 9998;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            transition: opacity 0.3s ease;
+            justify-content: center;
+            align-items: center;
+        }
+    </style>
+<script src="/static/js/custom-alert.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+    <div id="app" v-cloak class="container mx-auto px-4 py-8">
+        
+        <!-- Header -->
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">标签管理系统</h1>
+                <p class="text-gray-600 mt-2">管理股票标签、分值及关联关系</p>
+            </div>
+            <div class="flex space-x-4 bg-white p-1 rounded shadow">
+                <button @click="viewMode = 'tags'" :class="{'bg-blue-500 text-white': viewMode === 'tags', 'text-gray-600 hover:bg-gray-100': viewMode !== 'tags'}" class="px-4 py-2 rounded transition">
+                    🏷️ 标签管理
+                </button>
+                <button @click="viewMode = 'stock_query'" :class="{'bg-blue-500 text-white': viewMode === 'stock_query', 'text-gray-600 hover:bg-gray-100': viewMode !== 'stock_query'}" class="px-4 py-2 rounded transition">
+                    🔍 关联查询
+                </button>
+                <button @click="viewMode = 'logs'" :class="{'bg-blue-500 text-white': viewMode === 'logs', 'text-gray-600 hover:bg-gray-100': viewMode !== 'logs'}" class="px-4 py-2 rounded transition">
+                    📝 操作日志
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div v-if="viewMode === 'tags'">
+            <!-- Controls -->
+            <div class="mb-6 flex justify-between items-center bg-white p-4 rounded shadow">
+                <div class="flex space-x-4 items-center">
+                    <input v-model="searchQuery" @keyup.enter="fetchTags" type="text" placeholder="搜索标签名称..." class="border border-gray-300 rounded px-3 py-2 w-48 focus:outline-none focus:border-blue-500">
+                    
+                    <div class="flex items-center space-x-2">
+                        <label class="text-sm text-gray-600">日期:</label>
+                        <input v-model="searchDate" type="date" min="2020-01-01" :max="new Date().toISOString().split('T')[0]" class="border border-gray-300 rounded px-3 py-2 focus:outline-none focus:border-blue-500">
+                    </div>
+
+                    <button @click="fetchTags" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+                        搜索
+                    </button>
+                </div>
+                <div class="flex space-x-4">
+                    <button @click="openCreateModal" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded flex items-center">
+                        <span class="mr-2">➕</span> 新建标签
+                    </button>
+                    <button @click="openBatchModal" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded flex items-center">
+                        <span class="mr-2">📦</span> 批量导入
+                    </button>
+                </div>
+            </div>
+
+            <!-- Tag List -->
+            <div class="bg-white rounded shadow overflow-hidden">
+                <table class="min-w-full leading-normal">
+                    <thead>
+                        <tr>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ID</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">名称</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">分值</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">股票池</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">创建时间</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">操作</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="tag in tags" :key="tag.id" class="hover:bg-gray-50">
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ tag.id }}</td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">
+                                <span class="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">{{ tag.name }}</span>
+                            </td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm font-bold text-gray-700">{{ tag.score }}</td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">
+                                <div class="flex flex-wrap gap-1 max-w-md">
+                                    <span v-for="stock in (tag.stocks || [])" :key="stock.code" 
+                                          @click="handleStockClick(stock, tag)"
+                                          class="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded border border-blue-100 cursor-pointer hover:bg-blue-100 flex items-center inline-flex gap-1"
+                                          :title="stock.code">
+                                        <span>{{ stock.name }}</span>
+                                        <span v-if="stock.daily_change !== undefined && stock.daily_change !== null" 
+                                              :class="{'text-red-600 font-bold': stock.daily_change > 0, 'text-green-600 font-bold': stock.daily_change < 0, 'text-gray-600': stock.daily_change == 0}">
+                                            {{ stock.daily_change > 0 ? '+' : '' }}{{ stock.daily_change }}%
+                                        </span>
+                                        <button @click.stop="softDeleteStock(stock)" class="ml-1 text-gray-400 hover:text-red-500 font-bold px-1 rounded hover:bg-red-50 focus:outline-none" title="从股票池移除">
+                                            ×
+                                        </button>
+                                    </span>
+                                    <span v-if="!tag.stocks || tag.stocks.length === 0" class="text-gray-400 italic text-xs">
+                                        暂无关联
+                                    </span>
+                                </div>
+                            </td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ formatDate(tag.created_at) }}</td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm space-x-2">
+                                <button @click="openEditModal(tag)" class="text-blue-600 hover:text-blue-900">编辑</button>
+                                <button @click="openStocksModal(tag)" class="text-green-600 hover:text-green-900">关联</button>
+                                <button @click="deleteTag(tag)" class="text-red-600 hover:text-red-900">删除</button>
+                            </td>
+                        </tr>
+                        <tr v-if="tags.length === 0">
+                            <td colspan="6" class="px-5 py-5 border-b border-gray-200 text-sm text-center text-gray-500">暂无数据</td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <!-- Pagination -->
+                <div class="px-5 py-5 bg-white border-t flex flex-col xs:flex-row items-center xs:justify-between">
+                    <span class="text-xs xs:text-sm text-gray-900">
+                        显示 {{ (pagination.page - 1) * pagination.pageSize + 1 }} 到 {{ Math.min(pagination.page * pagination.pageSize, pagination.total) }} 条，共 {{ pagination.total }} 条
+                    </span>
+                    <div class="inline-flex mt-2 xs:mt-0">
+                        <button @click="changePage(pagination.page - 1)" :disabled="pagination.page <= 1" class="text-sm bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-l disabled:opacity-50">
+                            上一页
+                        </button>
+                        <button @click="changePage(pagination.page + 1)" :disabled="pagination.page * pagination.pageSize >= pagination.total" class="text-sm bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-r disabled:opacity-50">
+                            下一页
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stock Query View -->
+        <div v-else-if="viewMode === 'stock_query'">
+            <div class="bg-white rounded shadow p-6">
+                <div class="flex space-x-4 mb-8">
+                    <input v-model="stockQueryCode" @keyup.enter="searchStockTags" type="text" placeholder="输入股票代码 (例如: 000001)" class="border border-gray-300 rounded px-3 py-2 w-64 focus:outline-none focus:border-blue-500">
+                    <button @click="searchStockTags" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded">
+                        查询
+                    </button>
+                </div>
+
+                <div v-if="stockResult" class="border rounded-lg p-6 bg-gray-50">
+                    <div class="flex justify-between items-start mb-6">
+                        <div>
+                            <h2 class="text-2xl font-bold text-gray-800">{{ stockResult.stock_code }}</h2>
+                            <p class="text-gray-600">关联标签数: {{ stockResult.tags.length }}</p>
+                        </div>
+                        <div class="text-right">
+                            <p class="text-sm text-gray-500">总分值</p>
+                            <p class="text-4xl font-bold text-blue-600">{{ stockResult.total_score }}</p>
+                        </div>
+                    </div>
+
+                    <div v-if="stockResult.tags.length > 0">
+                        <h3 class="text-lg font-bold mb-4">标签列表</h3>
+                        <div class="flex flex-wrap gap-3">
+                            <div v-for="tag in stockResult.tags" :key="tag.id" class="bg-white border rounded px-4 py-2 flex items-center shadow-sm">
+                                <span class="font-medium text-gray-800 mr-2">{{ tag.name }}</span>
+                                <span class="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-1 rounded">{{ tag.score }}</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-else class="text-center py-8 text-gray-500">
+                        暂无关联标签
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs View -->
+        <div v-else-if="viewMode === 'logs'">
+             <div class="bg-white rounded shadow overflow-hidden">
+                <div class="p-4 border-b flex justify-between items-center">
+                    <h2 class="text-xl font-bold">操作日志</h2>
+                    <button @click="fetchLogs" class="text-blue-600 hover:underline">刷新</button>
+                </div>
+                <table class="min-w-full leading-normal">
+                    <thead>
+                        <tr>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">时间</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">操作人</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">动作</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">对象类型</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">对象ID</th>
+                            <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">详情</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr v-for="log in logs" :key="log.id" class="hover:bg-gray-50">
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ formatDate(log.created_at) }}</td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ log.operator }}</td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">
+                                <span :class="getActionColor(log.action)" class="px-2 py-1 rounded text-white text-xs">{{ log.action }}</span>
+                            </td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ log.target_type }}</td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ log.target_id }}</td>
+                            <td class="px-5 py-5 border-b border-gray-200 text-sm truncate max-w-xs" :title="JSON.stringify(log.details)">
+                                {{ JSON.stringify(log.details) }}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                 <!-- Pagination for Logs -->
+                <div class="px-5 py-5 bg-white border-t flex flex-col xs:flex-row items-center xs:justify-between">
+                     <div class="inline-flex mt-2 xs:mt-0">
+                        <button @click="changeLogPage(logsPagination.page - 1)" :disabled="logsPagination.page <= 1" class="text-sm bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-l disabled:opacity-50">
+                            上一页
+                        </button>
+                        <button @click="changeLogPage(logsPagination.page + 1)" :disabled="logsPagination.page * logsPagination.pageSize >= logsPagination.total" class="text-sm bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-2 px-4 rounded-r disabled:opacity-50">
+                            下一页
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create/Edit Modal -->
+        <div v-if="showModal" class="modal-mask">
+            <div class="bg-white rounded-lg shadow-xl w-1/3 p-6">
+                <h3 class="text-lg font-bold mb-4">{{ modalMode === 'create' ? '新建标签' : '编辑标签' }}</h3>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">标签名称</label>
+                    <input v-model="currentTag.name" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-gray-700 text-sm font-bold mb-2">分值</label>
+                    <input v-model="currentTag.score" type="number" step="0.01" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button @click="showModal = false" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">取消</button>
+                    <button @click="saveTag" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Batch Import Modal -->
+        <div v-if="showBatchModal" class="modal-mask">
+            <div class="bg-white rounded-lg shadow-xl w-1/2 p-6">
+                <h3 class="text-lg font-bold mb-4">批量导入标签</h3>
+                <p class="text-sm text-gray-600 mb-2">格式：每行一个标签，用逗号分隔名称和分值（可选）。例如：<br>高成长, 5.0<br>低估值, 3.5</p>
+                <textarea v-model="batchInput" rows="10" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline mb-4"></textarea>
+                <div class="flex justify-end space-x-3">
+                    <button @click="showBatchModal = false" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">取消</button>
+                    <button @click="submitBatch" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">导入</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stock Association Modal -->
+        <div v-if="showStocksModal" class="modal-mask">
+            <div class="bg-white rounded-lg shadow-xl w-3/4 max-w-4xl p-6 max-h-[85vh] flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-bold">关联股票 - {{ currentTag.name }}</h3>
+                    <span class="text-sm text-gray-500">共 {{ stocksPagination.total }} 只股票</span>
+                </div>
+                
+                <!-- Add Stock -->
+                <div class="mb-4 flex space-x-2">
+                    <input v-model="newStocksInput" placeholder="输入股票代码，多个用逗号分隔" class="flex-1 shadow appearance-none border rounded py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                    <button @click="addStocks" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded">添加</button>
+                </div>
+
+                <!-- Stock List -->
+                <div class="flex-1 overflow-y-auto border rounded p-4 mb-4 bg-gray-50">
+                    <div v-if="loadingStocks" class="text-center py-8">
+                        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+                        <p class="mt-2 text-gray-600">加载中...</p>
+                    </div>
+                    <div v-else class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <div v-for="stock in associatedStocks" :key="stock.code" class="bg-white border rounded px-3 py-2 flex items-center justify-between shadow-sm hover:shadow-md transition">
+                            <div @click="handleStockClick(stock)" class="flex flex-col flex-1 hover:bg-blue-50 p-1 rounded cursor-pointer group" title="点击跳转到测试工具">
+                                <span class="font-bold text-gray-800 group-hover:text-blue-600">{{ stock.name }}</span>
+                                <span class="text-xs text-gray-500 font-mono">{{ stock.code }}</span>
+                            </div>
+                            <button @click="removeStock(stock.code)" class="ml-2 text-red-400 hover:text-red-600 p-1 rounded hover:bg-red-50" title="取消关联">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div v-if="associatedStocks.length === 0" class="col-span-full text-center py-8 text-gray-500">
+                            暂无关联股票
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stock Pagination -->
+                <div class="flex justify-between items-center border-t pt-4">
+                    <div class="text-sm text-gray-600">
+                        显示 {{ (stocksPagination.page - 1) * stocksPagination.pageSize + 1 }} - {{ Math.min(stocksPagination.page * stocksPagination.pageSize, stocksPagination.total) }}
+                    </div>
+                    <div class="flex space-x-2">
+                         <button @click="changeStockPage(stocksPagination.page - 1)" :disabled="stocksPagination.page <= 1" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50">上一页</button>
+                         <button @click="changeStockPage(stocksPagination.page + 1)" :disabled="stocksPagination.page * stocksPagination.pageSize >= stocksPagination.total" class="px-3 py-1 border rounded hover:bg-gray-100 disabled:opacity-50">下一页</button>
+                    </div>
+                    <button @click="showStocksModal = false" class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded">关闭</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                const viewMode = ref('tags'); // 'tags', 'stock_query', 'logs'
+                const tags = ref([]);
+                const logs = ref([]);
+                const searchQuery = ref('');
+                const searchDate = ref('');
+                const pagination = ref({ page: 1, pageSize: 20, total: 0 });
+                const logsPagination = ref({ page: 1, pageSize: 20, total: 0 });
+
+                // Stock Query
+                const stockQueryCode = ref('');
+                const stockResult = ref(null);
+
+                // Modal States
+                const showModal = ref(false);
+                const modalMode = ref('create'); // 'create' or 'edit'
+                const currentTag = ref({ id: null, name: '', score: 0 });
+
+                const showBatchModal = ref(false);
+                const batchInput = ref('');
+
+                const showStocksModal = ref(false);
+                const associatedStocks = ref([]);
+                const loadingStocks = ref(false);
+                const newStocksInput = ref('');
+                const stocksPagination = ref({ page: 1, pageSize: 5000, total: 0 });
+
+                const api = axios.create({
+                    baseURL: '/api/v1/tags'
+                });
+
+                const fetchTags = async () => {
+                    try {
+                        const params = {
+                            page: pagination.value.page,
+                            page_size: pagination.value.pageSize,
+                            name: searchQuery.value || undefined,
+                            date_filter: searchDate.value || undefined
+                        };
+                        const res = await api.get('', { params });
+                        if (res.data.success) {
+                            tags.value = res.data.data.items;
+                            pagination.value.total = res.data.data.total;
+                        } else {
+                             alert(res.data.message || '加载标签失败');
+                        }
+                    } catch (e) {
+                        alert('加载标签失败');
+                    }
+                };
+
+
+                const fetchLogs = async () => {
+                    try {
+                         const params = {
+                            page: logsPagination.value.page,
+                            page_size: logsPagination.value.pageSize
+                        };
+                        const res = await api.get('/logs', { params });
+                        if (res.data.success) {
+                            logs.value = res.data.data.items;
+                            logsPagination.value.total = res.data.data.total;
+                        } else {
+                             alert(res.data.message || '加载日志失败');
+                        }
+                    } catch (e) {
+                        alert('加载日志失败');
+                    }
+                };
+
+                const changePage = (page) => {
+                    pagination.value.page = page;
+                    fetchTags();
+                };
+
+                const changeLogPage = (page) => {
+                    logsPagination.value.page = page;
+                    fetchLogs();
+                };
+
+                // Create/Edit
+                const openCreateModal = () => {
+                    modalMode.value = 'create';
+                    currentTag.value = { name: '', score: 0 };
+                    showModal.value = true;
+                };
+
+                const openEditModal = (tag) => {
+                    modalMode.value = 'edit';
+                    currentTag.value = { ...tag };
+                    showModal.value = true;
+                };
+
+                const saveTag = async () => {
+                    try {
+                        let res;
+                        if (modalMode.value === 'create') {
+                            res = await api.post('', currentTag.value);
+                        } else {
+                            res = await api.put(`/${currentTag.value.id}`, currentTag.value);
+                        }
+                        
+                        if (res.data.success) {
+                            alert(modalMode.value === 'create' ? '创建成功' : '更新成功');
+                            showModal.value = false;
+                            fetchTags();
+                        } else {
+                             alert(res.data.message || '操作失败');
+                        }
+                    } catch (e) {
+                        alert(e.response?.data?.message || '保存失败');
+                    }
+                };
+
+                const deleteTag = async (tag) => {
+                    if (!confirm(`确定要删除标签 "${tag.name}" 吗？`)) return;
+                    try {
+                        await api.delete(`/${tag.id}`);
+                        fetchTags();
+                    } catch (e) {
+                        alert('删除失败');
+                    }
+                };
+
+                // Batch
+                const openBatchModal = () => {
+                    batchInput.value = '';
+                    showBatchModal.value = true;
+                };
+
+                const submitBatch = async () => {
+                    const lines = batchInput.value.split('\n');
+                    const tagsToImport = [];
+                    lines.forEach(line => {
+                        const parts = line.split(/[，,]/);
+                        if (parts[0] && parts[0].trim()) {
+                            tagsToImport.push({
+                                name: parts[0].trim(),
+                                score: parts[1] ? parseFloat(parts[1]) : 0
+                            });
+                        }
+                    });
+
+                    if (tagsToImport.length === 0) return;
+
+                    try {
+                        const res = await api.post('/batch', tagsToImport);
+                        alert(`导入完成：成功 ${res.data.data.success}, 失败 ${res.data.data.failed}`);
+                        showBatchModal.value = false;
+                        fetchTags();
+                    } catch (e) {
+                        alert('批量导入失败');
+                    }
+                };
+
+                // Stocks Association
+                const fetchStockPage = async () => {
+                    loadingStocks.value = true;
+                    try {
+                        const params = {
+                            page: stocksPagination.value.page,
+                            page_size: stocksPagination.value.pageSize
+                        };
+                        const res = await api.get(`/${currentTag.value.id}/stocks`, { params });
+                        if (res.data.success) {
+                            associatedStocks.value = res.data.data.items;
+                            stocksPagination.value.total = res.data.data.total;
+                        } else {
+                            alert(res.data.message || '加载关联股票失败');
+                        }
+                    } catch (e) {
+                        alert('加载关联股票失败');
+                    } finally {
+                        loadingStocks.value = false;
+                    }
+                };
+
+                const openStocksModal = async (tag) => {
+                    currentTag.value = { ...tag };
+                    showStocksModal.value = true;
+                    associatedStocks.value = [];
+                    newStocksInput.value = '';
+                    stocksPagination.value.page = 1;
+                    await fetchStockPage();
+                };
+
+                const changeStockPage = (page) => {
+                    stocksPagination.value.page = page;
+                    fetchStockPage();
+                };
+
+                const addStocks = async () => {
+                    const codes = newStocksInput.value.split(/[，,]/).map(s => s.trim()).filter(s => s);
+                    if (codes.length === 0) return;
+
+                    try {
+                        await api.post(`/${currentTag.value.id}/stocks`, {
+                            stock_codes: codes,
+                            tag_id: currentTag.value.id
+                        });
+                        // Refresh list
+                        newStocksInput.value = '';
+                        await fetchStockPage();
+                    } catch (e) {
+                        alert('添加关联失败');
+                    }
+                };
+
+                const removeStock = async (stockCode) => {
+                    if (!confirm(`确定取消关联 ${stockCode} 吗？`)) return;
+                    try {
+                        await api.delete(`/${currentTag.value.id}/stocks`, {
+                            data: { stock_codes: [stockCode], tag_id: currentTag.value.id }
+                        });
+                        await fetchStockPage();
+                    } catch (e) {
+                        alert('取消关联失败');
+                    }
+                };
+
+                const handleStockClick = async (stock, fallbackTag = null) => {
+                    try {
+                        const res = await api.get(`/stocks/${stock.code}`);
+                        let dateTags = [];
+                        let otherTags = [];
+                        
+                        if (res.data.success && res.data.data.tags && res.data.data.tags.length > 0) {
+                            const allTags = res.data.data.tags;
+                            allTags.forEach(t => {
+                                if (/^\d{4}-\d{2}-\d{2}$/.test(t.name)) {
+                                    dateTags.push(t.name);
+                                } else {
+                                    otherTags.push(t.name);
+                                }
+                            });
+                        } else {
+                            // Fallback to fallbackTag if API returns no tags
+                            if (fallbackTag && fallbackTag.name) {
+                                if (/^\d{4}-\d{2}-\d{2}$/.test(fallbackTag.name)) {
+                                    dateTags.push(fallbackTag.name);
+                                } else {
+                                    otherTags.push(fallbackTag.name);
+                                }
+                            } else if (currentTag.value && currentTag.value.name) {
+                                 // Try currentTag as last resort (e.g. from modal)
+                                if (/^\d{4}-\d{2}-\d{2}$/.test(currentTag.value.name)) {
+                                    dateTags.push(currentTag.value.name);
+                                } else {
+                                    otherTags.push(currentTag.value.name);
+                                }
+                            }
+                        }
+                        
+                        const params = new URLSearchParams();
+                        params.append('stockCode', stock.code);
+                        
+                        if (otherTags.length > 0) {
+                            params.append('tags', otherTags.join(','));
+                        }
+                        
+                        if (dateTags.length > 0) {
+                            params.append('tagDates', dateTags.join(','));
+                        }
+                        
+                        if (window.self !== window.top) {
+                            window.parent.postMessage({
+                                type: 'OPEN_TAB',
+                                url: `/static/test-tool.html?${params.toString()}`,
+                                title: `测试工具-${stock.code}`
+                            }, '*');
+                        } else if (window.OPEN_TAB_Function) {
+                             window.OPEN_TAB_Function(`/static/test-tool.html?${params.toString()}`, `测试工具-${stock.code}`);
+                        } else {
+                             window.open(`/static/test-tool.html?${params.toString()}`, '_blank');
+                        }
+                    } catch (e) {
+                        console.error('Failed to fetch stock tags', e);
+                        // Fallback
+                        const params = new URLSearchParams();
+                        params.append('stockCode', stock.code);
+                        
+                        const tagToUse = fallbackTag || currentTag.value;
+                        
+                        if (tagToUse && tagToUse.name) {
+                            if (/^\d{4}-\d{2}-\d{2}$/.test(tagToUse.name)) {
+                                params.append('tagDates', tagToUse.name);
+                            } else {
+                                params.append('tags', tagToUse.name);
+                            }
+                        }
+                        if (window.self !== window.top) {
+                            window.parent.postMessage({
+                                type: 'OPEN_TAB',
+                                url: `/static/test-tool.html?${params.toString()}`,
+                                title: `测试工具-${stock.code}`
+                            }, '*');
+                        } else if (window.OPEN_TAB_Function) {
+                            window.OPEN_TAB_Function(`/static/test-tool.html?${params.toString()}`, `测试工具-${stock.code}`);
+                        } else {
+                            window.open(`/static/test-tool.html?${params.toString()}`, '_blank');
+                        }
+                    }
+                };
+
+                const softDeleteStock = async (stock) => {
+                if (!confirm(`确定将股票 ${stock.name} (${stock.code}) 从股票池软删除吗？`)) return;
+                try {
+                    await axios.put(`/api/v1/stocks/info/${stock.code}`, { 
+                        is_active: false,
+                        stock_name: stock.name
+                    });
+                    // Refresh tags list to update UI
+                    await fetchTags();
+                        // Also refresh stocks modal if open
+                        if (showStocksModal.value) {
+                             await fetchStockPage();
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        alert('操作失败');
+                    }
+                };
+
+                const searchStockTags = async () => {
+                    if (!stockQueryCode.value) return;
+                    try {
+                        const res = await api.get(`/stocks/${stockQueryCode.value}`);
+                        if (res.data.success) {
+                            stockResult.value = res.data.data;
+                        } else {
+                            alert(res.data.message || '查询失败');
+                        }
+                    } catch (e) {
+                        alert('查询失败');
+                        stockResult.value = null;
+                    }
+                };
+
+                // Utils
+                const formatDate = (dateStr) => {
+                    if (!dateStr) return '';
+                    return new Date(dateStr).toLocaleString();
+                };
+
+                const getActionColor = (action) => {
+                    const map = {
+                        'create': 'bg-green-500',
+                        'update': 'bg-blue-500',
+                        'delete': 'bg-red-500',
+                        'associate': 'bg-purple-500',
+                        'dissociate': 'bg-orange-500',
+                        'batch_import': 'bg-yellow-500'
+                    };
+                    return map[action] || 'bg-gray-500';
+                };
+
+                onMounted(() => {
+                    fetchTags();
+                });
+
+                return {
+                    viewMode, tags, logs, searchQuery, pagination, logsPagination,
+                    showModal, modalMode, currentTag,
+                    showBatchModal, batchInput,
+                    showStocksModal, associatedStocks, loadingStocks, newStocksInput,
+                    stockQueryCode, stockResult, searchStockTags,
+                    fetchTags, fetchLogs, changePage, changeLogPage,
+                    openCreateModal, openEditModal, saveTag, deleteTag,
+                    openBatchModal, submitBatch,
+                    openStocksModal, addStocks, removeStock, changeStockPage, handleStockClick, softDeleteStock,
+                    formatDate, getActionColor
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
