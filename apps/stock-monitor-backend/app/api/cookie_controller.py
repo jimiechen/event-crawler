@@ -20,6 +20,15 @@ class CookieDataModel(BaseModel):
     domain: str = Field(..., description="域名")
     cookies: List[Dict[str, Any]] = Field(..., description="Cookie列表")
 
+class CookieUpdateModel(BaseModel):
+    """Cookie更新模型"""
+    domain: str = Field(None, description="域名")
+    xpath_config: str = Field(None, description="登录检查XPath配置")
+    is_valid: bool = Field(None, description="是否有效")
+    account_name: str = Field(None, description="账号名称/备注")
+    test_url: str = Field(None, description="测试URL")
+    status: str = Field(None, description="状态")
+
 @router.post("", response_model=BaseResponse)
 async def sync_cookies(
     data: CookieDataModel,
@@ -79,5 +88,41 @@ async def get_cookies(
                 success=False,
                 message="No cookies found for this domain"
             )
+    except Exception as e:
+        return BaseResponse(success=False, message=str(e))
+
+@router.put("/{id}", response_model=BaseResponse)
+async def update_cookie(
+    id: int,
+    data: CookieUpdateModel,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    更新Cookie配置
+    """
+    try:
+        service = CookieService(db)
+        update_data = data.model_dump(exclude_unset=True)
+        success = await service.update_cookie(id, update_data)
+        if success:
+            return BaseResponse(success=True, message="Cookie updated successfully")
+        return BaseResponse(success=False, message="Cookie not found")
+    except Exception as e:
+        return BaseResponse(success=False, message=str(e))
+
+@router.delete("/{id}", response_model=BaseResponse)
+async def delete_cookie(
+    id: int,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    删除Cookie
+    """
+    try:
+        service = CookieService(db)
+        success = await service.delete_cookie(id)
+        if success:
+            return BaseResponse(success=True, message="Cookie deleted successfully")
+        return BaseResponse(success=False, message="Cookie not found")
     except Exception as e:
         return BaseResponse(success=False, message=str(e))

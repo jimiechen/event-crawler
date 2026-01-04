@@ -155,6 +155,7 @@ class CrawlerService:
                         # Check for login failure and notify
                         err_str = str(e).lower()
                         if any(k in err_str for k in ["login", "cookie", "auth", "登录", "sign in", "unauthorized"]):
+                            # 1. Notify Frontend
                             try:
                                 from app.services.task_executor import manager
                                 await manager.broadcast({
@@ -166,6 +167,29 @@ class CrawlerService:
                                 })
                             except Exception as ws_e:
                                 logger.error(f"WS broadcast failed: {ws_e}")
+                            
+                            # 2. Update Cookie Status in DB
+                            try:
+                                from app.models.cookie import ChromeCookie
+                                from sqlalchemy import select
+                                
+                                domain_map = {
+                                    "weibo": "weibo.com",
+                                    "douyin": "douyin.com", 
+                                    "xiaohongshu": "xiaohongshu.com",
+                                    "bilibili": "bilibili.com",
+                                    "okooo": "okooo.com"
+                                }
+                                search_domain = domain_map.get(platform, platform)
+                                
+                                stmt = select(ChromeCookie).where(ChromeCookie.domain.contains(search_domain))
+                                result = await self.session.execute(stmt)
+                                record = result.scalars().first()
+                                if record:
+                                    record.is_valid = False
+                                    logger.info(f"Marked cookie for {platform} as invalid due to crawl failure.")
+                            except Exception as db_e:
+                                logger.error(f"Failed to update cookie status: {db_e}")
 
                         # We don't commit here to avoid breaking the loop? No, we should commit the status update.
                         try:
@@ -187,6 +211,39 @@ class CrawlerService:
             return {"logged_in": False, "message": f"Platform {platform} not supported"}
         
         try:
+            # If xpath is not provided, try to find it in the database
+            if not nickname_xpath:
+                try:
+                    from app.models.cookie import ChromeCookie
+                    from sqlalchemy import select
+                    
+                    domain_map = {
+                        "weibo": "weibo.com",
+                        "douyin": "douyin.com", 
+                        "xiaohongshu": "xiaohongshu.com",
+                        "bilibili": "bilibili.com",
+                        "okooo": "okooo.com"
+                    }
+                    search_domain = domain_map.get(platform, platform)
+                    
+                    # Find any cookie record that contains the domain keyword
+                    stmt = select(ChromeCookie).where(ChromeCookie.domain.contains(search_domain))
+                    result = await self.session.execute(stmt)
+                    record = result.scalars().first()
+                    
+                    if record and record.xpath_config:
+                        import json
+                        try:
+                            config = json.loads(record.xpath_config)
+                            if isinstance(config, dict):
+                                nickname_xpath = config.get("login_check") or config.get("nickname") or config.get("nickname_xpath")
+                        except:
+                            # If not valid JSON, assume it's the raw xpath string if it looks like one
+                            if record.xpath_config.strip().startswith(("/", "(")):
+                                nickname_xpath = record.xpath_config.strip()
+                except Exception as e:
+                    logger.warning(f"Failed to fetch xpath config from DB: {e}")
+
             # Instantiate crawler (loads config automatically)
             crawler = crawler_cls()
             

@@ -8,10 +8,24 @@ import asyncio
 
 from app.services.sse_service import SSEService
 
-router = APIRouter(tags=["ADB Android"])
+# Configure dedicated logger for ADB SSE
+# Ensure logs directory exists
+import os
+if not os.path.exists("logs"):
+    os.makedirs("logs")
+
+# Add a sink specifically for ADB SSE channel
+# We check if the sink is already added to avoid duplication on reload (though loguru handles some dedup, it's safer)
+# Note: In a real app, logger configuration is usually central.
+logger.add("logs/adb_sse.log", rotation="10 MB", filter=lambda r: r["extra"].get("channel") == "adb_sse", level="INFO")
+
+router = APIRouter(prefix="/api/v1/adb", tags=["ADB Android"])
 
 # Dedicated SSE service for ADB
 adb_sse_service = SSEService()
+
+# Create a bound logger for this module
+adb_logger = logger.bind(channel="adb_sse")
 
 # In-memory storage for devices (could be moved to a service)
 devices: Dict[str, Dict[str, Any]] = {}

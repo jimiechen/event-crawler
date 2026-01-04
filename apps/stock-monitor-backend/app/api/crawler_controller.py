@@ -97,7 +97,10 @@ async def sse_endpoint(request: Request):
     return await sse_service.subscribe(request)
 
 @router.post("/status")
-async def update_crawler_status(status: CrawlerStatusUpdate):
+async def update_crawler_status(
+    status: CrawlerStatusUpdate,
+    db: AsyncSession = Depends(get_db_session)
+):
     """
     Receive status update from crawler
     """
@@ -106,6 +109,20 @@ async def update_crawler_status(status: CrawlerStatusUpdate):
     # Update local state
     crawler_states[status.platform] = status.dict()
     
+    # Check for login failure
+    if status.status == "error" and status.error and ("login" in status.error.lower() or "cookie" in status.error.lower()):
+        logger.warning(f"Login failure detected for {status.platform}")
+        # Update DB
+        from ..services.cookie_service import CookieService
+        cookie_service = CookieService(db)
+        await cookie_service.update_status_by_domain(status.platform, "expired", is_valid=False)
+        
+        # Broadcast login_failed event specifically
+        await sse_service.broadcast("login_failed", {
+            "platform": status.platform,
+            "message": status.error
+        })
+
     # Broadcast to frontend
     await sse_service.broadcast("crawler_status", status.dict())
     
@@ -131,7 +148,8 @@ async def get_targets(
     try:
         repo = CrawlerTargetRepository(db)
         targets = await repo.find_by_filters(platform=platform, name=name, url=url)
-        return ResponseModel(success=True, message="Success", data=targets)
+        data = [CrawlerTargetResponse.model_validate(t) for t in targets]
+        return ResponseModel(success=True, message="Success", data=data)
     except Exception as e:
         logger.error(f"Error fetching targets: {e}")
         return ResponseModel(success=False, message=str(e))
@@ -145,7 +163,7 @@ async def create_target(
     try:
         repo = CrawlerTargetRepository(db)
         new_target = await repo.create(target)
-        return ResponseModel(success=True, message="Target created", data=new_target)
+        return ResponseModel(success=True, message="Target created", data=CrawlerTargetResponse.model_validate(new_target))
     except Exception as e:
         logger.error(f"Error creating target: {e}")
         return ResponseModel(success=False, message=str(e))
@@ -162,7 +180,7 @@ async def update_target(
         updated_target = await repo.update(target_id, target)
         if not updated_target:
             return ResponseModel(success=False, message="Target not found")
-        return ResponseModel(success=True, message="Target updated", data=updated_target)
+        return ResponseModel(success=True, message="Target updated", data=CrawlerTargetResponse.model_validate(updated_target))
     except Exception as e:
         logger.error(f"Error updating target: {e}")
         return ResponseModel(success=False, message=str(e))
