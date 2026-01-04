@@ -70,6 +70,7 @@ const NavBar = {
                 { name: '定时任务', path: '/static/timed-task.html' },
                 { name: '数据浏览', path: '/static/stock-data-viewer.html' },
                 { name: '问财数据', path: '/static/wencai-data-viewer.html' },
+                { name: '爬虫维护', path: '/static/crawler.html' },
                 { name: '测试工具', path: '/static/test-tool.html' }
             ]
         }

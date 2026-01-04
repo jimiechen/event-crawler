@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>爬虫维护中心</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/vue.global.js"></script>
+    <script src="/static/axios.min.js"></script>
+    <script src="/static/js/navbar.js"></script>
+    <style>
+        .tab-btn {
+            @apply px-4 py-2 font-semibold text-gray-600 rounded-t-lg hover:bg-gray-100 transition duration-300;
+        }
+        .tab-btn.active {
+            @apply text-blue-600 border-b-2 border-blue-600 bg-white;
+        }
+    </style>
+    <script src="/static/js/custom-alert.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+    <div id="app" class="container mx-auto px-4 py-8">
+        
+        <!-- Header -->
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">爬虫维护中心</h1>
+                <p class="text-gray-600 mt-2">管理爬虫目标、监控登录状态、查看爬取结果</p>
+            </div>
+        </header>
+
+        <!-- Tabs -->
+        <div class="mb-6 border-b border-gray-200">
+            <nav class="flex -mb-px">
+                <button @click="currentTab = 'targets'" :class="['tab-btn', currentTab === 'targets' ? 'active' : '']">
+                    URL页面维护
+                </button>
+                <button @click="currentTab = 'status'" :class="['tab-btn', currentTab === 'status' ? 'active' : '']">
+                    登录状态查询
+                </button>
+                <button @click="currentTab = 'results'" :class="['tab-btn', currentTab === 'results' ? 'active' : '']">
+                    爬虫结果显示
+                </button>
+            </nav>
+        </div>
+
+        <!-- Content: Targets -->
+        <div v-if="currentTab === 'targets'" class="space-y-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold">目标URL配置</h2>
+                    <button @click="openAddTargetModal" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-sm">
+                        + 新增目标
+                    </button>
+                </div>
+                
+                <div class="overflow-x-auto">
+                    <table class="min-w-full leading-normal">
+                        <thead>
+                            <tr>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ID</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">平台</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">名称</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL/关键词</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">状态</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="target in targets" :key="target.id" class="hover:bg-gray-50">
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ target.id }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ target.platform }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm font-medium">{{ target.name }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm truncate max-w-xs" :title="target.url">{{ target.url }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">
+                                    <button @click="toggleTargetActive(target)" :class="target.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'" class="px-2 py-1 rounded text-xs font-semibold transition-colors">
+                                        {{ target.is_active ? '启用' : '禁用' }}
+                                    </button>
+                                </td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">
+                                    <button @click="editTarget(target)" class="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
+                                    <button @click="deleteTarget(target.id)" class="text-red-600 hover:text-red-900">删除</button>
+                                </td>
+                            </tr>
+                            <tr v-if="targets.length === 0">
+                                <td colspan="6" class="px-5 py-5 border-b border-gray-200 text-sm text-center text-gray-500">暂无数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content: Login Status -->
+        <div v-if="currentTab === 'status'" class="space-y-6">
+            <!-- New: Check Login Card -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                 <h2 class="text-xl font-bold mb-4">主动检查登录状态</h2>
+                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-end">
+                     <div>
+                         <label class="block text-sm font-medium text-gray-700 mb-1">平台</label>
+                         <select v-model="loginCheckForm.platform" class="border rounded px-3 py-2 w-full">
+                             <option value="bilibili">Bilibili</option>
+                             <option value="weibo">Weibo</option>
+                             <option value="douyin">Douyin</option>
+                             <option value="xiaohongshu">Xiaohongshu</option>
+                             <option value="okooo">Okooo</option>
+                         </select>
+                     </div>
+                     <div>
+                         <label class="block text-sm font-medium text-gray-700 mb-1">URL (可选)</label>
+                         <input v-model="loginCheckForm.url" type="text" placeholder="默认使用首页" class="border rounded px-3 py-2 w-full">
+                     </div>
+                     <div>
+                         <label class="block text-sm font-medium text-gray-700 mb-1">昵称XPath (可选)</label>
+                         <input v-model="loginCheckForm.nickname_xpath" type="text" placeholder="指定XPath查找昵称" class="border rounded px-3 py-2 w-full">
+                     </div>
+                     <div>
+                         <button @click="checkLoginStatus" :disabled="isCheckingLogin" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-6 rounded w-full disabled:opacity-50">
+                             {{ isCheckingLogin ? '检查中...' : '检查登录' }}
+                         </button>
+                     </div>
+                 </div>
+                 
+                 <!-- Check Result -->
+                 <div v-if="loginCheckResult" class="mt-4 p-4 rounded" :class="loginCheckResult.logged_in ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'">
+                     <div class="flex items-center">
+                         <span class="text-2xl mr-3">{{ loginCheckResult.logged_in ? '✅' : '❌' }}</span>
+                         <div>
+                             <p class="font-bold">{{ loginCheckResult.message }}</p>
+                             <p v-if="loginCheckResult.nickname" class="text-sm text-gray-600">检测到昵称: <span class="font-mono font-bold">{{ loginCheckResult.nickname }}</span></p>
+                             <p v-if="loginCheckResult.need_xpath" class="text-sm text-red-600 mt-1">
+                                 未能找到昵称。请提供正确的XPath。
+                             </p>
+                         </div>
+                     </div>
+                 </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold">实时爬虫状态监控</h2>
+                    <button @click="refreshStatus" class="text-blue-600 hover:text-blue-800 text-sm">
+                        🔄 刷新
+                    </button>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <!-- Status Card -->
+                    <div v-for="(state, platform) in crawlerStates" :key="platform" class="border rounded-lg p-4 shadow-sm">
+                        <div class="flex justify-between items-start mb-2">
+                            <h3 class="font-bold text-lg capitalize">{{ platform }}</h3>
+                            <span :class="getStatusClass(state.status)" class="px-2 py-1 rounded text-xs font-semibold text-white">
+                                {{ state.status }}
+                            </span>
+                        </div>
+                        <div class="text-sm text-gray-600 space-y-1">
+                            <p>消息: {{ state.message || '-' }}</p>
+                            <p>数据量: {{ state.data_count }}</p>
+                            <p v-if="state.error" class="text-red-500">错误: {{ state.error }}</p>
+                        </div>
+                    </div>
+                     <div v-if="Object.keys(crawlerStates).length === 0" class="col-span-full text-center text-gray-500 py-8">
+                        暂无实时状态数据，请等待爬虫连接...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Content: Results -->
+        <div v-if="currentTab === 'results'" class="space-y-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="flex flex-wrap gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">平台</label>
+                        <select v-model="resultFilter.platform" class="border rounded px-3 py-2 w-40">
+                            <option value="">全部</option>
+                            <option value="bilibili">Bilibili</option>
+                            <option value="weibo">Weibo</option>
+                            <option value="douyin">Douyin</option>
+                        </select>
+                    </div>
+                    <div class="flex items-end">
+                        <button @click="fetchResults" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded">
+                            查询
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-full leading-normal">
+                        <thead>
+                            <tr>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ID</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">平台</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">作者</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">内容/标题</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">爬取时间</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="result in results" :key="result.id" class="hover:bg-gray-50">
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ result.id }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ result.platform }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ result.author || '-' }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm truncate max-w-xs" :title="result.content">
+                                    {{ result.content ? result.content.substring(0, 50) + (result.content.length > 50 ? '...' : '') : '-' }}
+                                </td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm truncate max-w-xs">
+                                    <a :href="result.url" target="_blank" class="text-blue-600 hover:underline">查看链接</a>
+                                </td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ formatTime(result.crawled_at) }}</td>
+                            </tr>
+                            <tr v-if="results.length === 0">
+                                <td colspan="6" class="px-5 py-5 border-b border-gray-200 text-sm text-center text-gray-500">暂无数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Add/Edit Target Modal -->
+        <div v-if="showModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3 text-center">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">{{ isEditing ? '编辑目标' : '新增目标' }}</h3>
+                    <div class="mt-2 px-7 py-3 text-left">
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">平台</label>
+                            <select v-model="targetForm.platform" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                                <option value="bilibili">Bilibili</option>
+                                <option value="weibo">Weibo</option>
+                                <option value="douyin">Douyin</option>
+                                <option value="xiaohongshu">Xiaohongshu</option>
+                            </select>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">名称</label>
+                            <input v-model="targetForm.name" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" type="text">
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">URL/关键词</label>
+                            <textarea v-model="targetForm.url" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" rows="3"></textarea>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">类型</label>
+                            <select v-model="targetForm.target_type" class="shadow border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline">
+                                <option value="url">URL</option>
+                                <option value="keyword">关键词</option>
+                            </select>
+                        </div>
+                         <div class="mb-4">
+                            <label class="flex items-center">
+                                <input type="checkbox" v-model="targetForm.is_active" class="mr-2">
+                                <span class="text-sm">启用</span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="items-center px-4 py-3">
+                        <button @click="saveTarget" class="px-4 py-2 bg-blue-500 text-white text-base font-medium rounded-md w-full shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-300">
+                            保存
+                        </button>
+                        <button @click="closeModal" class="mt-3 px-4 py-2 bg-gray-100 text-gray-700 text-base font-medium rounded-md w-full shadow-sm hover:bg-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-300">
+                            取消
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, onMounted, onUnmounted } = Vue;
+
+        createApp({
+            setup() {
+                const currentTab = ref('targets');
+                const targets = ref([]);
+                const results = ref([]);
+                const crawlerStates = ref({});
+                const showModal = ref(false);
+                const isEditing = ref(false);
+                const resultFilter = ref({ platform: '' });
+                const eventSource = ref(null);
+
+                const loginCheckForm = ref({
+                    platform: 'bilibili',
+                    url: '',
+                    nickname_xpath: ''
+                });
+                const isCheckingLogin = ref(false);
+                const loginCheckResult = ref(null);
+
+                const targetForm = ref({
+                    id: null,
+                    platform: 'bilibili',
+                    name: '',
+                    url: '',
+                    target_type: 'url',
+                    is_active: true
+                });
+
+                const fetchTargets = async () => {
+                    try {
+                        const response = await axios.get('/api/v1/crawler/targets');
+                        if (response.data.success) {
+                            targets.value = response.data.data;
+                        } else {
+                            alert('获取目标失败: ' + response.data.message);
+                        }
+                    } catch (error) {
+                        console.error('Error fetching targets:', error);
+                    }
+                };
+
+                const fetchResults = async () => {
+                    try {
+                        let url = '/api/v1/crawler/results';
+                        if (resultFilter.value.platform) {
+                            url += `?platform=${resultFilter.value.platform}`;
+                        }
+                        const response = await axios.get(url);
+                        if (response.data.success) {
+                            results.value = response.data.data;
+                        } else {
+                            alert('获取结果失败: ' + response.data.message);
+                        }
+                    } catch (error) {
+                        console.error('Error fetching results:', error);
+                    }
+                };
+
+                const refreshStatus = async () => {
+                     try {
+                        const response = await axios.get('/api/v1/crawler/states');
+                        if (response.data.success) {
+                            crawlerStates.value = response.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Error fetching states:', error);
+                    }
+                };
+
+                const checkLoginStatus = async () => {
+                    isCheckingLogin.value = true;
+                    loginCheckResult.value = null;
+                    try {
+                        const response = await axios.post('/api/v1/crawler/check-login', loginCheckForm.value);
+                        if (response.data.success !== undefined) {
+                             if (response.data.success) {
+                                 loginCheckResult.value = response.data.data;
+                             } else {
+                                 loginCheckResult.value = {
+                                     logged_in: false,
+                                     message: response.data.message,
+                                     ...response.data.data
+                                 };
+                             }
+                        }
+                    } catch (error) {
+                        loginCheckResult.value = {
+                            logged_in: false,
+                            message: '请求失败: ' + error.message
+                        };
+                    } finally {
+                        isCheckingLogin.value = false;
+                    }
+                };
+
+                const setupSSE = () => {
+                    if (eventSource.value) {
+                        eventSource.value.close();
+                    }
+                    
+                    eventSource.value = new EventSource('/api/v1/crawler/events');
+                    
+                    eventSource.value.onmessage = (event) => {
+                        // Keep alive
+                    };
+                    
+                    eventSource.value.addEventListener('crawler_status', (event) => {
+                        const data = JSON.parse(event.data);
+                        crawlerStates.value[data.platform] = data;
+                    });
+                    
+                    eventSource.value.onerror = (error) => {
+                        console.error('SSE Error:', error);
+                        eventSource.value.close();
+                        // Reconnect after 5 seconds
+                        setTimeout(setupSSE, 5000);
+                    };
+                };
+
+                const openAddTargetModal = () => {
+                    isEditing.value = false;
+                    targetForm.value = {
+                        platform: 'bilibili',
+                        name: '',
+                        url: '',
+                        target_type: 'url',
+                        is_active: true
+                    };
+                    showModal.value = true;
+                };
+
+                const editTarget = (target) => {
+                    isEditing.value = true;
+                    targetForm.value = { ...target };
+                    showModal.value = true;
+                };
+
+                const closeModal = () => {
+                    showModal.value = false;
+                };
+
+                const saveTarget = async () => {
+                    try {
+                        if (isEditing.value) {
+                            await axios.put(`/api/v1/crawler/targets/${targetForm.value.id}`, targetForm.value);
+                        } else {
+                            await axios.post('/api/v1/crawler/targets', targetForm.value);
+                        }
+                        showModal.value = false;
+                        fetchTargets();
+                    } catch (error) {
+                        alert('保存失败: ' + error.message);
+                    }
+                };
+
+                const deleteTarget = async (id) => {
+                    if (!confirm('确定要删除吗？')) return;
+                    try {
+                        await axios.delete(`/api/v1/crawler/targets/${id}`);
+                        fetchTargets();
+                    } catch (error) {
+                        alert('删除失败: ' + error.message);
+                    }
+                };
+
+                const toggleTargetActive = async (target) => {
+                    try {
+                        await axios.put(`/api/v1/crawler/targets/${target.id}`, {
+                            ...target,
+                            is_active: !target.is_active
+                        });
+                        fetchTargets();
+                    } catch (error) {
+                        alert('更新状态失败: ' + error.message);
+                    }
+                };
+
+                const getStatusClass = (status) => {
+                    switch (status) {
+                        case 'running': return 'bg-green-500';
+                        case 'error': return 'bg-red-500';
+                        case 'starting': return 'bg-blue-500';
+                        default: return 'bg-gray-500';
+                    }
+                };
+
+                const formatTime = (timeStr) => {
+                    if (!timeStr) return '-';
+                    return new Date(timeStr).toLocaleString();
+                };
+
+                onMounted(() => {
+                    // Initialize navbar
+                    if (window.initNavbar) {
+                        window.initNavbar();
+                    }
+                    
+                    fetchTargets();
+                    fetchResults();
+                    refreshStatus();
+                    setupSSE();
+                });
+
+                onUnmounted(() => {
+                    if (eventSource.value) {
+                        eventSource.value.close();
+                    }
+                });
+
+                return {
+                    currentTab,
+                    targets,
+                    results,
+                    crawlerStates,
+                    showModal,
+                    isEditing,
+                    targetForm,
+                    resultFilter,
+                    loginCheckForm,
+                    isCheckingLogin,
+                    loginCheckResult,
+                    openAddTargetModal,
+                    editTarget,
+                    closeModal,
+                    saveTarget,
+                    deleteTarget,
+                    toggleTargetActive,
+                    checkLoginStatus,
+                    getStatusClass,
+                    formatTime,
+                    fetchResults,
+                    refreshStatus
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>

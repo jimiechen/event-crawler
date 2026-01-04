@@ -9,12 +9,15 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 import asyncio
 import sys
 import os
+import json
+import redis
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
@@ -22,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
 from app.services.stock_data_service import StockDataService, StockInfo, StockData
 from app.utils.database_pool import init_database, close_database
 from app.utils.data_deduplication import init_deduplication_manager
+from app.config.settings import get_settings
 
 # 配置日志
 logging.basicConfig(
@@ -30,12 +34,59 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 获取配置
+settings = get_settings()
+
+# 初始化Redis客户端
+redis_client = None
+try:
+    if settings.redis_url:
+        redis_client = redis.from_url(settings.redis_url, decode_responses=True)
+    else:
+        redis_client = redis.Redis(
+            host=settings.redis_host,
+            port=settings.redis_port,
+            db=settings.redis_db,
+            password=settings.redis_password,
+            decode_responses=True
+        )
+    # 测试连接
+    redis_client.ping()
+    logger.info("Redis连接成功")
+except Exception as e:
+    logger.warning(f"Redis连接失败: {e}")
+    redis_client = None
+
 # 创建FastAPI应用
 app = FastAPI(
     title="同花顺股票监控系统API",
     description="接收Chrome插件传来的股票数据",
     version="1.0.0"
 )
+
+# 注册爬虫控制器
+try:
+    from . import crawler_controller
+    app.include_router(crawler_controller.router)
+except ImportError:
+    logger.warning("未找到爬虫控制器，跳过注册")
+
+# 注册Cookie控制器
+try:
+    from . import cookie_controller
+    app.include_router(cookie_controller.router)
+except ImportError:
+    logger.warning("未找到Cookie控制器，跳过注册")
+
+# 注册定时任务控制器
+try:
+    from . import timed_task_controller
+    app.include_router(timed_task_controller.router)
+except ImportError:
+    logger.warning("未找到定时任务控制器，跳过注册")
+
+# 挂载静态文件目录
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # 配置CORS
 app.add_middleware(
@@ -95,20 +146,28 @@ class ResponseModel(BaseModel):
 async def startup_event():
     """应用启动事件"""
     global stock_service
-    
     try:
         # 初始化数据库连接池
-        await init_database()
+        db_pool = await init_database()
         logger.info("数据库连接池初始化成功")
         
-        # 初始化去重管理器
-        from app.utils.database_pool import db_pool
+        # 初始化数据去重管理器
         init_deduplication_manager(db_pool)
         logger.info("数据去重管理器初始化成功")
         
         # 初始化股票数据服务
         stock_service = StockDataService()
         logger.info("股票数据服务初始化成功")
+
+        # 启动定时任务调度器
+        try:
+            from app.services.scheduler_service import scheduler_service
+            scheduler_service.start()
+            logger.info("定时任务调度器启动成功")
+        except ImportError as e:
+            logger.warning(f"定时任务调度器导入失败: {e}")
+        except Exception as e:
+            logger.warning(f"定时任务调度器启动失败: {e}")
         
         logger.info("同花顺股票监控系统API启动成功")
         
@@ -163,6 +222,12 @@ async def health_check():
         raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}")
 
 
+@app.get("/api/v1/health", response_model=ResponseModel)
+async def health_check_v1():
+    """健康检查 (V1 API)"""
+    return await health_check()
+
+
 @app.post("/api/stocks/info", response_model=ResponseModel)
 async def receive_stock_info(stocks: List[StockInfoModel]):
     """接收股票信息数据"""
@@ -195,7 +260,10 @@ async def receive_stock_info(stocks: List[StockInfoModel]):
         raise HTTPException(status_code=500, detail=f"处理股票信息失败: {str(e)}")
 
 
-@app.post("/api/stocks/data", response_model=ResponseModel)
+
+
+
+@app.post("/api/v1/stock/data", response_model=ResponseModel)
 async def receive_stock_data(batch_data: BatchStockDataModel):
     """接收股票实时数据"""
     try:

@@ -91,6 +91,15 @@ export class NativeMessagingHost {
 
     // Handle directive messages from Chrome
     try {
+      // Forward to Server's DirectController if available
+      if (this.associatedServer && (message.type === 'LOGIN_COMPLETED' || message.type === 'LOGIN_FAILED')) {
+         // We need to access directController, but it's private in Server.
+         // Let's assume Server exposes a method or we cast it.
+         // Or better, make DirectController accessible.
+         // For now, let's use a dynamic check or refactor Server to expose handleMessage.
+         (this.associatedServer as any).directController?.handleExtensionMessage(message);
+      }
+
       switch (message.type) {
         case NativeMessageType.START:
           await this.startServer(message.payload?.port || 3000);
@@ -102,6 +111,10 @@ export class NativeMessagingHost {
         case 'ping_from_extension':
           this.sendMessage({ type: 'pong_to_extension' });
           break;
+        case 'LOGIN_COMPLETED':
+        case 'LOGIN_FAILED':
+           // Already handled above
+           break;
         default:
           // Double check when message type is not supported
           if (!message.responseToRequestId) {

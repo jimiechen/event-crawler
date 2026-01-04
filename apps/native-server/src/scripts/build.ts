@@ -19,7 +19,12 @@ console.log('dist 和 dist/logs 目录已创建/确认存在');
 
 // 编译TypeScript
 console.log('编译TypeScript...');
-execSync('tsc', { stdio: 'inherit' });
+try {
+  execSync('npx tsc', { stdio: 'inherit' });
+} catch (error) {
+  console.error('tsc 编译失败，尝试使用 node_modules/.bin/tsc');
+  execSync('./node_modules/.bin/tsc', { stdio: 'inherit' });
+}
 
 // 复制配置文件
 console.log('复制配置文件...');

@@ -204,36 +204,7 @@
           </div>
         </div>
         
-        <!-- 系统健康信息 -->
-        <div class="section">
-          <div class="config-card">
-            <div class="section-header">
-              <h3>系统健康状态</h3>
-            </div>
-            <div class="health-info">
-              <div class="health-item">
-                <span class="health-label">网络监听状态:</span>
-                <span :class="['health-status', isListening ? 'active' : 'inactive']">
-                  {{ isListening ? '运行中' : '已停止' }}
-                </span>
-              </div>
-              <div class="health-item">
-                <span class="health-label">登录状态:</span>
-                <span :class="['health-status', isLoggedIn ? 'active' : 'inactive']">
-                  {{ isLoggedIn ? '已登录' : '未登录' }}
-                </span>
-              </div>
-              <div class="health-item">
-                <span class="health-label">数据条数:</span>
-                <span class="health-value">{{ networkDataStats.totalCount }}</span>
-              </div>
-              <div class="health-item">
-                <span class="health-label">后端连接:</span>
-                <span class="health-status active">正常</span>
-              </div>
-            </div>
-          </div>
-        </div>
+        <SystemStatus />
       </div>
 
       <!-- MCP测试Tab -->
@@ -536,6 +507,7 @@ import {
   generateFootballReport,
 } from '../../utils/football-parser.js';
 import MonitoringStatusPanel from '../../components/MonitoringStatusPanel.vue';
+import SystemStatus from './components/SystemStatus.vue';
 import WencaiDataCapture from './components/WencaiDataCapture.vue';
 interface TemplateField {
   id: string;

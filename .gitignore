@@ -22,7 +22,7 @@ __pycache__/
 venv/
 .venv/
 env/
-.env
+data
 *.log
 *.sqlite
 *.db

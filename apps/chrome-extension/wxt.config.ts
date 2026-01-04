@@ -44,6 +44,7 @@ export default defineConfig({
       'offscreen',
       'storage',
       'sidePanel',
+      'cookies',
     ],
     side_panel: {
       default_path: 'sidepanel/index.html',
@@ -86,10 +87,6 @@ export default defineConfig({
           {
             src: '_locales/**/*',
             dest: '_locales',
-          },
-          {
-            src: '../../../test-scripts/test-rules.json',
-            dest: '.',
           },
         ],
       }) as any,

@@ -14,6 +14,7 @@ from app.services.rule_engine_service import RuleEngineService
 from app.services.local_data_service import LocalDataService
 from app.services.volume_analysis_service import VolumeAnalysisService
 from app.services.stock_service import StockService
+from app.services.crawler_service import CrawlerService
 from app.repositories.tag_repository import TagRepository
 from app.repositories.sync_log_repository import SyncLogRepository
 from app.repositories.scheduled_task_repository import ScheduledTaskRepository
@@ -68,6 +69,12 @@ class SchedulerService:
                 "task_type": "csv_health_check",
                 "cron_expression": "0 8 * * *",
                 "description": "每日08:00检查CSV文件格式和数据质量"
+            },
+            {
+                "name": "全量爬虫任务",
+                "task_type": "crawler_all",
+                "cron_expression": "0 * * * *",
+                "description": "每小时执行一次全量爬虫任务"
             }
         ]
         
@@ -128,6 +135,8 @@ class SchedulerService:
                 await self.run_daily_score()
             elif task_type == 'csv_health_check':
                 await self.run_csv_health_check()
+            elif task_type == 'crawler_all':
+                await self.run_crawler_all()
             else:
                 logger.warning(f"Unknown task type: {task_type}")
                 return
@@ -258,6 +267,14 @@ class SchedulerService:
         logger.info("定时任务: 开始每日评分计算")
         await self.rule_engine_service.calculate_daily_scores()
         logger.info("定时任务: 每日评分计算完成")
+
+    async def run_crawler_all(self):
+        """执行全量爬虫任务"""
+        logger.info("定时任务: 开始全量爬虫任务")
+        async with self.db_manager.get_session() as session:
+            crawler_service = CrawlerService(session)
+            await crawler_service.execute_all_crawlers()
+        logger.info("定时任务: 全量爬虫任务完成")
 
 # Global instance
 scheduler_service = SchedulerService(db_manager)

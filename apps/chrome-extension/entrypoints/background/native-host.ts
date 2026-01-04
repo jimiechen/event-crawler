@@ -188,7 +188,11 @@ export const initNativeHostListener = () => {
       console.error(ERROR_MESSAGES.SERVER_STATUS_LOAD_FAILED, error);
     });
 
-  chrome.runtime.onStartup.addListener(connectNativeHost);
+  // Connect immediately when background script loads (handles reload/update)
+  connectNativeHost();
+  
+  // Also listen for browser startup
+  chrome.runtime.onStartup.addListener(() => connectNativeHost());
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (
@@ -215,6 +219,20 @@ export const initNativeHostListener = () => {
         sendResponse({ success: true });
       } else {
         sendResponse({ success: false, error: 'No active connection' });
+      }
+      return true;
+    }
+
+    if (message.type === 'FORWARD_TO_NATIVE') {
+      if (nativePort) {
+        try {
+          nativePort.postMessage(message.payload);
+          sendResponse({ success: true });
+        } catch (error) {
+          sendResponse({ success: false, error: String(error) });
+        }
+      } else {
+        sendResponse({ success: false, error: 'Native host not connected' });
       }
       return true;
     }

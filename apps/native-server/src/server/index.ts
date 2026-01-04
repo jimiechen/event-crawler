@@ -13,6 +13,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { randomUUID } from 'node:crypto';
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { getMcpServer } from '../mcp/mcp-server';
+import { DirectController } from '../controller/direct-controller';
+// @ts-ignore
+import websocket from '@fastify/websocket';
 
 // Define request body type (if data needs to be retrieved from HTTP requests)
 interface ExtensionRequestPayload {
@@ -23,11 +26,37 @@ export class Server {
   private fastify: FastifyInstance;
   public isRunning = false; // Changed to public or provide a getter
   private nativeHost: NativeMessagingHost | null = null;
+  private directController: DirectController | null = null;
   private transportsMap: Map<string, StreamableHTTPServerTransport | SSEServerTransport> =
     new Map();
 
   constructor() {
-    this.fastify = Fastify({ logger: SERVER_CONFIG.LOGGER_ENABLED });
+    this.fastify = Fastify({
+      logger: SERVER_CONFIG.LOGGER_ENABLED
+        ? {
+            level: 'info',
+            transport: {
+              targets: [
+                {
+                  target: 'pino/file',
+                  options: {
+                    destination: `${SERVER_CONFIG.LOG_DIR}/server.log`,
+                    mkdir: true,
+                  },
+                },
+                {
+                  target: 'pino-pretty',
+                  options: {
+                    colorize: true,
+                    translateTime: 'SYS:standard',
+                    ignore: 'pid,hostname',
+                  },
+                },
+              ],
+            },
+          }
+        : false,
+    });
     this.setupPlugins();
     this.setupRoutes();
   }
@@ -36,6 +65,9 @@ export class Server {
    */
   public setNativeHost(nativeHost: NativeMessagingHost): void {
     this.nativeHost = nativeHost;
+    this.directController = new DirectController(nativeHost);
+    // Register DirectController routes dynamically
+    this.directController.registerRoutes(this.fastify);
   }
 
   private async setupPlugins(): Promise<void> {
@@ -55,10 +87,36 @@ export class Server {
       credentials: true,
       optionsSuccessStatus: 200 // 某些旧版浏览器（IE11, 各种SmartTVs）在204上会出错
     });
+
+    await this.fastify.register(websocket);
   }
 
   private setupRoutes(): void {
+    // Register DirectController routes if available
+    if (this.directController) {
+      this.directController.registerRoutes(this.fastify);
+    } else {
+       // If directController is not yet initialized (e.g. setNativeHost not called), 
+       // we can register a hook or handle it later. 
+       // However, setNativeHost is usually called before start.
+       // But setupRoutes is called in constructor. 
+       // So we need to delay route registration or pass nativeHost to constructor.
+       // Refactor: register routes dynamically or make sure directController is available.
+    }
+
+    // Since directController depends on nativeHost which is set later, we need to register these routes later or make them use lazy access.
+    // Let's modify DirectController to not require fastify at construction but have a register method, and we call it inside start() or a new init() method.
+    // Or simpler: We register the routes here, but the handler uses `this.directController`.
+    
+    // Register Direct API routes manually here delegating to controller (or controller registers them)
+    // To solve the timing issue (setupRoutes in constructor vs setNativeHost later), 
+    // we rely on dynamic route registration in setNativeHost calling directController.registerRoutes.
+    
     // for ping
+    this.fastify.get('/ping', async (request, reply) => {
+      return reply.status(HTTP_STATUS.OK).send({ status: 'ok' });
+    });
+
     this.fastify.get(
       '/ask-extension',
       async (request: FastifyRequest<{ Body: ExtensionRequestPayload }>, reply: FastifyReply) => {

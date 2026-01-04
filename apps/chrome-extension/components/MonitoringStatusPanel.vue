@@ -34,9 +34,9 @@
     </div>
 
     <!-- 当前运行状态 -->
-    <div v-if="currentRunState" class="current-run-section">
+    <div class="current-run-section">
       <h4>当前运行状态</h4>
-      <div class="run-status-grid">
+      <div v-if="currentRunState" class="run-status-grid">
         <div class="status-item">
           <span class="label">数据抓取状态:</span>
           <span class="value" :class="getDataFetchStatusClass(currentRunState.dataFetchStatus)">
@@ -66,12 +66,15 @@
           </span>
         </div>
       </div>
+      <div v-else class="empty-message">
+        暂无运行任务
+      </div>
     </div>
 
     <!-- 统计信息 -->
-    <div v-if="statistics" class="statistics-section">
+    <div class="statistics-section">
       <h4>运行统计</h4>
-      <div class="stats-grid">
+      <div v-if="statistics" class="stats-grid">
         <div class="stat-card">
           <div class="stat-value">{{ statistics.totalRuns }}</div>
           <div class="stat-label">总运行次数</div>
@@ -97,10 +100,13 @@
           <div class="stat-label">平均耗时</div>
         </div>
       </div>
+      <div v-else class="empty-message">
+        暂无统计数据
+      </div>
     </div>
 
-    <!-- 健康状态 -->
-    <div v-if="healthStatus" class="health-section">
+    <!-- 健康状态 (已移动到 SystemStatus 组件) -->
+    <!-- <div v-if="healthStatus" class="health-section">
       <h4>系统健康状态</h4>
       <div class="health-indicator" :class="getHealthStatusClass(healthStatus.status)">
         <span class="health-icon">{{ getHealthStatusIcon(healthStatus.status) }}</span>
@@ -115,7 +121,7 @@
           </li>
         </ul>
       </div>
-    </div>
+    </div> -->
 
     <!-- 最近错误 -->
     <div v-if="recentErrors.length > 0" class="errors-section">
@@ -891,5 +897,14 @@ onUnmounted(() => {
 
 .btn-icon {
   font-size: 16px;
+}
+
+.empty-message {
+  padding: 24px;
+  text-align: center;
+  color: #6c757d;
+  background: #f8f9fa;
+  border-radius: 6px;
+  font-size: 14px;
 }
 </style>

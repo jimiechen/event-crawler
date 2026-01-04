@@ -29,6 +29,7 @@
         { name: '问财数据', path: '/static/wencai-data-viewer.html' },
         { name: '标签云图', path: '/static/concept-cloud.html' },
         { name: '日线数据', path: '/static/stock-daily-data.html' },
+        { name: '爬虫维护', path: '/static/crawler.html' },
         { name: '测试工具', path: '/static/test-tool.html' }
     ];
 
