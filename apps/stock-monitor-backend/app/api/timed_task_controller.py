@@ -26,7 +26,7 @@ from app.services.scheduler_service import scheduler_service
 from app.models.scheduled_task import ScheduledTask
 from app.models.task_log import TaskExecutionLog
 
-router = APIRouter(prefix="/api/tasks", tags=["定时任务"])
+router = APIRouter(prefix="/api/v1/timed-task", tags=["定时任务"])
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -223,6 +223,33 @@ async def get_rules():
     service = RuleEngineService(db_manager)
     rules = await service.get_rule_config()
     return BaseResponse(success=True, data=rules)
+
+@router.post("/rules", summary="保存规则配置", response_model=BaseResponse)
+async def save_rules(rules: dict):
+    try:
+        service = RuleEngineService(db_manager)
+        await service.save_rule_config(rules)
+        return BaseResponse(success=True, message="规则已保存")
+    except Exception as e:
+        logger.error(f"保存规则失败: {e}")
+        return BaseResponse(success=False, message=f"保存规则失败: {str(e)}")
+
+@router.post("/sync/wencai", summary="触发问财同步", response_model=BaseResponse)
+async def trigger_wencai_sync(background_tasks: BackgroundTasks):
+    try:
+        # Trigger the crawler task in background
+        task = await scheduler_service.repo.get_task_by_type('crawler_all')
+        if task:
+            background_tasks.add_task(scheduler_service.execute_task_wrapper, task.id, task.task_type)
+            return BaseResponse(success=True, message="问财同步任务已触发")
+        else:
+            # Fallback if task not found in DB
+            background_tasks.add_task(scheduler_service.run_crawler_all)
+            return BaseResponse(success=True, message="问财同步任务已触发 (直接执行)")
+    except Exception as e:
+        logger.error(f"触发问财同步失败: {e}")
+        return BaseResponse(success=False, message=f"触发失败: {str(e)}")
+
 
 @router.get("/scheduled/list", summary="获取定时任务列表", response_model=BaseResponse)
 async def get_scheduled_tasks():

@@ -23,3 +23,29 @@ https://codeup.aliyun.com/5f9a8a071858a17210469d15/MineplanetGo.git
 
 - outModules/open-citycloud : Pull Rebase (Success) -> Push (Success)
 - event-crawler (Root): Update submodule reference -> Commit -> Push (Success)
+
+---
+
+## Backend Development Guide (Stock Monitor Backend)
+
+### Adding New API Controllers
+
+When adding a new controller (e.g., `new_feature_controller.py`) to `apps/stock-monitor-backend/app/api/`:
+
+1.  **Create the Controller**: Create the file `app/api/new_feature_controller.py` with the `APIRouter` definition.
+2.  **Export the Router**: Ensure `router = APIRouter(...)` is defined.
+3.  **Register in Main Application**:
+    *   Open `apps/stock-monitor-backend/app/main.py`.
+    *   **CRITICAL**: Add the controller to the import list at the top:
+        ```python
+        from .api import ..., new_feature_controller
+        ```
+    *   Add the include statement at the bottom:
+        ```python
+        app.include_router(new_feature_controller.router)
+        ```
+    *   *Failure to import the controller will result in a startup `NameError`.*
+
+### Common Issues
+
+*   **Startup Error `NameError: name 'xxx_controller' is not defined`**: Check that you have imported the controller in `app/main.py` before trying to use it in `app.include_router()`.

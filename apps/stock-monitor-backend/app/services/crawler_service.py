@@ -1,7 +1,7 @@
 import sys
 import os
 import asyncio
-from typing import List, Dict, Type
+from typing import List, Dict, Type, Any
 from datetime import datetime
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -119,29 +119,23 @@ class CrawlerService:
                         # Save results
                         count = 0
                         for item in data_list:
-                            # Map CrawlerData (dict) to CrawlerResult model
-                            # CrawlerData keys: content, author, time, likes, comments, shares, url, id
+                            # item is CrawlerData (Pydantic model)
                             
                             # Parse time
-                            publish_time = None
-                            if item.get('time'):
-                                try:
-                                    # Attempt parsing, might need robust parsing logic
-                                    # For now, ignore if parse fails or use current time
-                                    pass 
-                                except:
-                                    pass
+                            publish_time = item.publish_time
+                            if not publish_time:
+                                publish_time = datetime.now()
 
                             result = CrawlerResult(
                                 platform=platform,
                                 target_id=target.id,
-                                content=item.get('content'),
-                                author=item.get('author'),
-                                likes=item.get('likes', 0),
-                                comments=item.get('comments', 0),
-                                shares=item.get('shares', 0),
-                                url=item.get('url'),
-                                data_id=item.get('id'),
+                                content=item.content,
+                                author=item.author,
+                                likes=item.likes,
+                                comments=item.comments,
+                                shares=item.shares,
+                                url=item.url,
+                                data_id=item.data_id,
                                 crawled_at=datetime.now()
                             )
                             await self.result_repo.create(result)

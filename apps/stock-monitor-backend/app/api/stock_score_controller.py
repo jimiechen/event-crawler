@@ -14,7 +14,7 @@ from app.database import get_db_session
 from app.models.stock_daily import StockScoreResult
 from app.api.stock_daily_schemas import StockScoreResultListResponse, StockScoreResultResponse
 
-router = APIRouter(prefix="/api/scores", tags=["评分结果"])
+router = APIRouter(prefix="/api/v1/scores", tags=["评分结果"])
 
 @router.get("/latest", summary="查询评分结果", response_model=StockScoreResultListResponse)
 async def get_latest_scores(

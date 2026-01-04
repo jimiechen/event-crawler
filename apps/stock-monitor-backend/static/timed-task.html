@@ -512,7 +512,7 @@
         
         // Setup API client
         const api = axios.create({
-            baseURL: '/api'
+            baseURL: '/api/v1'
         });
 
         createApp({
@@ -596,7 +596,7 @@
 
                 const fetchScheduledTasks = async () => {
                     try {
-                        const res = await api.get('/tasks/scheduled/list');
+                        const res = await api.get('/timed-task/scheduled/list');
                         if (res.data.success) {
                             scheduledTasks.value = res.data.data;
                         }
@@ -609,7 +609,7 @@
                     if (!confirm(`确定要${task.is_active ? '禁用' : '启用'}任务 "${task.name}" 吗？`)) return;
                     
                     try {
-                        const res = await api.post('/tasks/scheduled/update', {
+                        const res = await api.post('/timed-task/scheduled/update', {
                             id: task.id,
                             is_active: !task.is_active
                         });
@@ -637,7 +637,7 @@
                     if (!tempCron.value) return;
                     
                     try {
-                        const res = await api.post('/tasks/scheduled/update', {
+                        const res = await api.post('/timed-task/scheduled/update', {
                             id: task.id,
                             cron_expression: tempCron.value
                         });
@@ -656,7 +656,7 @@
                     if (!confirm(`确定要立即运行任务 "${task.name}" 吗？`)) return;
                     
                     try {
-                        const res = await api.post(`/tasks/scheduled/run/${task.id}`);
+                        const res = await api.post(`/timed-task/scheduled/run/${task.id}`);
                         if (res.data.success) {
                             alert(res.data.message);
                             fetchScheduledTasks();
@@ -681,7 +681,7 @@
                     
                     loading.value = true;
                     try {
-                        const res = await api.post('/tasks/batch-create', { task_type: taskType });
+                        const res = await api.post('/timed-task/batch-create', { task_type: taskType });
                         
                         if (res.data.success) {
                             alert(res.data.message);
@@ -711,7 +711,7 @@
                             task_url: executionFilter.value.taskUrl || undefined
                         };
                         
-                        const res = await api.get('/tasks/execution-logs', { params });
+                        const res = await api.get('/timed-task/execution-logs', { params });
                         if (res.data.success) {
                             // Backend returns data as list and total as sibling
                             executionLogs.value = res.data.data || [];
@@ -760,7 +760,7 @@
                     
                     loading.value = true;
                     try {
-                        const res = await api.post('/tasks/execute', { log_ids: selectedTaskIds.value });
+                        const res = await api.post('/timed-task/execute', { log_ids: selectedTaskIds.value });
                         if (res.data.success) {
                             alert(res.data.message);
                             // Refresh after a short delay to see status updates
@@ -780,7 +780,7 @@
                 const executeSingleTask = async (id) => {
                     loading.value = true;
                     try {
-                        const res = await api.post('/tasks/execute', { log_ids: [id] });
+                        const res = await api.post('/timed-task/execute', { log_ids: [id] });
                         if (res.data.success) {
                             // alert(res.data.message);
                             setTimeout(() => fetchExecutionLogs(executionPagination.value.page), 500);
@@ -804,7 +804,7 @@
                             keyword: syncFilter.value.keyword || undefined,
                             date_filter: syncFilter.value.date || undefined
                         };
-                        const res = await api.get('/tasks/stocks', { params }); 
+                        const res = await api.get('/dashboard/stocks', { params }); 
                         if (res.data.success) {
                             syncList.value = res.data.data.list;
                             syncPagination.value.total = res.data.data.total;
@@ -819,7 +819,7 @@
                 const triggerWencaiSync = async () => {
                     if (!confirm('确定要触发问财同步吗？')) return;
                     try {
-                        const res = await api.post('/tasks/sync/wencai');
+                        const res = await api.post('/timed-task/sync/wencai');
                         if (res.data.success) alert(res.data.message);
                         else alert('失败: ' + res.data.message);
                     } catch (e) { alert('异常: ' + e.message); }
@@ -827,25 +827,28 @@
                 
                 const triggerSingleSync = async (code, type='increment') => {
                     // type: 'increment' (tushare), 'full' (csv)
-                    let url = '';
                     let label = '';
-                    if (type === 'full') {
-                        url = `/stock/sync/csv/${code}`;
-                        label = '全量同步(CSV)';
-                    } else {
-                        url = `/stock/sync/tushare/${code}`;
-                        label = '增量同步(Tushare)';
-                    }
-
-                    if(!confirm(`确定要对 ${code} 执行 ${label} 吗？`)) return;
+                    
+                    if(!confirm(`确定要对 ${code} 执行 ${type === 'full' ? '全量同步(CSV)' : '增量同步(Tushare)'} 吗？`)) return;
 
                     try {
-                        const res = await api.get(url);
+                        let res;
+                        if (type === 'full') {
+                            res = await api.get(`/stock/sync/csv/${code}`);
+                        } else {
+                            // Tushare sync requires POST with body
+                            res = await api.post('/stock/sync/tushare', {
+                                stock_codes: [code],
+                                batch_id: 0,
+                                start_date: '2025-12-22' // Default or dynamic?
+                            });
+                        }
+
                         if (res.data.success) {
-                            alert(`${label} 成功: ` + res.data.message);
+                            alert('操作成功: ' + res.data.message);
                             fetchSyncList(syncPagination.value.page);
                         } else {
-                            alert(`${label} 失败: ` + res.data.message);
+                            alert('操作失败: ' + res.data.message);
                         }
                     } catch (e) {
                         alert('请求异常: ' + (e.response?.data?.detail || e.message));
@@ -860,7 +863,7 @@
                 const fetchRules = async () => {
                     loadingRules.value = true;
                     try {
-                        const res = await api.get('/tasks/rules');
+                        const res = await api.get('/timed-task/rules');
                         if (res.data) {
                             rules.value = res.data.data || res.data;
                         }
@@ -873,7 +876,7 @@
                 
                 const saveRules = async () => {
                     try {
-                        const res = await api.post('/tasks/rules', rules.value);
+                        const res = await api.post('/timed-task/rules', rules.value);
                          if (res.data.success) alert("保存成功");
                     } catch (e) { alert("保存失败"); }
                 };
