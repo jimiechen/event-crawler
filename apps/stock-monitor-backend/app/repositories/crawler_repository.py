@@ -24,6 +24,26 @@ class CrawlerTargetRepository(BaseRepository[CrawlerTarget]):
         """根据平台查找目标"""
         return await self.find_all_by_field("platform", platform)
     
+    async def find_by_filters(self, platform: Optional[str] = None, name: Optional[str] = None, url: Optional[str] = None) -> List[CrawlerTarget]:
+        """根据条件筛选目标"""
+        try:
+            query = select(CrawlerTarget)
+            
+            if platform:
+                query = query.where(CrawlerTarget.platform == platform)
+            if name:
+                query = query.where(CrawlerTarget.name.ilike(f"%{name}%"))
+            if url:
+                query = query.where(CrawlerTarget.url.ilike(f"%{url}%"))
+                
+            query = query.order_by(desc(CrawlerTarget.created_at))
+            
+            result = await self.session.execute(query)
+            return result.scalars().all()
+        except Exception as e:
+            logger.error(f"筛选目标失败: {e}")
+            raise
+
     async def find_active_targets(self, platform: Optional[str] = None) -> List[CrawlerTarget]:
         """查找活跃目标"""
         try:

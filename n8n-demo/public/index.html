@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>n8n Workflow Editor (Lite)</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        :root {
+            --primary: #ff6d5a;
+            --bg: #1d1e22;
+            --card: #2d2e32;
+            --text: #ffffff;
+            --text-secondary: #a0a0a0;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+        }
+        .header {
+            grid-column: 1 / -1;
+            display: flex;
+            align-items: center;
+            border-bottom: 1px solid #333;
+            padding-bottom: 20px;
+            margin-bottom: 20px;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: bold;
+            color: var(--primary);
+            margin-right: 15px;
+        }
+        .card {
+            background-color: var(--card);
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        h2 {
+            margin-top: 0;
+            font-size: 18px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            background-color: #111;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+            margin-bottom: 15px;
+            font-size: 16px;
+        }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: opacity 0.2s;
+        }
+        button:hover {
+            opacity: 0.9;
+        }
+        button:disabled {
+            background-color: #555;
+            cursor: not-allowed;
+        }
+        pre {
+            background-color: #111;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+            color: #4caf50;
+            font-family: 'Monaco', 'Consolas', monospace;
+            min-height: 200px;
+        }
+        .status {
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .status.success { color: #4caf50; }
+        .status.error { color: #ff5252; }
+        
+        .mermaid {
+            background: #2d2e32;
+            padding: 20px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="logo">n8n Demo</div>
+        <div>Workflow Editor & Executor</div>
+    </div>
+
+    <div class="container">
+        <!-- Workflow Visualization -->
+        <div class="card">
+            <h2>Workflow Visualization</h2>
+            <div class="mermaid">
+                graph LR
+                    A[Start<br/>Manual Trigger] -->|Execute| B(Baidu Search<br/>HTTP Request)
+                    B -->|HTML| C(Extract Titles<br/>HTML Extract)
+                    C -->|Array| D(Format Data<br/>Code Node)
+                    D -->|JSON| E(Save File<br/>Write File)
+                    
+                    style A fill:#ff6d5a,stroke:#333,stroke-width:2px
+                    style B fill:#4caf50,stroke:#333,stroke-width:2px
+                    style C fill:#2196f3,stroke:#333,stroke-width:2px
+                    style D fill:#ff9800,stroke:#333,stroke-width:2px
+                    style E fill:#9c27b0,stroke:#333,stroke-width:2px
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="card">
+            <h2>Configuration</h2>
+            <div style="margin-bottom: 20px;">
+                <label style="display:block; margin-bottom: 8px; color: #aaa;">Search Keyword</label>
+                <input type="text" id="keyword" value="小米汽车" placeholder="Enter search term...">
+            </div>
+            <button id="runBtn" onclick="runWorkflow()">Execute Workflow</button>
+            <div id="status" class="status"></div>
+        </div>
+
+        <!-- Results -->
+        <div class="card" style="grid-column: 1 / -1;">
+            <h2>Execution Results (Live)</h2>
+            <pre id="results">Waiting for execution...</pre>
+        </div>
+    </div>
+
+    <script>
+        mermaid.initialize({ 
+            startOnLoad: true, 
+            theme: 'dark',
+            flowchart: { curve: 'basis' }
+        });
+
+        async function runWorkflow() {
+            const btn = document.getElementById('runBtn');
+            const results = document.getElementById('results');
+            const status = document.getElementById('status');
+            const keyword = document.getElementById('keyword').value;
+
+            btn.disabled = true;
+            btn.innerText = 'Running...';
+            results.innerText = 'Executing workflow steps...\n1. Initializing...\n2. Fetching Baidu (' + keyword + ')...\n3. Extracting titles...\n4. Saving file...';
+            status.innerText = '';
+            status.className = 'status';
+
+            try {
+                // First update the workflow definition
+                await fetch('/api/workflow', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyword })
+                });
+
+                // Then execute
+                const response = await fetch('/api/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ keyword })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    results.innerText = JSON.stringify(data.results, null, 2);
+                    status.innerText = 'Workflow executed successfully!';
+                    status.className = 'status success';
+                } else {
+                    results.innerText = 'Error:\n' + JSON.stringify(data.error, null, 2);
+                    status.innerText = 'Execution failed.';
+                    status.className = 'status error';
+                }
+            } catch (err) {
+                results.innerText = 'Network Error:\n' + err.message;
+                status.innerText = 'Failed to connect to server.';
+                status.className = 'status error';
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Execute Workflow';
+            }
+        }
+    </script>
+</body>
+</html>

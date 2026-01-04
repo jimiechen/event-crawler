@@ -151,6 +151,22 @@ class CrawlerService:
                     except Exception as e:
                         logger.error(f"Failed to crawl target {target.name}: {e}")
                         target.last_status = "failed"
+                        
+                        # Check for login failure and notify
+                        err_str = str(e).lower()
+                        if any(k in err_str for k in ["login", "cookie", "auth", "登录", "sign in", "unauthorized"]):
+                            try:
+                                from app.services.task_executor import manager
+                                await manager.broadcast({
+                                    "type": "login_failed",
+                                    "data": {
+                                        "platform": platform,
+                                        "message": f"Target '{target.name}' failed: {str(e)}"
+                                    }
+                                })
+                            except Exception as ws_e:
+                                logger.error(f"WS broadcast failed: {ws_e}")
+
                         # We don't commit here to avoid breaking the loop? No, we should commit the status update.
                         try:
                             await self.session.commit()

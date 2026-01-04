@@ -25,7 +25,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from .config.settings import get_settings
 from .config.logging import setup_logging
 from .database import DatabaseManager, db_manager
-from .api import stock_controller, monitor_controller, health_controller, wencai_controller, network_controller, stock_daily_controller, favorites_controller, analysis_controller, trading_rules_controller, morphology_controller, test_tool_controller, system_controller, tag_controller, timed_task_controller, stock_score_controller, dashboard_controller, volume_analysis_controller, debug_controller, ranking_controller, stock_sync_controller, cookie_controller, crawler_controller
+from .api import stock_controller, monitor_controller, health_controller, wencai_controller, network_controller, stock_daily_controller, favorites_controller, analysis_controller, trading_rules_controller, morphology_controller, test_tool_controller, system_controller, tag_controller, timed_task_controller, stock_score_controller, dashboard_controller, volume_analysis_controller, debug_controller, ranking_controller, stock_sync_controller, cookie_controller, crawler_controller, adb_controller
 from .api.schemas import ErrorResponse
 from .services.scheduler_service import scheduler_service
 from .services.task_executor import executor
@@ -243,6 +243,7 @@ app.include_router(volume_analysis_controller.router)
 app.include_router(debug_controller.router)
 app.include_router(cookie_controller.router)
 app.include_router(crawler_controller.router)
+app.include_router(adb_controller.router)
 
 # 配置静态文件服务
 static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")

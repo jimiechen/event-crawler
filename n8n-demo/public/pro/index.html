@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>n8n Professional Editor</title>
+    
+    <!-- Tailwind CSS (Local) -->
+    <script src="/pro/libs/tailwind.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        n8n: {
+                            primary: '#ff6d5a',
+                            dark: '#1d1e22',
+                            card: '#2d2e32',
+                            border: '#333333',
+                            text: '#e0e0e0',
+                            accent: '#4caf50'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- React & React DOM (Local) -->
+    <script src="/pro/libs/react.js"></script>
+    <script src="/pro/libs/react-dom.js"></script>
+    
+    <!-- Fix: Alias React to window.react for Lucide -->
+    <script>
+        window.react = window.React;
+        window.ReactDOM = window.ReactDOM;
+    </script>
+
+    <!-- Babel for JSX (Local) -->
+    <script src="/pro/libs/babel.js"></script>
+
+    <!-- Debug info removed -->
+</head>
+    <!-- React Flow Styles (Local) -->
+    <link rel="stylesheet" href="/pro/libs/reactflow.css" />
+    
+    <!-- React Flow UMD (Local) -->
+    <script src="/pro/libs/reactflow.js"></script>
+
+    <!-- Lucide Icons (Local) -->
+    <!-- lucide.js removed because it failed to download and is not needed for lucide-react -->
+    <script src="/pro/libs/lucide-react.js"></script>
+</head>
+<body class="bg-n8n-dark text-n8n-text overflow-hidden h-screen w-screen">
+    <div id="root" class="h-full w-full"></div>
+
+    <!-- Application Logic (No Module, Global Access) -->
+    <script type="text/babel" src="/pro/js/App.jsx"></script>
+</body>
+</html>

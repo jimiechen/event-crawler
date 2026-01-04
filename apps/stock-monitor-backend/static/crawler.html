@@ -36,7 +36,7 @@
                     URL页面维护
                 </button>
                 <button @click="currentTab = 'status'" :class="['tab-btn', currentTab === 'status' ? 'active' : '']">
-                    登录状态查询
+                    登录状态维护
                 </button>
                 <button @click="currentTab = 'results'" :class="['tab-btn', currentTab === 'results' ? 'active' : '']">
                     爬虫结果显示
@@ -47,8 +47,19 @@
         <!-- Content: Targets -->
         <div v-if="currentTab === 'targets'" class="space-y-6">
             <div class="bg-white p-6 rounded-lg shadow">
-                <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-bold">目标URL配置</h2>
+                <div class="flex flex-wrap justify-between items-center mb-4 gap-4">
+                    <div class="flex gap-2">
+                        <select v-model="targetFilter.platform" class="border rounded px-2 py-1 text-sm">
+                            <option value="">所有平台</option>
+                            <option value="bilibili">Bilibili</option>
+                            <option value="weibo">Weibo</option>
+                            <option value="douyin">Douyin</option>
+                            <option value="xiaohongshu">Xiaohongshu</option>
+                        </select>
+                        <input v-model="targetFilter.name" placeholder="名称搜索" class="border rounded px-2 py-1 text-sm">
+                        <input v-model="targetFilter.url" placeholder="URL搜索" class="border rounded px-2 py-1 text-sm">
+                        <button @click="fetchTargets" class="bg-blue-500 text-white px-3 py-1 rounded text-sm hover:bg-blue-600">搜索</button>
+                    </div>
                     <button @click="openAddTargetModal" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded text-sm">
                         + 新增目标
                     </button>
@@ -93,6 +104,36 @@
 
         <!-- Content: Login Status -->
         <div v-if="currentTab === 'status'" class="space-y-6">
+            <!-- Cookie List -->
+            <div class="bg-white p-6 rounded-lg shadow">
+                <h2 class="text-xl font-bold mb-4">当前Cookie列表</h2>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full leading-normal">
+                        <thead>
+                            <tr>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ID</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">域名</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Cookie数量</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="cookie in cookies" :key="cookie.id">
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ cookie.id }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm font-medium">{{ cookie.domain }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ cookie.count }}</td>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">
+                                    <button class="text-blue-600 hover:text-blue-900 text-xs">详情</button>
+                                </td>
+                            </tr>
+                            <tr v-if="cookies.length === 0">
+                                <td colspan="4" class="px-5 py-5 border-b border-gray-200 text-sm text-center text-gray-500">暂无Cookie数据</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
             <!-- New: Check Login Card -->
             <div class="bg-white p-6 rounded-lg shadow">
                  <h2 class="text-xl font-bold mb-4">主动检查登录状态</h2>
@@ -242,7 +283,11 @@
                         </div>
                         <div class="mb-4">
                             <label class="block text-gray-700 text-sm font-bold mb-2">URL/关键词</label>
-                            <textarea v-model="targetForm.url" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" rows="3"></textarea>
+                            <textarea v-model="targetForm.url" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" rows="2"></textarea>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">XPath配置 (JSON)</label>
+                            <textarea v-model="targetForm.xpath_config" placeholder='{"title": "//h1", "content": "//div[@class=\"content\"]"}' class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline font-mono text-xs" rows="3"></textarea>
                         </div>
                         <div class="mb-4">
                             <label class="block text-gray-700 text-sm font-bold mb-2">类型</label>
@@ -280,10 +325,12 @@
                 const currentTab = ref('targets');
                 const targets = ref([]);
                 const results = ref([]);
+                const cookies = ref([]);
                 const crawlerStates = ref({});
                 const showModal = ref(false);
                 const isEditing = ref(false);
                 const resultFilter = ref({ platform: '' });
+                const targetFilter = ref({ platform: '', name: '', url: '' });
                 const eventSource = ref(null);
 
                 const loginCheckForm = ref({
@@ -300,12 +347,18 @@
                     name: '',
                     url: '',
                     target_type: 'url',
-                    is_active: true
+                    is_active: true,
+                    xpath_config: ''
                 });
 
                 const fetchTargets = async () => {
                     try {
-                        const response = await axios.get('/api/v1/crawler/targets');
+                        let url = '/api/v1/crawler/targets?';
+                        if (targetFilter.value.platform) url += `platform=${targetFilter.value.platform}&`;
+                        if (targetFilter.value.name) url += `name=${targetFilter.value.name}&`;
+                        if (targetFilter.value.url) url += `url=${targetFilter.value.url}`;
+                        
+                        const response = await axios.get(url);
                         if (response.data.success) {
                             targets.value = response.data.data;
                         } else {
@@ -313,6 +366,17 @@
                         }
                     } catch (error) {
                         console.error('Error fetching targets:', error);
+                    }
+                };
+                
+                const fetchCookies = async () => {
+                    try {
+                        const response = await axios.get('/api/v1/cookies');
+                        if (response.data.success) {
+                            cookies.value = response.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Error fetching cookies:', error);
                     }
                 };
 
@@ -397,11 +461,13 @@
                 const openAddTargetModal = () => {
                     isEditing.value = false;
                     targetForm.value = {
+                        id: null,
                         platform: 'bilibili',
                         name: '',
                         url: '',
                         target_type: 'url',
-                        is_active: true
+                        is_active: true,
+                        xpath_config: ''
                     };
                     showModal.value = true;
                 };
@@ -466,6 +532,14 @@
                     return new Date(timeStr).toLocaleString();
                 };
 
+                // Watch tab change
+                const { watch } = Vue;
+                watch(currentTab, (newTab) => {
+                    if (newTab === 'status') {
+                        fetchCookies();
+                    }
+                });
+
                 onMounted(() => {
                     // Initialize navbar
                     if (window.initNavbar) {
@@ -476,6 +550,15 @@
                     fetchResults();
                     refreshStatus();
                     setupSSE();
+                    
+                    // Listen to Global WebSocket for login failure
+                    if (window.GlobalWS) {
+                        window.GlobalWS.on('login_failed', (data) => {
+                             window.GlobalWS.showToast(`登录失效警告: ${data.platform} - ${data.message}`, 'error');
+                             // Refresh cookies list if on status tab
+                             if (currentTab.value === 'status') fetchCookies();
+                        });
+                    }
                 });
 
                 onUnmounted(() => {
@@ -506,7 +589,12 @@
                     getStatusClass,
                     formatTime,
                     fetchResults,
-                    refreshStatus
+                    refreshStatus,
+                    targetFilter,
+                    cookies,
+                    fetchTargets,
+                    fetchCookies,
+                    toggleTargetActive
                 };
             }
         }).mount('#app');

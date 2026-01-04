@@ -46,6 +46,17 @@ class CookieService:
             await self.db.rollback()
             raise e
 
+    async def get_all_cookies(self) -> List[Dict[str, Any]]:
+        """获取所有Cookie记录"""
+        try:
+            stmt = select(ChromeCookie)
+            result = await self.db.execute(stmt)
+            records = result.scalars().all()
+            return [{"domain": r.domain, "count": len(json.loads(r.cookies_json)), "id": r.id} for r in records]
+        except Exception as e:
+            logger.error(f"Failed to get all cookies: {e}")
+            raise e
+
     async def get_cookies(self, domain: str) -> Optional[List[Dict[str, Any]]]:
         """
         获取指定域名的Cookie

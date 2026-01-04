@@ -39,6 +39,24 @@ async def sync_cookies(
     except Exception as e:
         return BaseResponse(success=False, message=str(e))
 
+@router.get("", response_model=BaseResponse)
+async def get_all_cookies_list(
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    获取所有Cookie域名列表
+    """
+    try:
+        service = CookieService(db)
+        data = await service.get_all_cookies()
+        return BaseResponse(
+            success=True,
+            message="Success",
+            data=data
+        )
+    except Exception as e:
+        return BaseResponse(success=False, message=str(e))
+
 @router.get("/{domain}", response_model=BaseResponse)
 async def get_cookies(
     domain: str,

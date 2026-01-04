@@ -27,6 +27,7 @@ class CrawlerTargetCreate(BaseModel):
     target_type: str = "url"
     is_active: bool = True
     description: Optional[str] = None
+    xpath_config: Optional[str] = None
 
 class CrawlerTargetUpdate(BaseModel):
     platform: Optional[str] = None
@@ -35,6 +36,7 @@ class CrawlerTargetUpdate(BaseModel):
     target_type: Optional[str] = None
     is_active: Optional[bool] = None
     description: Optional[str] = None
+    xpath_config: Optional[str] = None
 
 class CrawlerTargetResponse(BaseModel):
     id: int
@@ -44,6 +46,7 @@ class CrawlerTargetResponse(BaseModel):
     target_type: str
     is_active: bool
     description: Optional[str] = None
+    xpath_config: Optional[str] = None
     last_crawled_at: Optional[datetime] = None
     last_status: Optional[str] = None
     created_at: datetime
@@ -120,15 +123,14 @@ async def get_all_states():
 @router.get("/targets", response_model=ResponseModel)
 async def get_targets(
     platform: Optional[str] = None,
+    name: Optional[str] = None,
+    url: Optional[str] = None,
     db: AsyncSession = Depends(get_db_session)
 ):
     """Get all crawler targets"""
     try:
         repo = CrawlerTargetRepository(db)
-        if platform:
-            targets = await repo.find_by_platform(platform)
-        else:
-            targets = await repo.get_multi(limit=1000)
+        targets = await repo.find_by_filters(platform=platform, name=name, url=url)
         return ResponseModel(success=True, message="Success", data=targets)
     except Exception as e:
         logger.error(f"Error fetching targets: {e}")

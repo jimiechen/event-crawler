@@ -16,6 +16,7 @@ class CrawlerTarget(BaseModel):
     target_type: Mapped[str] = mapped_column(String(20), default="url", comment="类型: url, keyword")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否启用")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="描述")
+    xpath_config: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="XPath配置(JSON)")
     
     last_crawled_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True, comment="上次爬取时间")
     last_status: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, comment="上次状态")
