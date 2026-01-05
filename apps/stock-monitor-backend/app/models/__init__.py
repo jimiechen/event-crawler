@@ -13,6 +13,7 @@ from .stock_daily import StockDaily, StockScoreResult, TaskLog
 from .task_log import TaskExecutionLog
 from .volume_analysis import VolumeAnalysisResult, RuleCalculationLog, AlertRecord, StockVolumeBaseline
 from .scheduled_task import ScheduledTask
+from .automation import AutomationConfig, AutomationTask, AutomationLog
 
 __all__ = [
     "Base",
@@ -33,5 +34,8 @@ __all__ = [
     "RuleCalculationLog",
     "AlertRecord",
     "StockVolumeBaseline",
-    "ScheduledTask"
+    "ScheduledTask",
+    "AutomationConfig",
+    "AutomationTask",
+    "AutomationLog"
 ]

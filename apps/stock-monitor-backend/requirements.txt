@@ -47,3 +47,6 @@ numpy>=1.24.0
 
 # 定时任务
 APScheduler>=3.10.0
+
+# 自动化测试
+uiautomator2>=2.16.0

@@ -89,18 +89,18 @@ async def report_health(request: HealthRequest):
         devices[device.device_id] = device.model_dump()
         device_last_seen[device.device_id] = datetime.now()
     
-    logger.info(f"Received health report: {len(request.devices)} devices")
+    adb_logger.info(f"Received health report: {len(request.devices)} devices")
     return BaseResponse()
 
 @router.post("/app_list", response_model=BaseResponse)
 async def report_app_list(request: AppListRequest):
-    logger.info(f"Received app list for {request.device_id}: {len(request.apps)} apps")
+    adb_logger.info(f"Received app list for {request.device_id}: {len(request.apps)} apps")
     # In a real app, store this in DB
     return BaseResponse(received_count=len(request.apps))
 
 @router.post("/events", response_model=BaseResponse)
 async def report_event(request: EventRequest):
-    logger.info(f"Received event from {request.device_id}: {request.action} - Success: {request.data.success}")
+    adb_logger.info(f"Received event from {request.device_id}: {request.action} - Success: {request.data.success}")
     # Broadcast to any monitoring clients (if we had a separate monitoring channel)
     # For now just log
     return BaseResponse()
