@@ -101,7 +101,7 @@
         if (!document.querySelector('script[src*="tailwindcss"]')) {
             console.log('Injecting Tailwind CSS...');
             const script = document.createElement('script');
-            script.src = "https://cdn.tailwindcss.com";
+            script.src = "/static/libs/tailwindcss.js";
             document.head.appendChild(script);
         }
     }

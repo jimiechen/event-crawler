@@ -55,6 +55,12 @@ class CrawlerTargetResponse(BaseModel):
     class Config:
         from_attributes = True
 
+class CookieUpdate(BaseModel):
+    account_name: Optional[str] = None
+    test_url: Optional[str] = None
+    xpath_config: Optional[str] = None
+    is_valid: Optional[bool] = None
+
 class CheckLoginRequest(BaseModel):
     platform: str
     url: Optional[str] = None
@@ -229,6 +235,55 @@ async def get_results(
         return ResponseModel(success=True, message="Success", data=results)
     except Exception as e:
         logger.error(f"Error fetching results: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+# --- Cookie Endpoints ---
+
+@router.get("/cookies", response_model=ResponseModel)
+async def get_cookies(db: AsyncSession = Depends(get_db_session)):
+    """Get all cookies"""
+    try:
+        from ..services.cookie_service import CookieService
+        service = CookieService(db)
+        cookies = await service.get_all_cookies()
+        return ResponseModel(success=True, message="Success", data=cookies)
+    except Exception as e:
+        logger.error(f"Error fetching cookies: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+@router.put("/cookies/{cookie_id}", response_model=ResponseModel)
+async def update_cookie(
+    cookie_id: int,
+    data: CookieUpdate,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Update cookie configuration"""
+    try:
+        from ..services.cookie_service import CookieService
+        service = CookieService(db)
+        success = await service.update_cookie(cookie_id, data.model_dump(exclude_unset=True))
+        if not success:
+            return ResponseModel(success=False, message="Cookie not found")
+        return ResponseModel(success=True, message="Cookie updated")
+    except Exception as e:
+        logger.error(f"Error updating cookie: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+@router.delete("/cookies/{cookie_id}", response_model=ResponseModel)
+async def delete_cookie(
+    cookie_id: int,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Delete cookie"""
+    try:
+        from ..services.cookie_service import CookieService
+        service = CookieService(db)
+        success = await service.delete_cookie(cookie_id)
+        if not success:
+            return ResponseModel(success=False, message="Cookie not found")
+        return ResponseModel(success=True, message="Cookie deleted")
+    except Exception as e:
+        logger.error(f"Error deleting cookie: {e}")
         return ResponseModel(success=False, message=str(e))
 
 @router.post("/check-login", response_model=ResponseModel)

@@ -4,20 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>爬虫维护中心</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/libs/tailwindcss.js"></script>
     <!-- Vue 3 -->
-    <script src="https://cdn.bootcdn.net/ajax/libs/vue/3.2.47/vue.global.prod.min.js"></script>
+    <script src="/static/libs/vue.global.prod.min.js"></script>
     <!-- Axios -->
-    <script src="https://cdn.bootcdn.net/ajax/libs/axios/1.3.4/axios.min.js"></script>
+    <script src="/static/libs/axios.min.js"></script>
     <script src="/static/js/navbar.js"></script>
-    <style>
-        .tab-btn {
-            @apply px-4 py-2 font-semibold text-gray-600 rounded-t-lg hover:bg-gray-100 transition duration-300;
-        }
-        .tab-btn.active {
-            @apply text-blue-600 border-b-2 border-blue-600 bg-white;
-        }
-    </style>
     <script src="/static/js/custom-alert.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen font-sans">
@@ -34,13 +26,16 @@
         <!-- Tabs -->
         <div class="mb-6 border-b border-gray-200">
             <nav class="flex -mb-px">
-                <button @click="currentTab = 'targets'" :class="['tab-btn', currentTab === 'targets' ? 'active' : '']">
+                <button @click="currentTab = 'targets'" 
+                    :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'targets' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
                     URL页面维护
                 </button>
-                <button @click="currentTab = 'status'" :class="['tab-btn', currentTab === 'status' ? 'active' : '']">
+                <button @click="currentTab = 'status'" 
+                    :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'status' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
                     登录状态维护
                 </button>
-                <button @click="currentTab = 'results'" :class="['tab-btn', currentTab === 'results' ? 'active' : '']">
+                <button @click="currentTab = 'results'" 
+                    :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'results' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
                     爬虫结果显示
                 </button>
             </nav>
@@ -446,7 +441,7 @@
                 
                 const fetchCookies = async () => {
                     try {
-                        const response = await axios.get('/api/v1/cookies');
+                        const response = await axios.get('/api/v1/crawler/cookies');
                         if (response.data.success) {
                             cookies.value = response.data.data;
                         }
@@ -610,7 +605,7 @@
 
                 const saveCookie = async () => {
                     try {
-                        await axios.put(`/api/v1/cookies/${cookieForm.value.id}`, cookieForm.value);
+                        await axios.put(`/api/v1/crawler/cookies/${cookieForm.value.id}`, cookieForm.value);
                         showCookieModal.value = false;
                         fetchCookies();
                     } catch (error) {
@@ -621,7 +616,7 @@
                 const deleteCookie = async (id) => {
                     if (!confirm('确定要删除此Cookie记录吗？')) return;
                     try {
-                        await axios.delete(`/api/v1/cookies/${id}`);
+                        await axios.delete(`/api/v1/crawler/cookies/${id}`);
                         fetchCookies();
                     } catch (error) {
                         alert('删除Cookie失败: ' + error.message);
@@ -629,8 +624,29 @@
                 };
 
                 const checkCookieLogin = async (cookie) => {
-                     // TODO: Implement backend logic
-                     alert('此功能正在开发中，将使用配置的Test URL和XPath检查登录状态。');
+                     if (!cookie.test_url || !cookie.xpath_config) {
+                         showAlert('warning', '请先配置测试URL和XPath');
+                         return;
+                     }
+                     
+                     try {
+                         const response = await axios.post('/api/v1/crawler/check-login', {
+                             platform: cookie.domain,
+                             url: cookie.test_url,
+                             nickname_xpath: cookie.xpath_config
+                         });
+                         
+                         if (response.data.success) {
+                             showAlert('success', '登录状态有效: ' + response.data.message);
+                             fetchCookies(); // Refresh status
+                         } else {
+                             showAlert('error', '登录失效: ' + response.data.message);
+                         }
+                     } catch (error) {
+                         console.error('Check login error:', error);
+                         const msg = error.response?.data?.message || error.message;
+                         showAlert('error', '检查失败: ' + msg);
+                     }
                 };
 
                 const getStatusClass = (status) => {
