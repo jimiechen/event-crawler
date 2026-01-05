@@ -44,3 +44,13 @@ class CrawlerResult(BaseModel):
     data_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="原始数据ID")
     
     crawled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment="爬取时间")
+
+class CrawlerLoginStatus(BaseModel):
+    """爬虫登录状态表"""
+    __tablename__ = "crawler_login_status"
+    
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True, comment="主键ID")
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, comment="平台")
+    is_logged_in: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否已登录")
+    message: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, comment="状态消息")
+    checked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment="检查时间")

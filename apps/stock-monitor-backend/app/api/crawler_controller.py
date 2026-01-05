@@ -7,7 +7,17 @@ from datetime import datetime
 from ..services.sse_service import sse_service
 from ..database import get_db_session
 from ..repositories.crawler_repository import CrawlerTargetRepository, CrawlerResultRepository
+from ..models.crawler import CrawlerLoginStatus
 from loguru import logger
+import sys
+import os
+
+# Add module path dynamically
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../../../../.."))
+crawler_module_path = os.path.join(project_root, "modules/module-playwright-crawler/src")
+if crawler_module_path not in sys.path:
+    sys.path.append(crawler_module_path)
 
 router = APIRouter(prefix="/api/v1/crawler", tags=["Crawler"])
 
@@ -66,6 +76,11 @@ class CheckLoginRequest(BaseModel):
     url: Optional[str] = None
     nickname_xpath: Optional[str] = None
 
+class ParseHtmlRequest(BaseModel):
+    platform: str
+    html: str
+    url: Optional[str] = None
+
 class CrawlerResultResponse(BaseModel):
     id: int
     platform: str
@@ -98,9 +113,62 @@ crawler_states: Dict[str, Dict[str, Any]] = {}
 @router.get("/events")
 async def sse_endpoint(request: Request):
     """
-    SSE endpoint for real-time crawler updates
+    SSE endpoint for real-time updates
     """
     return await sse_service.subscribe(request)
+
+@router.post("/parse_html")
+async def parse_html(
+    request: ParseHtmlRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    解析HTML并检查登录状态
+    """
+    try:
+        from playwright_crawler import LovartCrawler, TempmailCrawler, StitchCrawler, DeepseekCrawler
+    except ImportError as e:
+         logger.error(f"Failed to import crawler module: {e}")
+         raise HTTPException(status_code=500, detail=f"Failed to import crawler module: {e}")
+
+    crawler = None
+    if request.platform == 'lovart':
+        crawler = LovartCrawler()
+    elif request.platform == 'tempmail':
+        crawler = TempmailCrawler()
+    elif request.platform == 'stitch':
+        crawler = StitchCrawler()
+    elif request.platform == 'deepseek':
+        crawler = DeepseekCrawler()
+    
+    if not crawler:
+        raise HTTPException(status_code=400, detail=f"Unsupported platform: {request.platform}")
+
+    try:
+        # Parse HTML
+        parsed_data = crawler.parse_html(request.html)
+        
+        # Check Login Status
+        login_status = crawler.check_login_status_from_html(request.html)
+        
+        # Save login status
+        new_status = CrawlerLoginStatus(
+            platform=request.platform,
+            is_logged_in=login_status.get('logged_in', False),
+            message=login_status.get('message'),
+            checked_at=datetime.now()
+        )
+        db.add(new_status)
+        await db.commit()
+        
+        return {
+            "success": True,
+            "data": parsed_data,
+            "login_status": login_status
+        }
+    except Exception as e:
+        logger.error(f"Error processing HTML for {request.platform}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/status")
 async def update_crawler_status(
@@ -131,179 +199,72 @@ async def update_crawler_status(
 
     # Broadcast to frontend
     await sse_service.broadcast("crawler_status", status.dict())
-    
-    return {"success": True}
 
-@router.get("/states")
-async def get_all_states():
+# --- Debug Log Storage ---
+debug_logs = []
+
+class DebugHtmlRequest(BaseModel):
+    platform: str
+    url: str
+    xpath: str
+    html: str
+
+@router.post("/debughtml")
+async def debug_html(request: DebugHtmlRequest):
     """
-    Get current states of all crawlers (for initial load)
+    Debug HTML with XPath
     """
-    return {"success": True, "data": crawler_states}
-
-# --- Target CRUD Endpoints ---
-
-@router.get("/targets", response_model=ResponseModel)
-async def get_targets(
-    platform: Optional[str] = None,
-    name: Optional[str] = None,
-    url: Optional[str] = None,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Get all crawler targets"""
     try:
-        repo = CrawlerTargetRepository(db)
-        targets = await repo.find_by_filters(platform=platform, name=name, url=url)
-        data = [CrawlerTargetResponse.model_validate(t) for t in targets]
-        return ResponseModel(success=True, message="Success", data=data)
-    except Exception as e:
-        logger.error(f"Error fetching targets: {e}")
-        return ResponseModel(success=False, message=str(e))
+        from playwright_crawler import LovartCrawler, TempmailCrawler, StitchCrawler, DeepseekCrawler
+        from lxml import etree
+    except ImportError as e:
+         logger.error(f"Failed to import crawler module: {e}")
+         raise HTTPException(status_code=500, detail=f"Failed to import crawler module: {e}")
 
-@router.post("/targets", response_model=ResponseModel)
-async def create_target(
-    target: CrawlerTargetCreate,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Create a new crawler target"""
+    logger.info(f"Debugging HTML for {request.platform} with XPath: {request.xpath}")
+
+    # Use lxml for XPath
     try:
-        repo = CrawlerTargetRepository(db)
-        new_target = await repo.create(target)
-        return ResponseModel(success=True, message="Target created", data=CrawlerTargetResponse.model_validate(new_target))
-    except Exception as e:
-        logger.error(f"Error creating target: {e}")
-        return ResponseModel(success=False, message=str(e))
-
-@router.put("/targets/{target_id}", response_model=ResponseModel)
-async def update_target(
-    target_id: int,
-    target: CrawlerTargetUpdate,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Update a crawler target"""
-    try:
-        repo = CrawlerTargetRepository(db)
-        updated_target = await repo.update(target_id, target)
-        if not updated_target:
-            return ResponseModel(success=False, message="Target not found")
-        return ResponseModel(success=True, message="Target updated", data=CrawlerTargetResponse.model_validate(updated_target))
-    except Exception as e:
-        logger.error(f"Error updating target: {e}")
-        return ResponseModel(success=False, message=str(e))
-
-@router.delete("/targets/{target_id}", response_model=ResponseModel)
-async def delete_target(
-    target_id: int,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Delete a crawler target"""
-    try:
-        repo = CrawlerTargetRepository(db)
-        success = await repo.delete(target_id)
-        if not success:
-            return ResponseModel(success=False, message="Target not found")
-        return ResponseModel(success=True, message="Target deleted")
-    except Exception as e:
-        logger.error(f"Error deleting target: {e}")
-        return ResponseModel(success=False, message=str(e))
-
-# --- Result Endpoints ---
-
-@router.get("/results", response_model=ResponseModel)
-async def get_results(
-    platform: Optional[str] = None,
-    target_id: Optional[int] = None,
-    limit: int = 100,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Get crawler results"""
-    try:
-        repo = CrawlerResultRepository(db)
-        if target_id:
-            results = await repo.find_by_target_id(target_id, limit)
-        elif platform:
-            results = await repo.find_by_platform(platform, limit)
-        else:
-            results = await repo.get_multi(limit=limit, order_by="crawled_at") # Need to ensure order_by handles desc logic if passed string, or just default to whatever get_multi does. 
-            # BaseRepository.get_multi sort support is basic. 
-            # Let's just use what we have or improve repository if needed. 
-            # Actually repo.get_multi takes string for order_by. 
-            # But "crawled_at desc" string might not work depending on implementation.
-            # Let's just use repo.find_all_by_field if platform provided, else default.
-            # Actually, let's just stick to platform/target_id filtering for now as per requirements.
+        parser = etree.HTMLParser()
+        tree = etree.fromstring(request.html, parser)
+        results = tree.xpath(request.xpath)
         
-        return ResponseModel(success=True, message="Success", data=results)
+        extracted_data = []
+        if results:
+            for res in results:
+                if hasattr(res, 'text'):
+                    extracted_data.append(res.text)
+                elif isinstance(res, str):
+                    extracted_data.append(res)
+                else:
+                    extracted_data.append(str(res))
+            
+            result_str = "\n".join(extracted_data)
+        else:
+            result_str = "No match found"
+            
     except Exception as e:
-        logger.error(f"Error fetching results: {e}")
-        return ResponseModel(success=False, message=str(e))
+        result_str = f"XPath Error: {str(e)}"
 
-# --- Cookie Endpoints ---
-
-@router.get("/cookies", response_model=ResponseModel)
-async def get_cookies(db: AsyncSession = Depends(get_db_session)):
-    """Get all cookies"""
-    try:
-        from ..services.cookie_service import CookieService
-        service = CookieService(db)
-        cookies = await service.get_all_cookies()
-        return ResponseModel(success=True, message="Success", data=cookies)
-    except Exception as e:
-        logger.error(f"Error fetching cookies: {e}")
-        return ResponseModel(success=False, message=str(e))
-
-@router.put("/cookies/{cookie_id}", response_model=ResponseModel)
-async def update_cookie(
-    cookie_id: int,
-    data: CookieUpdate,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Update cookie configuration"""
-    try:
-        from ..services.cookie_service import CookieService
-        service = CookieService(db)
-        success = await service.update_cookie(cookie_id, data.model_dump(exclude_unset=True))
-        if not success:
-            return ResponseModel(success=False, message="Cookie not found")
-        return ResponseModel(success=True, message="Cookie updated")
-    except Exception as e:
-        logger.error(f"Error updating cookie: {e}")
-        return ResponseModel(success=False, message=str(e))
-
-@router.delete("/cookies/{cookie_id}", response_model=ResponseModel)
-async def delete_cookie(
-    cookie_id: int,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """Delete cookie"""
-    try:
-        from ..services.cookie_service import CookieService
-        service = CookieService(db)
-        success = await service.delete_cookie(cookie_id)
-        if not success:
-            return ResponseModel(success=False, message="Cookie not found")
-        return ResponseModel(success=True, message="Cookie deleted")
-    except Exception as e:
-        logger.error(f"Error deleting cookie: {e}")
-        return ResponseModel(success=False, message=str(e))
-
-@router.post("/check-login", response_model=ResponseModel)
-async def check_login_status(
-    request: CheckLoginRequest,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    Check login status for a platform
-    """
-    from ..services.crawler_service import CrawlerService
-    service = CrawlerService(db)
-    result = await service.check_login_status(
-        request.platform, 
-        request.url, 
-        request.nickname_xpath
-    )
+    # Log the debug session
+    log_entry = {
+        "platform": request.platform,
+        "url": request.url,
+        "xpath": request.xpath,
+        "result": result_str,
+        "created_at": datetime.now().isoformat()
+    }
     
-    return ResponseModel(
-        success=result.get("logged_in", False),
-        message=result.get("message", "Unknown status"),
-        data=result
-    )
+    # Keep last 50 logs
+    debug_logs.insert(0, log_entry)
+    if len(debug_logs) > 50:
+        debug_logs.pop()
+        
+    return {"success": True, "data": log_entry}
+
+@router.get("/debug_logs")
+async def get_debug_logs():
+    """
+    Get recent debug logs
+    """
+    return {"success": True, "data": debug_logs}

@@ -146,6 +146,37 @@
       </button>
     </div>
 
+    <!-- 爬虫测试 -->
+    <div class="crawler-test-section">
+      <h4>爬虫测试与调试</h4>
+      
+      <!-- HTML调试 -->
+      <div class="debug-input-section">
+        <div class="input-group">
+            <input v-model="debugXpath" placeholder="输入XPath (e.g. //div[@class='title'])" class="xpath-input" />
+            <button @click="debugHtml" class="debug-btn">调试HTML</button>
+        </div>
+        <div class="platform-select">
+            <select v-model="debugPlatform">
+                <option value="lovart">Lovart</option>
+                <option value="tempmail">Tempmail</option>
+                <option value="stitch">Stitch</option>
+                <option value="deepseek">Deepseek</option>
+            </select>
+        </div>
+      </div>
+
+      <div class="test-buttons">
+        <button @click="testCrawler('lovart')" class="test-btn">测试 Lovart</button>
+        <button @click="testCrawler('tempmail')" class="test-btn">测试 Tempmail</button>
+        <button @click="testCrawler('stitch')" class="test-btn">测试 Stitch</button>
+        <button @click="testCrawler('deepseek')" class="test-btn">测试 Deepseek</button>
+      </div>
+      <div v-if="testResult" class="test-result">
+        <pre>{{ testResult }}</pre>
+      </div>
+    </div>
+
     <!-- 操作按钮 -->
     <div class="action-buttons">
       <button @click="exportStatus" class="action-btn">
@@ -539,6 +570,98 @@ const showRunHistory = async () => {
   }
 };
 
+// 爬虫测试
+const testResult = ref('');
+const debugXpath = ref('');
+const debugPlatform = ref('lovart');
+
+const debugHtml = async () => {
+  if (!debugXpath.value) {
+    testResult.value = "Please enter XPath";
+    return;
+  }
+  
+  try {
+    testResult.value = `Debugging HTML with XPath: ${debugXpath.value}...`;
+    
+    // Get current tab ID
+    const tabId = await getCurrentTabId();
+    if (!tabId) throw new Error("No active tab found");
+
+    // Execute script to get HTML and URL
+    // @ts-ignore
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: () => ({
+          html: document.documentElement.outerHTML,
+          url: window.location.href
+      })
+    });
+    
+    const { html, url } = results[0].result;
+    
+    // Send to backend
+    const response = await fetch('http://localhost:8000/api/v1/crawler/debughtml', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        platform: debugPlatform.value,
+        url: url,
+        xpath: debugXpath.value,
+        html: html
+      })
+    });
+    
+    const data = await response.json();
+    testResult.value = JSON.stringify(data, null, 2);
+    
+  } catch (error: any) {
+    testResult.value = `Error: ${error.message || String(error)}`;
+    console.error(error);
+  }
+};
+
+const testCrawler = async (platform: string) => {
+  try {
+    testResult.value = `Testing ${platform}...`;
+    
+    // Get current tab ID
+    const tabId = await getCurrentTabId();
+    if (!tabId) throw new Error("No active tab found");
+
+    // Execute script to get HTML
+    // @ts-ignore
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      func: () => document.documentElement.outerHTML
+    });
+    
+    const html = results[0].result;
+    
+    // Send to backend
+    const response = await fetch('http://localhost:8000/api/v1/crawler/parse_html', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        platform: platform,
+        html: html,
+        url: 'current_tab_url' 
+      })
+    });
+    
+    const data = await response.json();
+    testResult.value = JSON.stringify(data, null, 2);
+    
+  } catch (error: any) {
+    testResult.value = `Error: ${error.message || String(error)}`;
+    console.error(error);
+  }
+};
+
 // 生命周期
 onMounted(() => {
   updateStatus();
@@ -906,5 +1029,86 @@ onUnmounted(() => {
   background: #f8f9fa;
   border-radius: 6px;
   font-size: 14px;
+}
+
+.crawler-test-section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #dee2e6;
+}
+
+.test-buttons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.test-btn {
+  padding: 6px 12px;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.test-btn:hover {
+  background: #0056b3;
+}
+
+.test-result {
+  margin-top: 8px;
+  padding: 8px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.test-result pre {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.debug-input-section {
+  margin-bottom: 12px;
+}
+
+.input-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.xpath-input {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.debug-btn {
+  padding: 6px 12px;
+  background: #28a745;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.debug-btn:hover {
+  background: #218838;
+}
+
+.platform-select select {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid #ced4da;
+  border-radius: 4px;
+  background-color: white;
 }
 </style>

@@ -38,7 +38,48 @@
                     :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'results' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
                     爬虫结果显示
                 </button>
+                <button @click="currentTab = 'debug'" 
+                    :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'debug' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
+                    爬虫调试
+                </button>
             </nav>
+        </div>
+
+        <!-- Content: Debug -->
+        <div v-if="currentTab === 'debug'" class="space-y-6">
+            <div class="bg-white p-6 rounded-lg shadow">
+                <div class="flex justify-between items-center mb-4">
+                     <h2 class="text-xl font-semibold">最新调试记录</h2>
+                     <button @click="fetchDebugLogs" class="bg-gray-100 hover:bg-gray-200 text-gray-800 px-3 py-1 rounded text-sm">刷新</button>
+                </div>
+                <div v-if="debugLogs.length === 0" class="text-center text-gray-500 py-10">
+                    暂无调试记录，请在Chrome扩展中使用"调试HTML"功能
+                </div>
+                <div v-else class="space-y-4">
+                    <div v-for="(log, index) in debugLogs" :key="index" class="border rounded-lg p-4 hover:shadow-md transition">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <span class="inline-block px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded font-semibold mr-2">{{ log.platform }}</span>
+                                <span class="text-gray-500 text-sm">{{ new Date(log.created_at).toLocaleString() }}</span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-2">
+                            <div>
+                                <div class="text-xs font-semibold text-gray-500 uppercase">URL</div>
+                                <div class="text-sm truncate text-blue-600" :title="log.url">{{ log.url }}</div>
+                            </div>
+                            <div>
+                                <div class="text-xs font-semibold text-gray-500 uppercase">XPath</div>
+                                <div class="text-sm font-mono bg-gray-50 p-1 rounded">{{ log.xpath }}</div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="text-xs font-semibold text-gray-500 uppercase mb-1">提取结果</div>
+                            <div class="bg-gray-900 text-green-400 p-3 rounded text-xs font-mono overflow-x-auto max-h-60 whitespace-pre-wrap">{{ log.result }}</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Content: Targets -->
@@ -391,6 +432,20 @@
                 const resultFilter = ref({ platform: '' });
                 const targetFilter = ref({ platform: '', name: '', url: '' });
                 const eventSource = ref(null);
+                
+                // Debug Logs
+                const debugLogs = ref([]);
+
+                const fetchDebugLogs = async () => {
+                    try {
+                        const response = await axios.get('/api/v1/crawler/debug_logs');
+                        if (response.data.success) {
+                            debugLogs.value = response.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Error fetching debug logs:', error);
+                    }
+                };
 
                 // Cookie Management State
                 const showCookieModal = ref(false);
@@ -679,6 +734,7 @@
                     
                     fetchTargets();
                     fetchResults();
+                    fetchDebugLogs();
                     refreshStatus();
                     setupSSE();
                     
@@ -733,7 +789,10 @@
                     closeCookieModal,
                     saveCookie,
                     deleteCookie,
-                    checkCookieLogin
+                    checkCookieLogin,
+                    // Debug
+                    debugLogs,
+                    fetchDebugLogs
                 };
             }
         }).mount('#app');
