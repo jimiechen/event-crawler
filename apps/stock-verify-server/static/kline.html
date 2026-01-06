@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Verify - K-Line & Simulation</title>
+    <script src="/static/libs/tailwindcss.js"></script>
+    <script src="/static/libs/echarts.min.js"></script>
+    <style>
+        body { background-color: #f3f4f6; }
+        .chart-container { height: 600px; width: 100%; }
+        .log-panel { height: 300px; overflow-y: auto; background: #1f2937; color: #10b981; font-family: monospace; font-size: 0.875rem; padding: 1rem; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                <span class="text-blue-600">📊</span> Stock Verify Console
+            </h1>
+            <div class="flex gap-4">
+                <input type="text" id="stockCodeInput" value="603601.SH" class="border rounded px-3 py-2 text-sm w-32" placeholder="Code">
+                <button onclick="loadStockData()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium">Load Data</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow container mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Left Column: Chart & Controls -->
+        <div class="lg:col-span-2 space-y-6">
+            <!-- Chart Card -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-lg font-semibold text-gray-700">K-Line Visualization</h2>
+                    <div class="flex items-center gap-2">
+                         <span class="text-xs text-gray-500">Click on a candle to trigger simulation</span>
+                    </div>
+                </div>
+                <div id="klineChart" class="chart-container"></div>
+            </div>
+
+            <!-- Simulation Controls -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">Simulation Control</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="p-4 border rounded bg-gray-50">
+                        <h3 class="font-medium text-gray-900 mb-2">Current Selection</h3>
+                        <div id="selectionInfo" class="text-sm text-gray-600 space-y-1">
+                            <p>Date: <span id="selDate">-</span></p>
+                            <p>Close: <span id="selClose">-</span></p>
+                            <p>Volume: <span id="selVol">-</span></p>
+                        </div>
+                        <button id="btnSendSignal" onclick="sendSimulationSignal()" disabled class="mt-4 w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white py-2 rounded font-medium transition">
+                            🚀 Send Simulation Signal
+                        </button>
+                    </div>
+                    <div class="p-4 border rounded bg-gray-50">
+                        <h3 class="font-medium text-gray-900 mb-2">Batch Simulation</h3>
+                        <div class="flex items-center gap-2 mb-2">
+                            <input type="number" id="simDays" value="5" class="border rounded px-2 py-1 w-20" min="1" max="30">
+                            <span class="text-sm text-gray-600">Days</span>
+                        </div>
+                        <button onclick="runBatchSimulation()" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded font-medium transition">
+                            ▶ Run Batch (T+N)
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: Logs & Status -->
+        <div class="space-y-6">
+            <!-- Status Card -->
+            <div class="bg-white rounded-lg shadow p-4">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4">Verification Status</h2>
+                <div id="verifyStatus" class="space-y-2">
+                    <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                        <span class="text-sm text-gray-600">Backend Connection</span>
+                        <span id="statusBackend" class="text-xs font-bold px-2 py-1 rounded bg-gray-200 text-gray-500">Checking...</span>
+                    </div>
+                    <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                        <span class="text-sm text-gray-600">Last Signal</span>
+                        <span id="statusSignal" class="text-xs font-bold px-2 py-1 rounded bg-gray-200 text-gray-500">None</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logs Panel -->
+            <div class="bg-white rounded-lg shadow overflow-hidden flex flex-col h-full max-h-[600px]">
+                <div class="p-3 border-b bg-gray-100 flex justify-between items-center">
+                    <h2 class="font-semibold text-gray-700">Transaction Logs</h2>
+                    <button onclick="clearLogs()" class="text-xs text-red-500 hover:text-red-700">Clear</button>
+                </div>
+                <div id="logPanel" class="log-panel flex-grow">
+                    <div>[System] Ready.</div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // Configuration
+        const API_BASE = '/api';
+        let chartInstance = null;
+        let currentStockData = [];
+        let selectedCandle = null;
+
+        // --- Logger ---
+        function log(msg, type = 'info') {
+            const panel = document.getElementById('logPanel');
+            const div = document.createElement('div');
+            const time = new Date().toLocaleTimeString();
+            div.innerHTML = `<span class="text-gray-500">[${time}]</span> <span class="${type === 'error' ? 'text-red-400' : 'text-green-400'}">${msg}</span>`;
+            panel.appendChild(div);
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logPanel').innerHTML = '<div>[System] Logs cleared.</div>';
+        }
+
+        // --- API Client ---
+        async function apiCall(endpoint, method = 'POST', body = null) {
+            try {
+                const options = {
+                    method,
+                    headers: { 'Content-Type': 'application/json' }
+                };
+                if (body) options.body = JSON.stringify(body);
+                
+                const res = await fetch(`${API_BASE}${endpoint}`, options);
+                const data = await res.json();
+                return data;
+            } catch (e) {
+                log(`API Error: ${e.message}`, 'error');
+                throw e;
+            }
+        }
+
+        // --- Initialization ---
+        async function checkBackend() {
+            try {
+                // Ping backend through proxy
+                const res = await apiCall('/proxy/health', 'GET');
+                const el = document.getElementById('statusBackend');
+                if (res.status === 'ok') {
+                    el.className = 'text-xs font-bold px-2 py-1 rounded bg-green-100 text-green-700';
+                    el.textContent = 'ONLINE (8000)';
+                } else {
+                    throw new Error('Backend unhealthy');
+                }
+            } catch (e) {
+                const el = document.getElementById('statusBackend');
+                el.className = 'text-xs font-bold px-2 py-1 rounded bg-red-100 text-red-700';
+                el.textContent = 'OFFLINE';
+                log('Failed to connect to backend via proxy', 'error');
+            }
+        }
+
+        // --- Charting ---
+        function initChart() {
+            const dom = document.getElementById('klineChart');
+            chartInstance = echarts.init(dom);
+            
+            chartInstance.on('click', function (params) {
+                if (params.componentType === 'series' && (params.seriesType === 'candlestick' || params.seriesType === 'bar')) {
+                    const index = params.dataIndex;
+                    const item = currentStockData[index];
+                    selectCandle(item);
+                }
+            });
+
+            window.addEventListener('resize', () => chartInstance.resize());
+        }
+
+        function renderChart(stockCode, data) {
+            if (!chartInstance) initChart();
+            
+            // Sort data by date
+            data.sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+            currentStockData = data;
+
+            const dates = data.map(i => i.trade_date);
+            // ECharts candlestick: [open, close, low, high]
+            const kData = data.map(i => [
+                parseFloat(i.open),
+                parseFloat(i.close),
+                parseFloat(i.low),
+                parseFloat(i.high)
+            ]);
+            const volumes = data.map((i, idx) => [idx, parseFloat(i.volume), parseFloat(i.open) > parseFloat(i.close) ? -1 : 1]);
+
+            const option = {
+                title: { text: stockCode, left: 10 },
+                tooltip: {
+                    trigger: 'axis',
+                    axisPointer: { type: 'cross' }
+                },
+                grid: [
+                    { left: '5%', right: '5%', height: '60%' },
+                    { left: '5%', right: '5%', top: '75%', height: '15%' }
+                ],
+                xAxis: [
+                    { type: 'category', data: dates, scale: true, boundaryGap: false, splitLine: { show: false } },
+                    { type: 'category', gridIndex: 1, data: dates, scale: true, boundaryGap: false, axisLabel: { show: false } }
+                ],
+                yAxis: [
+                    { scale: true, splitArea: { show: true } },
+                    { scale: true, gridIndex: 1, splitNumber: 2, axisLabel: { show: false }, axisLine: { show: false }, splitLine: { show: false } }
+                ],
+                dataZoom: [
+                    { type: 'inside', xAxisIndex: [0, 1], start: 50, end: 100 },
+                    { show: true, xAxisIndex: [0, 1], type: 'slider', top: '92%', start: 50, end: 100 }
+                ],
+                series: [
+                    {
+                        name: 'K-Line',
+                        type: 'candlestick',
+                        data: kData,
+                        itemStyle: {
+                            color: '#ef4444', // Up (Red in China)
+                            color0: '#22c55e', // Down (Green in China)
+                            borderColor: '#ef4444',
+                            borderColor0: '#22c55e'
+                        }
+                    },
+                    {
+                        name: 'Volume',
+                        type: 'bar',
+                        xAxisIndex: 1,
+                        yAxisIndex: 1,
+                        data: volumes,
+                        itemStyle: {
+                            color: (params) => params.data[2] === 1 ? '#ef4444' : '#22c55e'
+                        }
+                    }
+                ]
+            };
+            
+            chartInstance.setOption(option);
+        }
+
+        // --- Logic ---
+        async function loadStockData() {
+            const code = document.getElementById('stockCodeInput').value.trim();
+            if (!code) return;
+            
+            log(`Loading data for ${code}...`);
+            try {
+                // Call Verify Server API to get data (which might proxy to backend or read local DB)
+                const res = await apiCall(`/stock/${code}/history`, 'GET');
+                if (res.status === 'success' && res.data) {
+                    renderChart(code, res.data);
+                    log(`Loaded ${res.data.length} records.`);
+                } else {
+                    log(`Failed to load data: ${res.message || 'Unknown error'}`, 'error');
+                }
+            } catch (e) {
+                // Fallback for demo/testing if backend not ready
+                log('Using mock data for demonstration (Backend fetch failed)', 'info');
+                // TODO: Remove this in production
+                const mockData = generateMockData(100);
+                renderChart(code, mockData);
+            }
+        }
+
+        function selectCandle(item) {
+            selectedCandle = item;
+            document.getElementById('selDate').textContent = item.trade_date;
+            document.getElementById('selClose').textContent = item.close;
+            document.getElementById('selVol').textContent = item.volume;
+            document.getElementById('btnSendSignal').disabled = false;
+            
+            // Highlight in chart (optional)
+            log(`Selected: ${item.trade_date}`);
+        }
+
+        async function sendSimulationSignal() {
+            if (!selectedCandle) return;
+            
+            const btn = document.getElementById('btnSendSignal');
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            
+            const payload = {
+                code: document.getElementById('stockCodeInput').value,
+                trade_date: selectedCandle.trade_date,
+                close: selectedCandle.close,
+                open: selectedCandle.open,
+                high: selectedCandle.high,
+                low: selectedCandle.low,
+                volume: selectedCandle.volume,
+                timestamp: new Date().toISOString()
+            };
+            
+            log(`Sending signal for ${payload.trade_date}...`);
+            
+            try {
+                const start = performance.now();
+                const res = await apiCall('/simulate/signal', 'POST', payload);
+                const duration = Math.round(performance.now() - start);
+                
+                if (res.status === 'success') {
+                    log(`Signal Sent & Verified in ${duration}ms ✅`);
+                    log(`Backend Response: ${JSON.stringify(res.backend_response)}`);
+                    
+                    const statusEl = document.getElementById('statusSignal');
+                    statusEl.textContent = `${payload.trade_date} (OK)`;
+                    statusEl.className = 'text-xs font-bold px-2 py-1 rounded bg-green-100 text-green-700';
+                } else {
+                    throw new Error(res.message);
+                }
+            } catch (e) {
+                log(`Signal Failed: ${e.message} ❌`, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '🚀 Send Simulation Signal';
+            }
+        }
+
+        async function runBatchSimulation() {
+            const days = document.getElementById('simDays').value;
+            const code = document.getElementById('stockCodeInput').value;
+            log(`Starting batch simulation for ${days} days...`);
+            await apiCall('/simulate/batch', 'POST', { stock_code: code, days: parseInt(days) });
+            log('Batch simulation started.');
+        }
+
+        function generateMockData(count) {
+            const data = [];
+            let date = new Date();
+            date.setDate(date.getDate() - count);
+            let price = 10;
+            
+            for(let i=0; i<count; i++) {
+                date.setDate(date.getDate() + 1);
+                if(date.getDay() === 0 || date.getDay() === 6) continue;
+                
+                const open = price * (1 + (Math.random() - 0.5) * 0.05);
+                const close = price * (1 + (Math.random() - 0.5) * 0.05);
+                const high = Math.max(open, close) * (1 + Math.random() * 0.02);
+                const low = Math.min(open, close) * (1 - Math.random() * 0.02);
+                const vol = Math.floor(Math.random() * 1000000);
+                
+                data.push({
+                    trade_date: date.toISOString().split('T')[0],
+                    open: open.toFixed(2),
+                    close: close.toFixed(2),
+                    high: high.toFixed(2),
+                    low: low.toFixed(2),
+                    volume: vol
+                });
+                price = close;
+            }
+            return data;
+        }
+
+        // Auto-run
+        checkBackend();
+        loadStockData(); // Try initial load
+    </script>
+</body>
+</html>

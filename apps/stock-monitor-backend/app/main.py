@@ -60,6 +60,16 @@ async def lifespan(app: FastAPI):
         scheduler_service.start()
         logger.info("✅ 定时任务调度器已启动")
 
+        # 初始化配置
+        try:
+            from .services.pattern_analysis_service import PatternAnalysisService
+            async with db_manager.get_session() as session:
+                pattern_service = PatternAnalysisService(session)
+                await pattern_service.init_configs()
+                logger.info("✅ 评分配置初始化完成")
+        except Exception as e:
+            logger.warning(f"⚠️ 评分配置初始化失败: {e}")
+
         # 启动任务执行器 (APScheduler)
         executor.start()
         logger.info("✅ 任务执行器已启动")
@@ -247,6 +257,7 @@ app.include_router(cookie_controller.router)
 app.include_router(crawler_controller.router)
 app.include_router(adb_controller.router)
 app.include_router(automation_controller.router)
+app.include_router(pattern_analysis_controller.router)
 
 # 配置静态文件服务
 static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")

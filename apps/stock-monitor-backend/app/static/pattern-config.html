@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>缠论量价 - 分析配置中心</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; background-color: #f5f7fa; }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        h1 { color: #2c3e50; margin: 0; }
+        button { padding: 8px 16px; border: none; border-radius: 4px; background-color: #3498db; color: white; cursor: pointer; }
+        button.secondary { background-color: #95a5a6; }
+        button:hover { opacity: 0.9; }
+        
+        .section { background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .section-title { font-size: 1.2em; font-weight: bold; margin-bottom: 15px; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; color: #666; }
+        
+        input[type="number"] { width: 80px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; }
+        input[type="checkbox"] { transform: scale(1.2); }
+        
+        .action-btn { background-color: #2ecc71; padding: 4px 8px; font-size: 0.9em; }
+        .screen-btn { background-color: #e67e22; font-size: 1.1em; padding: 10px 20px; width: 100%; }
+        
+        #pool-list { max-height: 400px; overflow-y: auto; }
+        .status-badge { padding: 2px 6px; border-radius: 4px; font-size: 0.85em; }
+        .status-core { background-color: #ffeaa7; color: #d35400; border: 1px solid #fdcb6e; }
+        .status-observation { background-color: #dfe6e9; color: #636e72; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>缠论量价分析配置</h1>
+            <div>
+                <button class="secondary" onclick="window.location.href='/static/concept-cloud.html'">查看行业云图</button>
+            </div>
+        </div>
+
+        <!-- 实时告警区域 -->
+        <div id="alert-section" class="section" style="display: none; border-left: 5px solid #e74c3c;">
+            <div class="section-title" style="color: #c0392b;">⚠️ 实时监控告警</div>
+            <div id="alert-list" style="max-height: 200px; overflow-y: auto;"></div>
+        </div>
+
+        <!-- 评分配置 -->
+        <div class="section">
+            <div class="section-title">形态评分配置</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>形态代码</th>
+                        <th>名称</th>
+                        <th>描述</th>
+                        <th>分值</th>
+                        <th>启用</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="config-table">
+                    <!-- Dynamic content -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- 筛选操作 -->
+        <div class="section">
+            <div class="section-title">手动筛选控制</div>
+            <p style="color: #666; font-size: 0.9em; margin-bottom: 15px;">
+                注意：筛选将基于"临时表"数据进行，并根据配置更新"核心股票池"。
+                筛选过程包括：EXPMA13校验、形态评分计算、优胜劣汰(Core池限制20只)。
+            </p>
+            <button class="screen-btn" onclick="runScreening()">立即执行形态筛选</button>
+            <div id="screen-result" style="margin-top: 10px; color: #27ae60;"></div>
+        </div>
+
+        <!-- 股票池预览 -->
+        <div class="section">
+            <div class="section-title">当前核心股票池 (Top 20)</div>
+            <div id="pool-list">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>代码</th>
+                            <th>评分</th>
+                            <th>匹配形态</th>
+                            <th>状态</th>
+                            <th>入池时间</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pool-table">
+                        <!-- Dynamic content -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Load Configs
+        async function loadConfigs() {
+            const res = await fetch('/api/pattern/configs');
+            const response = await res.json();
+            const configs = response.data; // Wrapper
+            
+            const tbody = document.getElementById('config-table');
+            tbody.innerHTML = '';
+            
+            configs.forEach(cfg => {
+                // Map backend fields to frontend
+                const code = cfg.pattern_code;
+                const name = cfg.pattern_name;
+                const enabled = cfg.is_enabled;
+                
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${code}</td>
+                    <td>${name}</td>
+                    <td>${cfg.description}</td>
+                    <td><input type="number" id="score-${code}" value="${cfg.score}"></td>
+                    <td><input type="checkbox" id="enabled-${code}" ${enabled ? 'checked' : ''}></td>
+                    <td><button class="action-btn" onclick="saveConfig('${code}')">保存</button></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // Save Single Config
+        async function saveConfig(code) {
+            const score = document.getElementById(`score-${code}`).value;
+            const enabled = document.getElementById(`enabled-${code}`).checked;
+            
+            try {
+                const res = await fetch('/api/pattern/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ code, score: parseFloat(score), enabled })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('保存成功');
+                    loadConfigs();
+                } else {
+                    alert('保存失败: ' + data.message);
+                }
+            } catch (e) {
+                console.error(e);
+                alert('请求错误');
+            }
+        }
+
+        // Run Screening
+        async function runScreening() {
+            const btn = document.querySelector('.screen-btn');
+            const resultDiv = document.getElementById('screen-result');
+            btn.disabled = true;
+            btn.textContent = '筛选计算中...';
+            resultDiv.textContent = '';
+            
+            try {
+                const res = await fetch('/api/pattern/screen', { method: 'POST' });
+                const response = await res.json();
+                if(response.success) {
+                    const data = response.data;
+                    resultDiv.textContent = `筛选完成: 总处理 ${data.processed}, 通过 ${data.passed}, 失败 ${data.failed}`;
+                    loadPool();
+                } else {
+                    resultDiv.textContent = '筛选失败: ' + response.message;
+                }
+            } catch (e) {
+                resultDiv.textContent = '筛选请求失败: ' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '立即执行形态筛选';
+            }
+        }
+
+        // Load Pool
+        async function loadPool() {
+            const res = await fetch('/api/pattern/pool?status=core');
+            const response = await res.json();
+            const stocks = response.data;
+            const tbody = document.getElementById('pool-table');
+            tbody.innerHTML = '';
+            
+            stocks.forEach(stock => {
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${stock.stock_code}</td>
+                    <td><strong>${stock.score}</strong></td>
+                    <td>${stock.pattern_details}</td>
+                    <td><span class="status-badge status-${stock.status}">${stock.status}</span></td>
+                    <td>${new Date(stock.updated_at || new Date()).toLocaleDateString()}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+        
+        // SSE Listener
+        function initSSE() {
+            const evtSource = new EventSource("/api/sse/subscribe");
+            
+            evtSource.addEventListener("core_alert", function(event) {
+                const payload = JSON.parse(event.data); // data is already JSON string inside event.data?
+                // Wait, broadcast sends data as JSON string? 
+                // sse_service.broadcast sends: "data": json.dumps(data)
+                // So event.data IS the JSON string.
+                
+                // But wait, the sse_starlette might wrap it.
+                // Let's assume standard SSE behavior.
+                
+                // Parse payload if it's stringified
+                let data = payload;
+                if (typeof payload === 'string') {
+                    try { data = JSON.parse(payload); } catch(e){}
+                }
+                
+                // Show alert section
+                document.getElementById('alert-section').style.display = 'block';
+                const list = document.getElementById('alert-list');
+                
+                const div = document.createElement('div');
+                div.style.padding = '10px';
+                div.style.borderBottom = '1px solid #eee';
+                div.style.backgroundColor = '#fff';
+                div.innerHTML = `
+                    <strong>${data.message}</strong>
+                    <br>
+                    <span style="font-size: 0.8em; color: #999;">${data.timestamp}</span>
+                `;
+                list.insertBefore(div, list.firstChild);
+            });
+            
+            evtSource.onerror = function() {
+                console.log("SSE Connection Error");
+            };
+        }
+
+        // Initial Load
+        loadConfigs();
+        loadPool();
+        initSSE();
+    </script>
+</body>
+</html>

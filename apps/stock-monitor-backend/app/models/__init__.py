@@ -9,11 +9,14 @@ from .base import Base
 from .stock import StockInfo, StockData, MonitorList, DataDedupLog, StockConcept
 from .network import NetworkData
 from .tag_management import StockTagInfo, StockTagRelation, OperationLog
-from .stock_daily import StockDaily, StockScoreResult, TaskLog
+from .cookie import ChromeCookie
+from .pattern_config import PatternConfig, PatternStockPool
+from .stock_daily import StockDaily, StockDailyTemp, StockScoreResult, TaskLog
 from .task_log import TaskExecutionLog
 from .volume_analysis import VolumeAnalysisResult, RuleCalculationLog, AlertRecord, StockVolumeBaseline
 from .scheduled_task import ScheduledTask
 from .automation import AutomationConfig, AutomationTask, AutomationLog
+from .crawler import CrawlerTarget, CrawlerResult, CrawlerLoginStatus
 
 __all__ = [
     "Base",
@@ -27,6 +30,7 @@ __all__ = [
     "StockTagRelation",
     "OperationLog",
     "StockDaily",
+    "StockDailyTemp",
     "StockScoreResult",
     "TaskLog",
     "TaskExecutionLog",
@@ -37,5 +41,11 @@ __all__ = [
     "ScheduledTask",
     "AutomationConfig",
     "AutomationTask",
-    "AutomationLog"
+    "AutomationLog",
+    "ChromeCookie",
+    "PatternConfig",
+    "PatternStockPool",
+    "CrawlerTarget",
+    "CrawlerResult",
+    "CrawlerLoginStatus"
 ]

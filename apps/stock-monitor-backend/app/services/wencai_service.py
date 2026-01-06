@@ -472,7 +472,7 @@ class WencaiService:
             return decimal_value
             
         except (ValueError, InvalidOperation):
-            logger.warning(f"无法解析数值: {value}")
+            # logger.warning(f"无法解析数值: {value}")
             return None
     
 
@@ -713,10 +713,10 @@ class WencaiService:
         try:
             for stock_data in stocks_data:
                 try:
-                    # 验证必要字段
                     stock_code = stock_data.get('stock_code')
                     stock_name = stock_data.get('stock_name')
-                    
+
+                    # 验证必要字段
                     if not stock_code or not stock_name:
                         error_msg = f"缺少必要字段: stock_code={stock_code}, stock_name={stock_name}"
                         errors.append(error_msg)
@@ -769,6 +769,38 @@ class WencaiService:
                     error_msg = f"保存股票 {stock_data.get('stock_code', 'unknown')} 失败: {str(e)}"
                     errors.append(error_msg)
                     logger.warning(error_msg)
+            
+            # 同步保存到 StockDailyTemp (供缠论分析使用)
+            try:
+                from app.services.pattern_analysis_service import PatternAnalysisService
+                pattern_service = PatternAnalysisService(self.db)
+                
+                # 转换数据格式
+                temp_data_list = []
+                for stock in stocks_data:
+                    if not stock.get('stock_code'): continue
+                    
+                    temp_data_list.append({
+                        "code": stock.get('stock_code'),
+                        "trade_date": datetime.now().date(),
+                        "open": stock.get('opening_price'),
+                        "close": stock.get('current_price'),
+                        "high": stock.get('highest_price'),
+                        "low": stock.get('lowest_price'),
+                        "volume": stock.get('volume'),
+                        "amount": stock.get('turnover'),
+                        "turnover": stock.get('turnover_rate'),
+                        "industry": stock.get('industry'),
+                        "concept": stock.get('concept')
+                    })
+                
+                if temp_data_list:
+                    saved_temp = await pattern_service.save_temp_data(temp_data_list, source="wencai_crawl")
+                    logger.info(f"同步了 {saved_temp} 条数据到临时表")
+                    
+            except Exception as e:
+                logger.error(f"同步临时表失败: {e}")
+                # 不阻断主流程
             
             await self.db.commit()
             

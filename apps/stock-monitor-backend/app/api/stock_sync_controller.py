@@ -63,6 +63,24 @@ async def sync_csv(
         logger.error(f"CSV同步API异常: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/csv/health", response_model=BaseResponse, summary="CSV健康检查")
+async def check_csv_health(
+    service: StockSyncService = Depends(get_stock_sync_service)
+):
+    """
+    检查CSV文件数据完整性和健康状况
+    """
+    try:
+        result = await service.check_csv_health()
+        return BaseResponse(
+            success=True,
+            message="CSV健康检查完成",
+            data=result
+        )
+    except Exception as e:
+        logger.error(f"CSV健康检查失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/logs", response_model=BaseResponse, summary="获取同步日志")
 async def get_sync_logs(
     limit: int = Query(50, description="限制条数"),

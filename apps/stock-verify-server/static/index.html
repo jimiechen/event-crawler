@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Verification Console</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f5f5f5; }
+        .container { max-width: 1000px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .control-panel { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 5px; font-weight: bold; }
+        input[type="text"], input[type="number"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        button { padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; transition: background 0.2s; color: white; }
+        .btn-danger { background-color: #dc3545; }
+        .btn-danger:hover { background-color: #c82333; }
+        .btn-primary { background-color: #007bff; }
+        .btn-primary:hover { background-color: #0069d9; }
+        .btn-success { background-color: #28a745; }
+        .btn-success:hover { background-color: #218838; }
+        .btn-info { background-color: #17a2b8; }
+        .btn-warning { background-color: #ffc107; color: black; }
+        
+        .log-panel { background: #333; color: #0f0; padding: 15px; border-radius: 4px; height: 300px; overflow-y: auto; font-family: monospace; margin-top: 20px; }
+        .result-panel { margin-top: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f8f9fa; }
+        .status-ok { color: green; font-weight: bold; }
+        .status-fail { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Stock Verification Console</h1>
+        
+        <div class="input-group">
+            <label for="stockCode">Stock Code</label>
+            <input type="text" id="stockCode" value="603601" placeholder="Enter stock code (e.g. 603601)">
+        </div>
+
+        <div class="control-panel">
+            <button class="btn-danger" onclick="cleanup()">1. Clear Data</button>
+            <button class="btn-primary" onclick="ingest()">2. Trigger Ingest (Backend)</button>
+            <button class="btn-info" onclick="simulate()">3. Simulate T+1 Update</button>
+            <button class="btn-success" onclick="verify()">4. Verify Status</button>
+        </div>
+        
+        <div class="result-panel">
+            <h3>Verification Results</h3>
+            <div id="verifyResults">No results yet.</div>
+        </div>
+
+        <div class="log-panel" id="logPanel">
+            <div>System Ready...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api';
+        
+        function log(msg) {
+            const panel = document.getElementById('logPanel');
+            const div = document.createElement('div');
+            div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            panel.appendChild(div);
+            panel.scrollTop = panel.scrollHeight;
+        }
+
+        async function apiCall(endpoint, method='POST', body=null) {
+            const code = document.getElementById('stockCode').value;
+            if (!code) { alert("Please enter stock code"); return; }
+            
+            const payload = body ? { ...body, stock_code: code } : { stock_code: code };
+            
+            try {
+                log(`Calling ${endpoint}...`);
+                const res = await fetch(`${API_BASE}${endpoint}`, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: method === 'GET' ? null : JSON.stringify(payload)
+                });
+                const data = await res.json();
+                log(`Response: ${JSON.stringify(data)}`);
+                return data;
+            } catch (e) {
+                log(`Error: ${e}`);
+                return null;
+            }
+        }
+
+        async function cleanup() {
+            if(!confirm("Are you sure you want to clear all data for this stock?")) return;
+            await apiCall('/cleanup');
+        }
+
+        async function ingest() {
+            await apiCall('/step/ingest');
+        }
+
+        async function simulate() {
+            await apiCall('/simulate', 'POST', { days: 1, interval: 1 });
+        }
+
+        async function verify() {
+            const code = document.getElementById('stockCode').value;
+            const res = await fetch(`${API_BASE}/verify/${code}`);
+            const data = await res.json();
+            
+            if(data.status === 'success') {
+                renderResults(data.data);
+                log("Verification complete.");
+            } else {
+                log("Verification failed.");
+            }
+        }
+
+        function renderResults(data) {
+            let html = '<table><thead><tr><th>Check Item</th><th>Exists</th><th>Count/Details</th></tr></thead><tbody>';
+            for (const [key, val] of Object.entries(data)) {
+                const statusClass = val.exists ? 'status-ok' : 'status-fail';
+                html += `<tr>
+                    <td>${key}</td>
+                    <td class="${statusClass}">${val.exists ? 'PASS' : 'FAIL'}</td>
+                    <td>${val.count !== undefined ? val.count : JSON.stringify(val)}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            document.getElementById('verifyResults').innerHTML = html;
+        }
+    </script>
+</body>
+</html>
