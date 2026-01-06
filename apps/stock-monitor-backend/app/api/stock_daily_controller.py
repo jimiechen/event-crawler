@@ -16,11 +16,15 @@ from app.api.stock_daily_schemas import (
     StockDailyCreate
 )
 from app.repositories.stock_daily_repository import StockDailyRepository
+from app.services.stock_sync_service import StockSyncService
 
 router = APIRouter(prefix="/api/stock/daily", tags=["股票日线"])
 
 # 实例化Repository
 repository = StockDailyRepository(db_manager)
+
+def get_stock_sync_service() -> StockSyncService:
+    return StockSyncService(db_manager)
 
 @router.get("/search", response_model=StockDailyPageResponse)
 async def search_daily_data(
@@ -84,6 +88,34 @@ async def get_task_logs(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取任务日志失败: {str(e)}"
         )
+
+@router.get("/{code}/mixed_history", response_model=BaseResponse, summary="混合获取股票历史数据(CSV+Tushare)")
+async def get_mixed_history(
+    code: str,
+    days: int = Query(250, description="天数"),
+    split_date: str = Query("2025-12-22", description="分割日期"),
+    service: StockSyncService = Depends(get_stock_sync_service)
+):
+    """
+    混合获取历史数据: CSV (<= split_date) + Tushare (> split_date)
+    """
+    try:
+        result = await service.get_mixed_history(code, days, split_date)
+        if result["success"]:
+            return BaseResponse(
+                success=True,
+                message="ok",
+                data=result["data"]
+            )
+        else:
+            return BaseResponse(
+                success=False,
+                message=result.get("message", "获取失败"),
+                data=None
+            )
+    except Exception as e:
+        logger.error(f"get_mixed_history error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/{code}", response_model=StockDailyListResponse)
 async def get_daily_data(

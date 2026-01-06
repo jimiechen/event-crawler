@@ -47,6 +47,7 @@ class EnvCheckResult(BaseModel):
 class AddCustomStockRequest(BaseModel):
     code: str = Field(..., description="股票代码")
     label: str = Field(..., description="自定义标签")
+    days: int = Field(250, description="加载K线天数")
     custom_date: Optional[str] = Field(None, description="自定义结束日期 (YYYY-MM-DD)")
     platform: Optional[str] = Field(None, description="强制使用指定平台: tushare, baostock, akshare")
 

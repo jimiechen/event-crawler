@@ -85,6 +85,27 @@ try:
 except ImportError:
     logger.warning("未找到定时任务控制器，跳过注册")
 
+# 注册测试工具控制器
+try:
+    from . import test_tool_controller
+    app.include_router(test_tool_controller.router)
+except ImportError:
+    logger.warning("未找到测试工具控制器，跳过注册")
+
+# 注册问财控制器
+try:
+    from . import wencai_controller
+    app.include_router(wencai_controller.router)
+except ImportError as e:
+    logger.warning(f"未找到问财控制器，跳过注册: {e}")
+
+# 注册股票同步控制器
+try:
+    from . import stock_sync_controller
+    app.include_router(stock_sync_controller.router)
+except ImportError as e:
+    logger.warning(f"未找到股票同步控制器，跳过注册: {e}")
+
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

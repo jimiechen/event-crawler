@@ -21,12 +21,12 @@ router = APIRouter(prefix="/api/v1/stock/sync", tags=["股票数据同步"])
 class CsvSyncRequest(BaseModel):
     batch_id: int
     days: int = 250
-    end_date: str = "2025-12-22"
+    end_date: Optional[str] = None
     stock_codes: Optional[List[str]] = None
 
 class TushareSyncRequest(BaseModel):
     batch_id: int
-    start_date: str = "2025-12-23"
+    start_date: Optional[str] = None
     stock_codes: Optional[List[str]] = None
 
 def get_stock_sync_service() -> StockSyncService:
@@ -114,12 +114,19 @@ async def sync_tushare(
     service: StockSyncService = Depends(get_stock_sync_service)
 ):
     """
-    Tushare增量数据同步 (2025-12-22日后数据)
+    Tushare增量数据同步 (默认从昨天开始)
     """
     try:
+        # 如果未提供开始日期，默认使用昨天
+        start_date = request.start_date
+        if not start_date:
+            from datetime import timedelta
+            yesterday = datetime.now() - timedelta(days=1)
+            start_date = yesterday.strftime("%Y-%m-%d")
+
         result = await service.sync_tushare_increment(
             batch_id=request.batch_id,
-            start_date_str=request.start_date,
+            start_date_str=start_date,
             stock_codes=request.stock_codes
         )
         if result["success"]:
@@ -156,7 +163,7 @@ async def sync_csv_single(
 
         # Hardcoded parameters as per requirement
         days = 250
-        end_date = "2025-12-22"
+        end_date = datetime.now().strftime("%Y-%m-%d")
         
         # Use sync_csv_single to handle single stock logic without batch dependency
         result = await service.sync_csv_single(stock_code, days, end_date)

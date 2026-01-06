@@ -873,6 +873,16 @@ class WencaiService:
         
         return None
     
+    async def get_batch_data(self, batch_id: int) -> List[Any]:
+        """获取批次数据"""
+        try:
+            sql = "SELECT * FROM wencai_stocks WHERE crawl_batch_id = :batch_id"
+            result = await self.db.execute(text(sql), {"batch_id": batch_id})
+            return result.fetchall()
+        except Exception as e:
+            logger.error(f"获取批次数据失败: {e}")
+            return []
+
     async def _insert_wencai_stock(self, batch_id: int, stock_data: Dict[str, Any]):
         """插入问财股票数据 - 保存核心字段及概念、行业、原始数据"""
         sql = """

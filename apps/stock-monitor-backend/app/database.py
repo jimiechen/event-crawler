@@ -136,15 +136,15 @@ class DatabaseManager:
                 finally:
                     cursor.close()
         
-        @event.listens_for(self.engine.sync_engine, "checkout")
-        def receive_checkout(dbapi_connection, connection_record, connection_proxy):
-            """连接检出事件"""
-            logger.debug("数据库连接检出")
+        # @event.listens_for(self.engine.sync_engine, "checkout")
+        # def receive_checkout(dbapi_connection, connection_record, connection_proxy):
+        #     """连接检出事件"""
+        #     logger.debug("数据库连接检出")
         
-        @event.listens_for(self.engine.sync_engine, "checkin")
-        def receive_checkin(dbapi_connection, connection_record):
-            """连接检入事件"""
-            logger.debug("数据库连接检入")
+        # @event.listens_for(self.engine.sync_engine, "checkin")
+        # def receive_checkin(dbapi_connection, connection_record):
+        #     """连接检入事件"""
+        #     logger.debug("数据库连接检入")
     
     @asynccontextmanager
     async def get_session(self) -> AsyncGenerator[AsyncSession, None]:

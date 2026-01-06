@@ -67,12 +67,14 @@ class StockSyncService:
         cn_map = {
             '股票代码': 'code', '交易日期': 'trade_date', '开盘价': 'open',
             '最高价': 'high', '最低价': 'low', '收盘价': 'close',
-            '成交量(手)': 'vol', '成交额(千元)': 'amount'
+            '成交量(手)': 'vol', '成交量（手）': 'vol', '成交量': 'vol', 
+            '成交额(千元)': 'amount', '成交额（千元）': 'amount', '成交额': 'amount'
         }
         en_map = {
             'ts_code': 'code', 'code': 'code', 'trade_date': 'trade_date', 'open': 'open',
             'high': 'high', 'low': 'low', 'close': 'close',
-            'vol': 'vol', 'amount': 'amount'
+            'vol': 'vol', 'volume': 'vol', 'Volume': 'vol', 'VOLUME': 'vol',
+            'amount': 'amount', 'Amount': 'amount'
         }
         
         def get_col(target_col):
@@ -124,9 +126,115 @@ class StockSyncService:
         numeric_cols = ['open', 'high', 'low', 'close', 'vol', 'amount']
         for col in numeric_cols:
             if col in new_df.columns:
+                # Handle strings with commas or other artifacts
+                if new_df[col].dtype == 'object':
+                     # Remove commas
+                     new_df[col] = new_df[col].astype(str).str.replace(',', '')
+                     # Try to clean non-numeric characters (except dot, minus, E)
+                     # But be careful not to break valid formats. 
+                     # For now, primarily focus on commas and whitespace.
+                     new_df[col] = new_df[col].str.strip()
+                
                 new_df[col] = pd.to_numeric(new_df[col], errors='coerce')
                 
         return new_df[columns_order] if set(columns_order).issubset(new_df.columns) else new_df
+
+    async def get_mixed_history(self, code: str, days: int = 250, split_date_str: str = "2025-12-22") -> Dict[str, Any]:
+        """
+        混合获取历史数据: CSV (<= split_date) + Tushare (> split_date)
+        """
+        try:
+            # 1. CSV Data
+            csv_path = self._find_csv_path(code)
+            csv_records = []
+            
+            # Split date setup
+            try:
+                split_date = datetime.strptime(split_date_str, "%Y-%m-%d").date()
+            except ValueError:
+                # Fallback or error
+                split_date = date(2025, 12, 22)
+
+            if csv_path:
+                try:
+                    df_csv = pd.read_csv(csv_path)
+                    # Normalize columns
+                    df_csv = self._normalize_df(df_csv)
+                    
+                    if not df_csv.empty and 'trade_date' in df_csv.columns:
+                        # Convert to date object
+                        df_csv['trade_date'] = pd.to_datetime(df_csv['trade_date'], format='%Y%m%d', errors='coerce').dt.date
+                        
+                        # Drop duplicates in CSV based on trade_date, keep last
+                        df_csv.drop_duplicates(subset=['trade_date'], keep='last', inplace=True)
+                        
+                        # Filter
+                        df_csv = df_csv[df_csv['trade_date'] <= split_date]
+                        
+                        # Select columns
+                        csv_records = df_csv.to_dict('records')
+                except Exception as e:
+                    logger.error(f"Error reading CSV for {code}: {e}")
+            else:
+                logger.warning(f"No CSV found for {code}")
+
+            # 2. Tushare Data
+            ts_records = []
+            start_date_ts = (split_date + timedelta(days=1)).strftime("%Y%m%d")
+            today_str = datetime.now().strftime("%Y%m%d")
+            
+            ts_code = self.tushare_service._add_suffix(code)
+            
+            # Fetch from Tushare
+            # Note: get_daily is async and rate limited
+            df_ts = await self.tushare_service.get_daily(ts_code, start_date_ts, today_str)
+            
+            if df_ts is not None and not df_ts.empty:
+                # Normalize Tushare Data
+                # Tushare cols: ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount
+                # Need to match standard keys if possible, or just return what we have
+                # Standard keys: code, trade_date, open, close, high, low, vol, amount
+                
+                df_ts['trade_date'] = pd.to_datetime(df_ts['trade_date'], format='%Y%m%d').dt.date
+                # Ensure vol is numeric
+                df_ts['vol'] = pd.to_numeric(df_ts['vol'], errors='coerce')
+                
+                # Rename ts_code to code for consistency
+                if 'ts_code' in df_ts.columns:
+                    df_ts = df_ts.rename(columns={'ts_code': 'code'})
+                
+                ts_records = df_ts.to_dict('records')
+
+            # 3. Merge
+            all_records = csv_records + ts_records
+            
+            # Filter valid records (must have trade_date)
+            all_records = [r for r in all_records if r.get('trade_date') is not None]
+            
+            # Deduplicate by trade_date (Global Dedup)
+            # Use a dict to keep the last occurrence for each date
+            unique_records_map = {}
+            for r in all_records:
+                unique_records_map[r['trade_date']] = r
+            
+            all_records = list(unique_records_map.values())
+            
+            # Sort by date
+            all_records.sort(key=lambda x: x['trade_date'])
+            
+            # 4. Limit (Last N days)
+            if len(all_records) > days:
+                all_records = all_records[-days:]
+                
+            return {
+                "success": True,
+                "data": all_records,
+                "count": len(all_records)
+            }
+            
+        except Exception as e:
+            logger.error(f"get_mixed_history failed: {e}")
+            return {"success": False, "message": str(e), "data": []}
 
     async def sync_csv_to_db(self, batch_id: int, days: int = 250, end_date_str: str = "2025-12-22", stock_codes: Optional[List[str]] = None) -> Dict[str, Any]:
         """

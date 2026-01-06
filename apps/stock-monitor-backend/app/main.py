@@ -33,7 +33,7 @@ settings = get_settings()
 setup_logging()
 
 # 导入控制器 (在日志配置后导入，确保日志sink正确设置)
-from .api import stock_controller, monitor_controller, health_controller, wencai_controller, network_controller, stock_daily_controller, favorites_controller, analysis_controller, trading_rules_controller, morphology_controller, test_tool_controller, system_controller, tag_controller, timed_task_controller, stock_score_controller, dashboard_controller, volume_analysis_controller, debug_controller, ranking_controller, stock_sync_controller, cookie_controller, crawler_controller, adb_controller, automation_controller
+from .api import stock_controller, monitor_controller, health_controller, wencai_controller, network_controller, stock_daily_controller, favorites_controller, analysis_controller, trading_rules_controller, morphology_controller, test_tool_controller, system_controller, tag_controller, timed_task_controller, stock_score_controller, dashboard_controller, volume_analysis_controller, debug_controller, ranking_controller, stock_sync_controller, cookie_controller, crawler_controller, adb_controller, automation_controller, pattern_analysis_controller
 from .api.schemas import ErrorResponse
 
 

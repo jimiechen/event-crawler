@@ -6,7 +6,7 @@
 """
 
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import json
 import aiofiles
@@ -16,11 +16,13 @@ from loguru import logger
 
 from ..database import get_db_session
 from ..services.wencai_service import WencaiService
+from ..services.pattern_analysis_service import PatternAnalysisService
+from ..crawler.wencai_crawler import WencaiCrawler
 from .schemas import (
     BaseResponse, ErrorResponse,
     WencaiParseRequest, WencaiParseFileRequest, WencaiParseResponse, WencaiSaveResponse,
     WencaiBatchResponse, WencaiStockResponse,
-    WencaiStockData
+    WencaiStockData, WencaiValidateRequest, WencaiValidateResponse
 )
 
 router = APIRouter(prefix="/api/v1/wencai", tags=["问财数据"])
@@ -80,6 +82,152 @@ async def hide_concept(
     except Exception as e:
         logger.error(f"隐藏概念失败: {e}")
         return BaseResponse(success=False, message=str(e))
+
+@router.post("/validate", response_model=BaseResponse, summary="问财股票校验")
+async def validate_wencai_stock(
+    request: WencaiValidateRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    校验股票是否符合问财条件
+    1. 根据当前日期生成查询条件
+    2. 调用爬虫获取结果
+    3. 校验股票是否在结果中
+    4. 如果在，加入临时股票池
+    """
+    try:
+        logger.info(f"Received validate request: {request}")
+        # 1. 计算日期
+        target_date = datetime.now()
+        if request.check_date:
+            try:
+                if "-" in request.check_date:
+                    target_date = datetime.strptime(request.check_date, "%Y-%m-%d")
+                else:
+                    target_date = datetime.strptime(request.check_date, "%Y%m%d")
+            except ValueError:
+                logger.warning(f"Invalid date format: {request.check_date}, using today")
+        
+        prev_day = target_date - timedelta(days=1)
+        # Simple weekend skipping (if Sunday, go to Friday; if Saturday, go to Friday)
+        while prev_day.weekday() >= 5:
+            prev_day -= timedelta(days=1)
+        
+        date_str = target_date.strftime("%Y年%m月%d日")
+        prev_date_str = prev_day.strftime("%Y年%m月%d日")
+        
+        logger.info(f"[WencaiValidate] Step 1: Date calculation - Today={date_str}, Prev={prev_date_str}")
+        
+        # 2. 构建查询
+        if request.query_template:
+            query = request.query_template.format(date=date_str, prev_date=prev_date_str)
+        else:
+            # 默认查询模板
+            query = f"{date_str}成交量是{prev_date_str}成交量的2.5倍以上，非北交 非创业版，非科创版，非ST，概念 行业，{prev_date_str}和{date_str}涨幅低于13% 收盘价低于25"
+            
+        logger.info(f"[WencaiValidate] Step 2: Validating stock {request.stock_code} with query: {query}")
+        
+        # 3. 调用爬虫
+        logger.info(f"[WencaiValidate] Step 3: Starting crawler execution...")
+        crawler = WencaiCrawler(db)
+        result = await crawler.fetch_and_parse(
+            query=query, 
+            batch_name=f"Validate_{request.stock_code}_{target_date.strftime('%Y%m%d')}",
+            target_stock_code=request.stock_code
+        )
+        
+        logger.info(f"[WencaiValidate] Step 4: Crawler result - Status={result.get('status')}, Found={result.get('found_target')}, Total={result.get('total')}")
+        
+        if result.get("status") != "completed":
+            return BaseResponse(
+                success=False,
+                message=f"爬虫执行失败: {result.get('error')}",
+                data=None
+            )
+            
+        found_target = result.get("found_target", False)
+        
+        # 4. 如果找到，加入临时池
+        added_to_pool = False
+        if found_target:
+            logger.info(f"[WencaiValidate] Step 5: Stock found! Preparing to add to temp pool...")
+            pattern_service = PatternAnalysisService(db)
+            
+            # 获取该股票的详细数据 (从爬虫结果中提取)
+            # 由于 fetch_and_parse 已经保存了数据到 wencai_stock 表
+            # 我们需要从 wencai_stock 表或者直接从 parsed result (如果 crawler 返回了) 获取
+            # 这里 crawler 只返回了 status, batch_id 等。
+            # 我们可以重新查询 WencaiService 获取刚才保存的数据，或者让 fetch_and_parse 返回数据。
+            # 为了简单，我们再次查询 WencaiService
+            
+            wencai_service = WencaiService(db)
+            batch_id = result["batch_id"]
+            
+            # 获取批次数据
+            stocks = await wencai_service.get_batch_data(batch_id)
+            target_stock_data = None
+            target_short = request.stock_code.split('.')[0]
+            
+            for stock in stocks:
+                if target_short in stock.stock_code:
+                    target_stock_data = stock
+                    break
+            
+            if target_stock_data:
+                # 构造临时池数据
+                # 使用 getattr 安全获取属性，因为 Row 对象可能缺少某些列
+                current_price = getattr(target_stock_data, 'current_price', 0) or 0
+                
+                temp_data = [{
+                    "code": target_stock_data.stock_code,
+                    "trade_date": target_date.date(),
+                    "open": getattr(target_stock_data, 'opening_price', current_price) or current_price,
+                    "close": current_price,
+                    "high": getattr(target_stock_data, 'highest_price', current_price) or current_price,
+                    "low": getattr(target_stock_data, 'lowest_price', current_price) or current_price,
+                    "volume": getattr(target_stock_data, 'volume', 0) or 0,
+                    "amount": getattr(target_stock_data, 'turnover', 0) or 0,
+                    "turnover": getattr(target_stock_data, 'turnover_rate', 0) or 0,
+                    "industry": getattr(target_stock_data, 'industry', '') or '',
+                    "concept": getattr(target_stock_data, 'concept', '') or ''
+                }]
+                
+                logger.info(f"[WencaiValidate] Stock Data: {temp_data}")
+                
+                await pattern_service.save_temp_data(temp_data, source="wencai_validate")
+                added_to_pool = True
+                logger.info(f"[WencaiValidate] Step 6: Stock {request.stock_code} successfully added to temp pool")
+            else:
+                logger.warning(f"[WencaiValidate] Stock {request.stock_code} validated but data retrieval failed from DB batch {batch_id}")
+        else:
+            logger.info(f"[WencaiValidate] Stock {request.stock_code} NOT found in query results.")
+            
+        # 提取所有找到的股票信息
+        all_found = []
+        raw_stocks = result.get("stocks", [])
+        for s in raw_stocks:
+            all_found.append({
+                "code": s.get("stock_code", ""),
+                "name": s.get("stock_name", "")
+            })
+        
+        return BaseResponse(
+            success=True,
+            data=WencaiValidateResponse(
+                stock_code=request.stock_code,
+                is_valid=found_target,
+                query=query,
+                found_in_wencai=found_target,
+                added_to_pool=added_to_pool,
+                message="校验通过并已入池" if found_target else "校验未通过，问财结果中未找到该股票",
+                all_found_stocks=all_found
+            )
+        )
+
+    except Exception as e:
+        logger.error(f"Validation failed: {e}")
+        return BaseResponse(success=False, message=str(e), data=None)
+
 
 @router.post("/parse", response_model=BaseResponse, summary="解析并保存问财HTML数据")
 async def parse_wencai_data(

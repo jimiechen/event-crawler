@@ -13,6 +13,8 @@ from loguru import logger
 
 router = APIRouter()
 
+from pydantic import BaseModel, Field
+
 class StockRequest(BaseModel):
     stock_code: str
 
@@ -23,13 +25,17 @@ class SimulationRequest(BaseModel):
 
 class SignalRequest(BaseModel):
     code: str
-    trade_date: str
-    close: float
-    open: float
-    high: float
-    low: float
-    volume: float
-    timestamp: str
+    trade_date: Optional[str] = None
+    close: Optional[float] = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    volume: Optional[float] = None
+    timestamp: Optional[str] = None
+    
+    class Config:
+        extra = "allow" # Allow extra fields
+
 
 @router.post("/cleanup")
 async def cleanup_data(req: StockRequest, db: AsyncSession = Depends(get_db)):
@@ -63,26 +69,28 @@ async def send_simulation_signal(req: SignalRequest):
     logger.info(f"Sending simulation signal for {req.code} on {req.trade_date}")
     
     # Construct payload expected by backend validation endpoint
-    # Assuming backend has an endpoint /api/v1/test-tool/validate or similar
-    # If not, we might need to use a different endpoint or the generic ingest one.
-    # Based on original test-tool.html, it calls /api/v1/test-tool/validate
+    # Schema: WencaiValidateRequest(stock_code, check_date, query_template)
     
-    # We will use httpx directly here or via client if extended
-    async with httpx.AsyncClient() as http:
+    payload = {
+        "stock_code": req.code,
+        "check_date": req.trade_date,
+    }
+    
+    # Add extra fields if present (e.g. query_template)
+    if hasattr(req, "query_template"):
+        payload["query_template"] = getattr(req, "query_template")
+    # Also check if it's in the extra dict if pydantic puts it there
+    if hasattr(req, "__dict__"):
+         for key, value in req.__dict__.items():
+             if key not in ["code", "trade_date"] and key in ["query_template"]:
+                 payload[key] = value
+
+    async with httpx.AsyncClient(timeout=120.0) as http:
         try:
             # Forward to backend
             resp = await http.post(
-                f"{client.BASE_URL}/test-tool/validate", 
-                json={
-                    "data": {
-                        "code": req.code,
-                        "name": req.code, # Simplified
-                        "current_price": req.close,
-                        "volume": req.volume,
-                        "change_percent": 0, # Calculated if needed
-                        "timestamp": req.trade_date
-                    }
-                }
+                f"{client.BASE_URL}/wencai/validate", 
+                json=payload
             )
             resp.raise_for_status()
             data = resp.json()
@@ -91,8 +99,10 @@ async def send_simulation_signal(req: SignalRequest):
             return {"status": "success", "backend_response": data}
             
         except Exception as e:
+            import traceback
             logger.error(f"Failed to send signal: {e}")
-            return {"status": "error", "message": str(e)}
+            logger.error(traceback.format_exc())
+            return {"status": "error", "message": f"{type(e).__name__}: {str(e)}"}
 
 @router.get("/verify/{stock_code}")
 async def verify_status(stock_code: str, db: AsyncSession = Depends(get_db)):
@@ -108,29 +118,26 @@ async def step_ingest(req: StockRequest):
     return {"status": "called", "backend_response": res}
 
 @router.get("/stock/{stock_code}/history")
-async def get_stock_history(stock_code: str):
+async def get_stock_history(stock_code: str, days: int = 300):
     """
-    Fetch history from Backend (8000) acting as a proxy.
-    Mimics the behavior of test-tool.html fetching data.
+    Fetch history from Backend (8000) using the new mixed history endpoint.
+    Proxies the request to /api/stock/daily/{code}/mixed_history
     """
     client = BackendClient()
-    logger.info(f"Fetching history for {stock_code} via proxy...")
+    logger.info(f"Fetching history for {stock_code} via proxy (days={days})...")
     
     async with httpx.AsyncClient() as http:
         try:
-            # We use the 'add-custom-stock' endpoint as seen in test-tool.html
-            # payload: { code, label, custom_date }
-            from datetime import datetime
-            today = datetime.now().strftime("%Y-%m-%d")
+            # Call the new endpoint on port 8000
+            # Note: client.BASE_URL includes /api/v1, but stock_daily endpoint is at /api/stock/daily
+            # We need to construct the URL correctly
+            base_url = client.BASE_URL.replace("/api/v1", "")
+            target_url = f"{base_url}/api/stock/daily/{stock_code}/mixed_history"
             
-            resp = await http.post(
-                f"{client.BASE_URL}/test-tool/add-custom-stock",
-                json={
-                    "code": stock_code,
-                    "label": "auto-verify",
-                    "custom_date": today
-                },
-                timeout=10.0
+            resp = await http.get(
+                target_url,
+                params={"days": days, "split_date": "2025-12-22"},
+                timeout=30.0
             )
             
             if resp.status_code != 200:
@@ -141,9 +148,8 @@ async def get_stock_history(stock_code: str):
             if not data.get("success"):
                 return {"status": "error", "message": data.get("message", "Unknown backend error")}
                 
-            daily_data = data.get("daily_data", [])
+            daily_data = data.get("data", [])
             
-            # Transform if necessary, but kline.html expects standard fields which daily_data usually has
             return {"status": "success", "data": daily_data}
             
         except Exception as e:

@@ -13,6 +13,7 @@ from app.services.tushare_service import TushareService
 from app.services.baostock_service import BaostockService
 from app.services.akshare_service import AkshareService
 from app.services.tdx_service import TdxService
+from app.services.local_data_service import LocalDataService
 from app.api.test_tool_schemas import (
     AddCustomStockRequest, 
     AddCustomStockResponse,
@@ -128,7 +129,7 @@ async def add_custom_stock(
 
                 db_records = []
                 try:
-                    stmt = select(StockDaily).where(StockDaily.code == query_code).order_by(StockDaily.trade_date.desc()).limit(250)
+                    stmt = select(StockDaily).where(StockDaily.code == query_code).order_by(StockDaily.trade_date.desc()).limit(request.days)
                     result = await db.execute(stmt)
                     db_records = result.scalars().all()
                     logger.info(f"DB Query Result for {query_code}: {len(db_records)} records")
@@ -149,7 +150,7 @@ async def add_custom_stock(
                     
                     if alt_code:
                         logger.info(f"First attempt for {query_code} failed, trying alternative code: {alt_code}")
-                        stmt = select(StockDaily).where(StockDaily.code == alt_code).order_by(StockDaily.trade_date.desc()).limit(250)
+                        stmt = select(StockDaily).where(StockDaily.code == alt_code).order_by(StockDaily.trade_date.desc()).limit(request.days)
                         result = await db.execute(stmt)
                         db_records = result.scalars().all()
                         if db_records:
@@ -222,6 +223,59 @@ async def add_custom_stock(
                 
                 logger.info(f"DEBUG: Before processing records. Count={len(db_records) if db_records else 0}, Type={type(db_records)}")
 
+                # Map to store unique records by date string 'YYYYMMDD'
+                daily_data_map = {}
+
+                # 1. Load from CSV if needed (or if DB records are insufficient)
+                # Always try to load CSV to fill gaps if we have fewer records than requested
+                if len(db_records) < request.days:
+                    logger.info(f"Data insufficient ({len(db_records)} < {request.days}), attempting to load from CSV...")
+                    try:
+                        # Fetch enough data from CSV
+                        csv_data = await LocalDataService.get_daily_data(query_code, limit=request.days)
+                        if csv_data:
+                            logger.info(f"Loaded {len(csv_data)} records from CSV.")
+                            for row in csv_data:
+                                # row['trade_date'] is datetime.date object from LocalDataService
+                                d_date_obj = row.get('trade_date')
+                                if not d_date_obj:
+                                     # Try '日期' just in case
+                                     d_date_obj = row.get('日期')
+                                
+                                if not d_date_obj:
+                                    continue
+                                    
+                                if hasattr(d_date_obj, 'strftime'):
+                                    d_str = d_date_obj.strftime("%Y%m%d")
+                                else:
+                                    # Fallback if it's a string
+                                    d_str = str(d_date_obj).replace('-', '')
+                                
+                                # Convert Decimal to float safely
+                                def to_float(val):
+                                    try:
+                                        return float(val) if val is not None else 0.0
+                                    except:
+                                        return 0.0
+
+                                item = {
+                                    "trade_date": d_str,
+                                    "open": to_float(row.get('open')),
+                                    "high": to_float(row.get('high')),
+                                    "low": to_float(row.get('low')),
+                                    "close": to_float(row.get('close')),
+                                    "volume": to_float(row.get('vol')),
+                                    "vol": to_float(row.get('vol')),
+                                    "amount": to_float(row.get('amount')),
+                                    "pct_chg": 0.0, # Will calculate later
+                                    "change_percent": 0.0,
+                                    "adj_factor": None
+                                }
+                                daily_data_map[d_str] = item
+                    except Exception as e:
+                        logger.error(f"Failed to load CSV data: {e}")
+
+                # 2. Process DB records (Priority: Overwrite CSV data for same dates)
                 if db_records:
                     # Get latest adj_factor
                     latest_factor = 1.0
@@ -236,38 +290,23 @@ async def add_custom_stock(
                     except Exception as e:
                         logger.warning(f"Failed to get latest adj_factor: {e}")
 
-                    # Calculate change percent and QFQ
-                    sorted_records = sorted(db_records, key=lambda x: x.trade_date)
-                    logger.info(f"DEBUG QFQ: Code={query_code}, LatestFactor={latest_factor}, Records={len(sorted_records)}")
-                    for i, item in enumerate(sorted_records):
+                    # Calculate QFQ and add to map
+                    for item in db_records:
+                        d_str = item.trade_date.strftime("%Y%m%d")
+                        
                         # Calculate QFQ rate
                         adj_rate = 1.0
                         if item.adj_factor and latest_factor:
                             adj_rate = float(item.adj_factor) / latest_factor
                         
-                        if query_code.startswith('002735') and i > len(sorted_records) - 5:
-                            logger.info(f"DEBUG 002735: Date={item.trade_date}, Close={item.close}, ItemAdj={item.adj_factor}, Rate={adj_rate}")
-
                         # Apply QFQ
                         close_price = float(item.close) * adj_rate if item.close else 0
                         open_price = float(item.open) * adj_rate if item.open else 0
                         high_price = float(item.high) * adj_rate if item.high else 0
                         low_price = float(item.low) * adj_rate if item.low else 0
 
-                        # Calculate change percent (based on adjusted close)
-                        pct_chg = 0.0
-                        if i > 0:
-                            prev_item = sorted_records[i-1]
-                            prev_adj_rate = 1.0
-                            if prev_item.adj_factor and latest_factor:
-                                prev_adj_rate = float(prev_item.adj_factor) / latest_factor
-                            prev_close = float(prev_item.close) * prev_adj_rate if prev_item.close else 0
-                            
-                            if prev_close != 0:
-                                pct_chg = ((close_price - prev_close) / prev_close) * 100
-                        
-                        first_daily_data.append({
-                            "trade_date": item.trade_date.strftime("%Y%m%d"),
+                        daily_item = {
+                            "trade_date": d_str,
                             "open": open_price,
                             "high": high_price,
                             "low": low_price,
@@ -275,10 +314,30 @@ async def add_custom_stock(
                             "volume": item.vol,
                             "vol": item.vol,
                             "amount": float(item.amount) if item.amount else None,
-                            "pct_chg": pct_chg,
-                            "change_percent": pct_chg,
+                            "pct_chg": 0.0, # Will calculate later
+                            "change_percent": 0.0,
                             "adj_factor": float(item.adj_factor) if item.adj_factor else None
-                        })
+                        }
+                        daily_data_map[d_str] = daily_item
+
+                # 3. Sort and Calculate Change Percent
+                if daily_data_map:
+                    # Sort by date ascending
+                    sorted_data = sorted(daily_data_map.values(), key=lambda x: x['trade_date'])
+                    
+                    for i, item in enumerate(sorted_data):
+                        pct_chg = 0.0
+                        if i > 0:
+                            prev_item = sorted_data[i-1]
+                            prev_close = prev_item['close']
+                            curr_close = item['close']
+                            if prev_close != 0:
+                                pct_chg = ((curr_close - prev_close) / prev_close) * 100
+                        
+                        item['pct_chg'] = pct_chg
+                        item['change_percent'] = pct_chg
+                        first_daily_data.append(item)
+
                             
         # Process batch to associate tags
         if success_codes:

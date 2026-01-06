@@ -24,9 +24,12 @@ class WencaiCrawler:
         # 使用PC版搜索页面，通常结构更稳定且是表格形式
         self.base_url = "http://www.iwencai.com/stockpick/search"
 
-    async def fetch_and_parse(self, query: str, batch_name: str = None) -> Dict[str, Any]:
+    async def fetch_and_parse(self, query: str, batch_name: str = None, target_stock_code: str = None) -> Dict[str, Any]:
         """
         执行抓取并解析
+        :param query: 搜索条件
+        :param batch_name: 批次名称
+        :param target_stock_code: 目标股票代码，如果提供则校验该股票是否存在于结果中
         """
         html_content = await self.fetch_page_source(query)
         
@@ -57,9 +60,31 @@ class WencaiCrawler:
             except Exception as e:
                 logger.error(f"Failed to save debug HTML: {e}")
 
-            await self.wencai_service.update_batch_status(batch_id, 'failed', 0, 0, 0, 'No data parsed')
-            return {"status": "failed", "error": "No data parsed"}
+            # Even if no stocks parsed, we consider it "completed" (just empty result)
+            # This allows the user to see that 0 stocks were found, rather than a generic error.
+            # But we log a warning.
+            logger.warning("No stocks parsed from page content. Possibly no results or layout changed.")
             
+            # await self.wencai_service.update_batch_status(batch_id, 'failed', 0, 0, 0, 'No data parsed')
+            # return {"status": "failed", "error": "No data parsed"}
+            
+        # 校验目标股票是否存在
+        found_target = False
+        if target_stock_code:
+            logger.info(f"Validating target stock: {target_stock_code}")
+            # 格式化 target_stock_code，确保匹配 (例如 000001.SZ vs 000001)
+            target_short = target_stock_code.split('.')[0]
+            for stock in parsed_stocks:
+                stock_code = stock.get('stock_code', '')
+                if target_short in stock_code:
+                    found_target = True
+                    logger.info(f"Target stock found! {target_stock_code} matched with {stock_code}")
+                    break
+            
+            if not found_target:
+                logger.warning(f"Target stock {target_stock_code} not found in crawler results")
+                # 虽然没找到目标股票，但爬虫数据还是可以保存
+        
         # 保存
         success, failed, errors = await self.wencai_service.save_wencai_stocks(batch_id, parsed_stocks)
         
@@ -67,7 +92,8 @@ class WencaiCrawler:
         await self.wencai_service.process_batch_data(batch_id)
         
         # 更新状态
-        status = 'completed' if success > 0 else 'failed'
+        # Even if 0 stocks found (success=0), if parsed_stocks was empty, it's a valid "completed" (just no results)
+        status = 'completed' if (success > 0 or len(parsed_stocks) == 0) else 'failed'
         await self.wencai_service.update_batch_status(
             batch_id, status, len(parsed_stocks), success, failed, str(errors)
         )
@@ -76,7 +102,9 @@ class WencaiCrawler:
             "status": status,
             "batch_id": batch_id,
             "total": len(parsed_stocks),
-            "success": success
+            "success": success,
+            "found_target": found_target if target_stock_code else None,
+            "stocks": parsed_stocks
         }
 
     async def fetch_page_source(self, query: str) -> Optional[str]:

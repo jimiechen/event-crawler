@@ -365,6 +365,24 @@ class WencaiParseRequest(BaseModel):
     query_string: Optional[str] = Field(None, description="查询条件")
 
 
+class WencaiValidateRequest(BaseModel):
+    """问财验证请求"""
+    stock_code: str = Field(..., description="股票代码")
+    check_date: Optional[str] = Field(None, description="校验日期 (YYYY-MM-DD 或 YYYYMMDD)")
+    query_template: Optional[str] = Field(None, description="自定义查询模板")
+
+
+class WencaiValidateResponse(BaseModel):
+    """问财验证响应"""
+    stock_code: str
+    is_valid: bool
+    query: str
+    found_in_wencai: bool
+    added_to_pool: bool
+    message: str
+    all_found_stocks: List[Dict[str, str]] = []
+
+
 class WencaiParseFileRequest(BaseModel):
     """问财文件解析请求"""
     file_path: str = Field(..., description="HTML文件路径或文件名")
