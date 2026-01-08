@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     tushare_incremental_start_date: str = Field(default="2025-12-22", description="Tushare增量同步默认起始日期")
     
     # CSV Data Path
-    csv_data_path: str = Field(default="/Users/mac/ok-mcp/history/daily", description="本地CSV数据目录")
+    csv_data_path_stock_daily: str = Field(default="/Volumes/MacintoshHD/data/daily", description="股票日线数据CSV存储路径")
 
     db_user: str = Field(default="root", description="数据库用户名")
     db_password: str = Field(default="", description="数据库密码")

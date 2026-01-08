@@ -80,3 +80,80 @@ def check_shooting_star(k: Dict[str, Any]) -> bool:
         return long_upper and short_lower
     except (KeyError, ValueError):
         return False
+
+def preprocess_kline_chan(k_lines: list) -> list:
+    """
+    缠论K线包含关系处理
+    规则:
+    1. 趋势判断：若 High_curr > High_prev 且 Low_curr > Low_prev -> 向上趋势 (暂时简化处理，不判断分型方向)
+       或者简单使用前两根K线的方向
+    
+    简化版包含处理 (仅处理包含，不严格区分向上/向下趋势，默认向上或向下合并):
+    - 包含定义: (High_curr <= High_prev and Low_curr >= Low_prev) 或 (High_curr >= High_prev and Low_curr <= Low_prev)
+    - 这里的定义是：后一根在前一根范围内，或者前一根在后一根范围内（非标准定义，标准是后包前或前包后）
+    - 标准缠论包含: 
+        如果是相邻两根K线，gk和gk+1
+        凡是 High_k+1 >= High_k 且 Low_k+1 <= Low_k (反了？)
+        
+        正确定义:
+        包含关系指两根K线的高低点关系。
+        若 High_k+1 <= High_k 且 Low_k+1 >= Low_k，则 k+1 包含在 k 中。
+        若 High_k+1 >= High_k 且 Low_k+1 <= Low_k，则 k 包含在 k+1 中（这种情况通常不处理，因为是后包前？不对，缠论只处理后一根在范围内的）。
+        
+        修正：缠论只处理“当前根被前一根包含”的情况？
+        不，是两根K线存在包含关系。
+        
+        我们采用标准处理：
+        1. 从左向右处理
+        2. 若第 i 根和第 i+1 根存在包含关系（一根的高低点完全在另一根范围内）
+        3. 需要根据“趋势”决定合并方式：
+           - 向上趋势：High = max(H1, H2), Low = max(L1, L2)
+           - 向下趋势：High = min(H1, H2), Low = min(L1, L2)
+           
+    为简化实现，我们这里暂时假设：
+    - 如果第一根K线是阳线，假设向上趋势
+    - 如果第一根K线是阴线，假设向下趋势
+    """
+    if len(k_lines) < 2:
+        return k_lines
+        
+    result = [k_lines[0]]
+    
+    for i in range(1, len(k_lines)):
+        curr = k_lines[i]
+        prev = result[-1]
+        
+        h_curr, l_curr = float(curr['high']), float(curr['low'])
+        h_prev, l_prev = float(prev['high']), float(prev['low'])
+        
+        # 检查包含关系
+        is_curr_inside_prev = (h_curr <= h_prev) and (l_curr >= l_prev)
+        is_prev_inside_curr = (h_curr >= h_prev) and (l_curr <= l_prev)
+        
+        if is_curr_inside_prev or is_prev_inside_curr:
+            # 存在包含，进行合并
+            # 简单策略：根据前一根的颜色判断趋势 (这是一个启发式近似，非严格缠论)
+            # 严格缠论需要看分型，这里简化
+            prev_open = float(prev['open'])
+            prev_close = float(prev['close'])
+            is_up = prev_close >= prev_open
+            
+            new_k = curr.copy()
+            if is_up:
+                # 向上: 取高高，低高
+                new_k['high'] = max(h_curr, h_prev)
+                new_k['low'] = max(l_curr, l_prev)
+            else:
+                # 向下: 取高低，低低
+                new_k['high'] = min(h_curr, h_prev)
+                new_k['low'] = min(l_curr, l_prev)
+            
+            # 更新当前K线为合并后的K线，并替换结果列表中的最后一个
+            # 注意：如果前一个是被合并的，应该替换前一个？
+            # 缠论是合并后作为新的第i根，去和第i+2根比较
+            # 所以这里应该替换 result[-1]
+            result[-1] = new_k
+        else:
+            result.append(curr)
+            
+    return result

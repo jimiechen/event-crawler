@@ -23,7 +23,7 @@ class PatternConfig(BaseModel):
     pattern_code: Mapped[str] = mapped_column(String(50), nullable=False, comment="形态代码")
     pattern_name: Mapped[str] = mapped_column(String(100), nullable=False, comment="形态名称")
     description: Mapped[str] = mapped_column(Text, nullable=True, comment="描述")
-    score: Mapped[int] = mapped_column(Integer, default=0, comment="分值")
+    score: Mapped[float] = mapped_column(DECIMAL(10, 2), default=0, comment="分值/阈值")
     days: Mapped[int] = mapped_column(Integer, default=1, comment="形态天数(1/2/3)")
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否启用")
     priority: Mapped[int] = mapped_column(Integer, default=1, comment="优先级")

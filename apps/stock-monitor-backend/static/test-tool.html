@@ -243,10 +243,10 @@
                         <tbody id="volumeAnalysisBody" class="bg-white divide-y divide-gray-200">
                             <!-- Results -->
                         </tbody>
-                        <tfoot class="bg-gray-50 border-t border-gray-200">
-                            <tr class="bg-blue-50">
-                                <td colspan="10" class="px-4 py-2 text-right text-sm font-bold text-gray-700">当前筛选合计评分:</td>
-                                <td id="footerTotalScore" class="px-4 py-2 text-left text-sm font-bold text-blue-700">0分</td>
+                        <tfoot class="bg-gray-50 border-t border-gray-200 sticky bottom-0">
+                            <tr class="bg-blue-100">
+                                <td colspan="10" class="px-4 py-3 text-right text-sm font-bold text-blue-800">当前筛选范围内合计评分 (Total Score in Range):</td>
+                                <td id="footerTotalScore" class="px-4 py-3 text-left text-base font-extrabold text-blue-700">0分</td>
                                 <td colspan="2"></td>
                             </tr>
                         </tfoot>
@@ -2153,12 +2153,13 @@
                 }
 
                 if (res.success) {
-                    if (!res.daily_data || res.daily_data.length === 0) {
-                        alert(`未获取到K线数据 (${platform || '默认'})`);
-                        return;
-                    }
-                    
-                    closeCustomStockModal();
+                console.log('AddCustomStock Response:', res);
+                if (!res.daily_data || res.daily_data.length === 0) {
+                    alert(`未获取到K线数据 (${platform || '默认'})`);
+                    return;
+                }
+
+                closeCustomStockModal();
                     
                     // Store context
                     // Use deep copy for fullData to ensure cached data isn't mutated in place across multiple uses
@@ -2173,7 +2174,11 @@
                     
                     // Process full data to ensure change_percent exists (if not provided by backend)
                     // And sort ascending
-                    currentStockContext.fullData.sort((a, b) => a.trade_date.localeCompare(b.trade_date));
+                    currentStockContext.fullData.sort((a, b) => {
+                        const da = String(a.trade_date).replace(/-/g, '');
+                        const db = String(b.trade_date).replace(/-/g, '');
+                        return da.localeCompare(db);
+                    });
                     
                     // Calculate change percent if missing
                     for (let i = 0; i < currentStockContext.fullData.length; i++) {
@@ -2272,27 +2277,45 @@
             // 1. Sort chartData for detection
             chartData.sort((a, b) => a.trade_date.localeCompare(b.trade_date));
 
-            // 2. Ensure tags are loaded for scoring
-            await initTags();
+            try {
+                // 2. Ensure tags are loaded for scoring
+                await initTags();
 
-            // 3. Detect anomalies on the current visible history
-            const { results, tags } = detectAnomalies(chartData);
-            
-            // 4. Preserve visibility preference or reset?
-            // User likely wants to see the latest anomaly in backtest mode.
-            // Default logic: first one (newest) is visible.
-            if (results.length > 0) {
-                results.forEach((a, index) => {
-                    a.visible = (index === 0);
-                });
+                // 3. Detect anomalies on the current visible history
+                let results = [];
+                let tags = [];
+                try {
+                    const detection = detectAnomalies(chartData);
+                    results = detection.results;
+                    tags = detection.tags;
+                } catch (e) {
+                    console.error('Anomaly detection failed:', e);
+                    // Continue rendering chart even if detection fails
+                }
+                
+                // 4. Preserve visibility preference or reset?
+                // User likely wants to see the latest anomaly in backtest mode.
+                // Default logic: first one (newest) is visible.
+                if (results.length > 0) {
+                    results.forEach((a, index) => {
+                        a.visible = (index === 0);
+                    });
+                }
+                
+                currentStockContext.anomalies = results;
+                
+                // 5. Render Volume Analysis List
+                renderVolumeAnalysis(results);
+                
+                try {
+                    renderStockChart(currentStockContext.stockInfo, chartData);
+                } catch (e) {
+                    console.error('Chart rendering failed:', e);
+                    alert('K线图渲染失败: ' + e.message);
+                }
+            } catch (e) {
+                console.error('Error in updateBacktestView:', e);
             }
-            
-            currentStockContext.anomalies = results;
-            
-            // 5. Render Volume Analysis List
-            renderVolumeAnalysis(results);
-            
-            renderStockChart(currentStockContext.stockInfo, chartData);
         }
 
         // --- Notification Helpers ---
@@ -2875,14 +2898,14 @@
         }
         if (elVolumeDateEnd) {
             elVolumeDateEnd.addEventListener('change', () => {
-                renderVolumeAnalysis(currentStockContext.anomalies);
+                findHighVolumeEvents(true); // Auto trigger query
             });
         }
         if (elBtnResetDateFilter) {
             elBtnResetDateFilter.addEventListener('click', () => {
                 if(elVolumeDateStart) elVolumeDateStart.value = '';
                 if(elVolumeDateEnd) elVolumeDateEnd.value = '';
-                renderVolumeAnalysis(currentStockContext.anomalies);
+                findHighVolumeEvents(true); // Auto trigger query with default range
             });
         }
 
@@ -3420,6 +3443,35 @@
             if (elBacktestModeToggle.checked) {
                 requestNotificationPermission();
             }
+        });
+
+        elBtnFindHighVolume.addEventListener('click', () => {
+             if (!currentStockContext.anomalies || currentStockContext.anomalies.length === 0) {
+                 return alert('当前范围内未发现异动量');
+             }
+             
+             // Make all anomalies visible
+             let count = 0;
+             currentStockContext.anomalies.forEach(a => {
+                 a.visible = true;
+                 count++;
+             });
+             
+             // Re-render chart
+             const chartData = currentStockContext.sortedChartData || currentStockContext.fullData;
+             // Filter if in backtest mode (should match updateBacktestView logic)
+             let renderData = chartData;
+             if (elBacktestModeToggle.checked) {
+                  const { customDate, addedDates } = currentStockContext;
+                  const customDateStr = customDate ? customDate.replace(/-/g, '') : '';
+                  renderData = chartData.filter(d => {
+                      const dDate = d.trade_date.replace(/-/g, '');
+                      return (customDateStr && dDate <= customDateStr) || addedDates.has(d.trade_date);
+                  });
+             }
+             
+             renderStockChart(currentStockContext.stockInfo, renderData);
+             alert(`已在K线上标记 ${currentStockContext.anomalies.length} 处异动量`);
         });
 
         // --- Simulated Data Logic ---

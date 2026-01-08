@@ -8,6 +8,8 @@
 import asyncio
 import logging
 import json
+import random
+import time
 from typing import List, Dict, Any, Optional
 from playwright.async_api import async_playwright, Page, BrowserContext
 from app.services.cookie_service import CookieService

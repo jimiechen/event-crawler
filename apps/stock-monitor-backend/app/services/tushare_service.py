@@ -151,23 +151,32 @@ class TushareService:
 
     async def get_daily(self, ts_code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """
-        获取单只股票日线数据 (异步)
+        获取单只股票日线数据 (异步) - 带重试和限流处理
         """
         if not self.pro:
             return None
             
-        try:
-            await global_rate_limiter.wait()
-            
-            loop = asyncio.get_event_loop()
-            df = await loop.run_in_executor(
-                None,
-                lambda: self.pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
-            )
-            return df
-        except Exception as e:
-            logger.error(f"Tushare get_daily failed for {ts_code}: {e}")
-            return None
+        retries = 3
+        for attempt in range(retries):
+            try:
+                await global_rate_limiter.wait()
+                
+                loop = asyncio.get_event_loop()
+                df = await loop.run_in_executor(
+                    None,
+                    lambda: self.pro.daily(ts_code=ts_code, start_date=start_date, end_date=end_date)
+                )
+                return df
+            except Exception as e:
+                err_msg = str(e)
+                if "每分钟最多访问" in err_msg or "visit frequency" in err_msg:
+                    logger.warning(f"Tushare rate limit hit for {ts_code}, aborting Tushare and switching to fallback...")
+                    return None
+                
+                logger.error(f"Tushare get_daily failed for {ts_code}: {e}")
+                return None
+        
+        return None
 
     def _validate_data(self, item: Dict[str, Any]) -> bool:
         """
@@ -459,10 +468,9 @@ class TushareService:
                             except Exception as e:
                                 err_str = str(e)
                                 if "每分钟最多访问" in err_str or "visit frequency" in err_str:
-                                    logger.warning(f"触发Tushare频率限制，暂停60秒... ({code})")
-                                    await asyncio.sleep(60)
-                                    # 重试次数不减？或者让它继续重试
-                                    # 这里仅仅是sleep，下一次循环会继续尝试
+                                    logger.warning(f"触发Tushare频率限制，跳过当前重试... ({code})")
+                                    # await asyncio.sleep(60) # Don't sleep, fail fast
+                                    return 0
                                 
                                 if attempt < retry_count - 1:
                                     await asyncio.sleep(1) # 重试等待

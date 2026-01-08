@@ -193,7 +193,8 @@ class RuleEngineService:
                 for attempt in range(retries):
                     try:
                         async with self.db_manager.get_session() as session:
-                            await VolumeAnalysisService.generate_daily_tags(code, target_date, session)
+                            # disable auto sync during scoring to prevent unintended data fetches
+                            await VolumeAnalysisService.generate_daily_tags(code, target_date, session, sync_if_missing=False)
                             await session.commit()
                         break
                     except Exception as e:
@@ -206,7 +207,7 @@ class RuleEngineService:
                         break
 
             # 分批执行以控制并发 (降低并发数以减少死锁)
-            analysis_batch_size = 10  
+            analysis_batch_size = 2  
             for i in range(0, len(target_codes), analysis_batch_size):
                 batch = target_codes[i:i+analysis_batch_size]
                 tasks = [process_tag_generation(code) for code in batch]
@@ -279,6 +280,19 @@ class RuleEngineService:
                             scores[score_key] = float(tag_score)
                             total_score += tag_score
                 
+                # Cumulative Score Logic: Add previous total_score
+                # Get previous score (most recent before target_date)
+                async with self.db_manager.get_session() as session:
+                    stmt = select(StockScoreResult.total_score)\
+                        .where(StockScoreResult.code == code, StockScoreResult.trade_date < target_date)\
+                        .order_by(StockScoreResult.trade_date.desc())\
+                        .limit(1)
+                    prev_res = await session.execute(stmt)
+                    prev_score = prev_res.scalar_one_or_none()
+                    
+                    if prev_score:
+                        total_score += prev_score
+
                 # 保存结果
                 results.append({
                     "code": code,

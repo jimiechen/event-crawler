@@ -3,8 +3,9 @@ from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, and_, func
 from sqlalchemy.orm import aliased
-from app.models.stock_daily import StockScoreResult
+from app.models.stock_daily import StockScoreResult, StockDaily
 from app.models.stock import StockInfo
+from .volume_analysis_service import VolumeAnalysisService
 
 class RankingService:
     def __init__(self, db: AsyncSession):
@@ -79,45 +80,79 @@ class RankingService:
         ]
 
     async def get_total_score_ranking(self, target_date: date, limit: int = 20):
-        # Calculate start date for 250 days window
-        # User requirement: Total ranking is 250 days total score (from target_date back 250 days)
+        """
+        Calculate ranking based on total score of anomalies over the last 250 days.
+        Uses Pandas for efficient calculation of Limit Up, Volume Multiples, and Low Volume.
+        """
+        import pandas as pd
+        import numpy as np
         from datetime import timedelta
-        # Explicitly use 250 days as requested
+        
+        # 1. Determine Date Range
+        # We need 250 days for scoring, plus 60 days buffer for Low Volume calculation
         start_date = target_date - timedelta(days=250)
-
-        total_score_col = func.sum(StockScoreResult.total_score).label('total_score')
-
-        query = select(
-            StockScoreResult.code,
-            StockInfo.name,
-            total_score_col
-        ).outerjoin(
-            StockInfo,
-            StockScoreResult.code == StockInfo.code
+        data_start_date = start_date - timedelta(days=100) # Buffer
+        
+        # 2. Fetch Data (Active Stocks Only to optimize)
+        stmt = select(
+            StockDaily.code, 
+            StockDaily.trade_date, 
+            StockDaily.close, 
+            StockDaily.vol,
+            StockInfo.name
+        ).join(
+            StockInfo, StockDaily.code == StockInfo.code
         ).where(
             and_(
-                StockScoreResult.trade_date <= target_date,
-                StockScoreResult.trade_date > start_date  # > start_date to include exactly 250 days? or >=? 
-                                                        # "往前250天" usually means [date-250, date].
-                                                        # Let's keep >= start_date.
+                StockInfo.is_active == True,
+                StockDaily.trade_date >= data_start_date,
+                StockDaily.trade_date <= target_date
             )
-        ).group_by(
-            StockScoreResult.code,
-            StockInfo.name
-        ).order_by(
-            desc(total_score_col)
-        ).limit(limit)
-
-        result = await self.db.execute(query)
-        rows = result.all()
-
+        )
+        
+        result = await self.db.execute(stmt)
+        # Convert to list of dicts for DataFrame
+        data = [
+            {
+                "code": row.code, 
+                "trade_date": row.trade_date, 
+                "close": float(row.close or 0), 
+                "vol": float(row.vol or 0),
+                "name": row.name
+            } 
+            for row in result
+        ]
+        
+        if not data:
+            return []
+            
+        df = pd.DataFrame(data)
+        df['trade_date'] = pd.to_datetime(df['trade_date'])
+        df = df.sort_values(['code', 'trade_date'])
+        
+        # 3. Calculate Scores using Service
+        scores = VolumeAnalysisService.calculate_scores_batch(df, group_col='code')
+        df['score'] = scores
+            
+        # 4. Filter Date Range and Sum
+        # Target Range: [start_date, target_date]
+        # Optimize date comparison
+        start_ts = pd.Timestamp(start_date)
+        end_ts = pd.Timestamp(target_date)
+        mask_date = (df['trade_date'] >= start_ts) & (df['trade_date'] <= end_ts)
+        df_final = df[mask_date]
+        
+        # Group by code to get total score
+        ranking = df_final.groupby(['code', 'name'])['score'].sum().reset_index()
+        ranking = ranking.sort_values('score', ascending=False).head(limit)
+        
         return [
             {
-                "code": row.code,
-                "name": row.name,
-                "score": float(row.total_score) if row.total_score is not None else 0.0,
+                "code": row['code'],
+                "name": row['name'],
+                "score": float(row['score']),
                 "date": target_date
             }
-            for row in rows
+            for _, row in ranking.iterrows()
         ]
 

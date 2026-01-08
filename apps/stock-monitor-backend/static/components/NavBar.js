@@ -66,6 +66,7 @@ const NavBar = {
             isOpen: false,
             navItems: [
                 { name: '首页', path: '/static/index.html' },
+                { name: '缠论分析', path: '/static/pattern-analysis.html' },
                 { name: '标签管理', path: '/static/tag-management.html' },
                 { name: '定时任务', path: '/static/timed-task.html' },
                 { name: '数据浏览', path: '/static/stock-data-viewer.html' },

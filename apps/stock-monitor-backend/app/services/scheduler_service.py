@@ -28,38 +28,41 @@ class SchedulerService:
             logger.warning("Scheduler is already running")
             return
             
-        logger.info("Starting scheduler...")
+        logger.info("Scheduler is disabled by user request.")
+        return
+
+        # logger.info("Starting scheduler...")
         
-        # 1. 每日全量爬虫任务 (17:00)
-        self.scheduler.add_job(
-            self.run_crawler_all,
-            CronTrigger(hour=17, minute=0),
-            id="daily_crawler_all",
-            name="每日全量爬虫",
-            replace_existing=True
-        )
+        # # 1. 每日全量爬虫任务 (17:00)
+        # self.scheduler.add_job(
+        #     self.run_crawler_all,
+        #     CronTrigger(hour=17, minute=0),
+        #     id="daily_crawler_all",
+        #     name="每日全量爬虫",
+        #     replace_existing=True
+        # )
         
-        # 2. 每日临时数据清洗 (00:00)
-        self.scheduler.add_job(
-            self.run_temp_data_cleaning,
-            CronTrigger(hour=0, minute=0),
-            id="daily_temp_cleaning",
-            name="每日临时数据清洗",
-            replace_existing=True
-        )
+        # # 2. 每日临时数据清洗 (00:00)
+        # self.scheduler.add_job(
+        #     self.run_temp_data_cleaning,
+        #     CronTrigger(hour=0, minute=0),
+        #     id="daily_temp_cleaning",
+        #     name="每日临时数据清洗",
+        #     replace_existing=True
+        # )
         
-        # 3. 核心池监控 (每1分钟)
-        self.scheduler.add_job(
-            self.run_pool_monitor,
-            IntervalTrigger(minutes=1),
-            id="core_pool_monitor",
-            name="核心池监控",
-            replace_existing=True
-        )
+        # # 3. 核心池监控 (每1分钟)
+        # self.scheduler.add_job(
+        #     self.run_pool_monitor,
+        #     IntervalTrigger(minutes=1),
+        #     id="core_pool_monitor",
+        #     name="核心池监控",
+        #     replace_existing=True
+        # )
         
-        self.scheduler.start()
-        self.is_running = True
-        logger.info("Scheduler started successfully")
+        # self.scheduler.start()
+        # self.is_running = True
+        # logger.info("Scheduler started successfully")
 
     def shutdown(self):
         """关闭调度器"""

@@ -1,6 +1,6 @@
 import asyncio
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pandas as pd
 import akshare as ak
 from sqlalchemy import select, delete, desc
@@ -12,6 +12,9 @@ from app.models.pattern_config import PatternConfig, PatternStockPool
 from app.services.stock_service import StockService
 from app.utils.technical_indicators import calculate_expma
 from app.utils.morphology_recognition import check_bullish_engulfing, check_bottom_fractal, check_shooting_star
+# Avoid circular import by using TYPE_CHECKING or local import if needed, 
+# but StockSyncService is high level. Let's try direct import or handle dynamically.
+# For now, I will add the field to __init__ and import inside methods or if safe.
 
 class PatternAnalysisService:
     """
@@ -19,8 +22,9 @@ class PatternAnalysisService:
     处理临时数据存储、形态识别、优胜劣汰
     """
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, stock_sync_service: Any = None):
         self.db = db
+        self.stock_sync_service = stock_sync_service
 
     async def init_configs(self):
         """初始化默认配置"""
@@ -128,7 +132,7 @@ class PatternAnalysisService:
         result = await self.db.execute(stmt)
         return result.scalars().all()
     
-    async def perform_screening(self) -> Dict[str, Any]:
+    async def perform_screening(self, analysis_date: Optional[date] = None) -> Dict[str, Any]:
         """
         执行筛选流程：
         1. 获取 StockDailyTemp 中 pending 的股票
@@ -149,7 +153,7 @@ class PatternAnalysisService:
         for stock in pending_stocks:
             try:
                 # 分析
-                analysis = await self.analyze_history_and_score(stock.code)
+                analysis = await self.analyze_history_and_score(stock.code, analysis_date=analysis_date)
                 
                 # 检查 EXPMA
                 if not analysis.get("expma_ok"):
@@ -321,9 +325,9 @@ class PatternAnalysisService:
             stmt = select(PatternConfig).where(PatternConfig.pattern_code == 'low_volume_ratio')
             res = await self.db.execute(stmt)
             config = res.scalar_one_or_none()
-            ratio = config.score if config else 0.6 # 默认0.6倍以下算地量
+            ratio = float(config.score) if config else 0.6 # 默认0.6倍以下算地量
             
-            is_low = current_vol < (avg_vol_5 * ratio)
+            is_low = bool(current_vol < (avg_vol_5 * ratio))
             
             return {
                 "is_low_vol": is_low,
@@ -336,32 +340,61 @@ class PatternAnalysisService:
             print(f"Error checking low volume for {stock_code}: {e}")
             return {"is_low_vol": False, "msg": str(e)}
 
-    async def analyze_history_and_score(self, stock_code: str) -> Dict[str, Any]:
+    async def analyze_history_and_score(self, stock_code: str, analysis_date: Optional[date] = None) -> Dict[str, Any]:
         """
         拉取历史数据，计算EXPMA和形态得分
+        优先使用 StockSyncService.get_mixed_history (CSV+Tushare)
+        :param analysis_date: 如果提供，则只分析该日期及之前的数据 (用于回测/补录)
         """
         try:
-            # 1. Fetch History Data (Last 60 days)
+            # 1. Fetch History Data (Last 250 days preferred for mixed history)
             # akshare expects 6 digit code. remove suffix if present.
             clean_code = stock_code.split('.')[0]
-            start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
-            end_date = datetime.now().strftime("%Y%m%d")
             
-            # Run blocking akshare call in a separate thread
-            def fetch_data():
-                return ak.stock_zh_a_hist(symbol=clean_code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+            df = pd.DataFrame()
             
-            df = await asyncio.to_thread(fetch_data)
+            if self.stock_sync_service:
+                # Use optimized mixed history
+                # days=250 to ensure enough data for MA/EXPMA
+                result = await self.stock_sync_service.get_mixed_history(clean_code, days=250)
+                if result.get("success") and result.get("data"):
+                    df = pd.DataFrame(result["data"])
+                    # Ensure columns match internal expectations
+                    # get_mixed_history returns: code, trade_date, open, high, low, close, vol, amount
+                    # internal logic uses: date, open, close, high, low, volume
+                    if not df.empty:
+                        df = df.rename(columns={
+                            'trade_date': 'date', 
+                            'vol': 'volume'
+                        })
+            else:
+                # Fallback to Akshare
+                start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
+                end_date = datetime.now().strftime("%Y%m%d")
+                
+                # Run blocking akshare call in a separate thread
+                def fetch_data():
+                    return ak.stock_zh_a_hist(symbol=clean_code, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+                
+                df = await asyncio.to_thread(fetch_data)
+                
+                if not df.empty:
+                    # Rename columns to match our internal format
+                    df = df.rename(columns={
+                        '日期': 'date', '开盘': 'open', '收盘': 'close', 
+                        '最高': 'high', '最低': 'low', '成交量': 'volume'
+                    })
             
             if df.empty or len(df) < 20:
                 return {"score": 0, "reason": "Insufficient data"}
                 
-            # Rename columns to match our internal format
-            # akshare: 日期, 开盘, 收盘, 最高, 最低, 成交量, ...
-            df = df.rename(columns={
-                '日期': 'date', '开盘': 'open', '收盘': 'close', 
-                '最高': 'high', '最低': 'low', '成交量': 'volume'
-            })
+            # Filter by analysis_date if provided
+            if analysis_date:
+                # Ensure date column is date object
+                df['date'] = pd.to_datetime(df['date']).dt.date
+                df = df[df['date'] <= analysis_date]
+                if df.empty or len(df) < 20:
+                     return {"score": 0, "reason": "Insufficient data after date filter"}
             
             # 2. Calculate EXPMA
             df['expma13'] = calculate_expma(df['close'], 13)
@@ -379,7 +412,7 @@ class PatternAnalysisService:
             # Load configs
             stmt = select(PatternConfig).where(PatternConfig.is_enabled == True)
             res = await self.db.execute(stmt)
-            configs = {c.pattern_code: c.score for c in res.scalars().all()}
+            configs = {c.pattern_code: float(c.score) for c in res.scalars().all()}
             
             score = 0
             patterns = []

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class LocalDataService:
     @classmethod
     def get_daily_dir(cls):
-        return get_settings().csv_data_path
+        return get_settings().csv_data_path_stock_daily
 
     @classmethod
     def get_base_dir(cls):

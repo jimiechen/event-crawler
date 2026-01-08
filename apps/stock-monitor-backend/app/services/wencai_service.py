@@ -14,7 +14,8 @@ from typing import List, Dict, Any, Optional, Tuple
 from bs4 import BeautifulSoup
 from decimal import Decimal, InvalidOperation
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text, bindparam
+from sqlalchemy import text, bindparam, select
+from app.models.stock import WencaiStock, WencaiCrawlBatch
 
 from app.config.logging import get_logger
 from .tag_service import TagService
@@ -35,6 +36,22 @@ class WencaiService:
         self.db = db
         self.tag_mgmt_service = TagManagementService(db)
         self.stock_service = StockService(db)
+
+    async def get_batch_by_name(self, batch_name: str) -> Optional[WencaiCrawlBatch]:
+        """
+        根据批次名称获取批次信息
+        """
+        stmt = select(WencaiCrawlBatch).where(WencaiCrawlBatch.batch_name == batch_name).limit(1)
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_stocks_by_batch(self, batch_id: int) -> List[WencaiStock]:
+        """
+        根据批次ID获取该批次的所有股票
+        """
+        stmt = select(WencaiStock).where(WencaiStock.crawl_batch_id == str(batch_id))
+        result = await self.db.execute(stmt)
+        return result.scalars().all()
     
     def parse_html_table(self, html_content: str, debug: bool = False) -> List[Dict[str, Any]]:
         """
@@ -883,6 +900,16 @@ class WencaiService:
             logger.error(f"获取批次数据失败: {e}")
             return []
 
+    async def get_stocks_by_batch(self, batch_id: int) -> List[WencaiStock]:
+        """获取批次的所有股票 (ORM对象)"""
+        try:
+            stmt = select(WencaiStock).where(WencaiStock.crawl_batch_id == str(batch_id))
+            result = await self.db.execute(stmt)
+            return result.scalars().all()
+        except Exception as e:
+            logger.error(f"获取批次股票失败: {e}")
+            return []
+
     async def _insert_wencai_stock(self, batch_id: int, stock_data: Dict[str, Any]):
         """插入问财股票数据 - 保存核心字段及概念、行业、原始数据"""
         sql = """
@@ -1183,8 +1210,11 @@ class WencaiService:
             # 2. 解析日期和特殊标签
             tags_to_apply = []
             
-            # 2.1 解析日期 (xxxx年xx月xx日)
+            # 2.1 解析日期 (xxxx年xx月xx日 或 xxxx-xx-xx)
             date_match = re.search(r'(\d{4})年(\d{1,2})月(\d{1,2})日', query_string)
+            if not date_match:
+                date_match = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', query_string)
+            
             date_tag_name = None
             if date_match:
                 year, month, day = date_match.groups()
@@ -1305,13 +1335,48 @@ class WencaiService:
             await self.db.commit()
             logger.info(f"批次 {batch_id} 数据处理完成，共处理 {processed_count} 只股票")
 
-            # 触发增量同步任务(后台运行)
+            # 6. 触发评分计算 (Trigger Scoring)
+            # 如果查询包含日期，则计算该日期的评分；否则计算今日
             try:
-                ts_service = TushareService(db_manager)
-                asyncio.create_task(ts_service.sync_daily_data(mode="incremental"))
-                logger.info("已触发后台增量同步任务")
+                from app.services.rule_engine_service import RuleEngineService
+                
+                scoring_date = None
+                if date_match: # Re-use regex match from earlier
+                     try:
+                        year, month, day = date_match.groups()
+                        scoring_date = date(int(year), int(month), int(day))
+                     except:
+                        pass
+                
+                if not scoring_date:
+                    scoring_date = date.today()
+                    
+                # logger.info(f"触发评分计算，目标日期: {scoring_date}")
+                
+                # 使用 db_manager 因为 RuleEngineService 需要它
+                # rule_service = RuleEngineService(db_manager)
+                
+                # 异步运行评分，不阻塞当前请求太久 (或者根据需求阻塞)
+                # 既然是后台处理，我们可以 await 它，或者 create_task
+                # 为了保证数据一致性，建议 await，但如果是长任务，可能需要优化
+                # 这里选择 create_task 以避免超时，但要注意日志追踪
+                # Update: User wants to verify result, so maybe await is better for debug scripts?
+                # But in production this might be slow.
+                # Let's use await for now as batch processing is already heavy.
+                
+                # await rule_service.calculate_daily_scores(target_date=scoring_date, force=True)
+                # logger.info(f"评分计算任务已完成: {scoring_date}")
+                
             except Exception as e:
-                logger.error(f"触发增量同步任务失败: {e}")
+                logger.error(f"触发评分计算失败: {e}")
+
+            # 触发增量同步任务(后台运行) - Disabled by user request for verification
+            # try:
+            #     ts_service = TushareService(db_manager)
+            #     asyncio.create_task(ts_service.sync_daily_data(mode="incremental"))
+            #     logger.info("已触发后台增量同步任务")
+            # except Exception as e:
+            #     logger.error(f"触发增量同步任务失败: {e}")
             
         except Exception as e:
             await self.db.rollback()

@@ -7,6 +7,7 @@
 import os
 import csv
 import pandas as pd
+import asyncio
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 from loguru import logger
@@ -21,12 +22,53 @@ from app.services.tushare_service import TushareService
 from app.config.settings import get_settings
 
 
+import akshare as ak
+
 class StockSyncService:
     def __init__(self, db_manager: DatabaseManager):
         self.db_manager = db_manager
-        self.repository = StockDailyRepository(db_manager)
         self.tushare_service = TushareService(db_manager)
+        self.repository = StockDailyRepository(db_manager)
         self.log_repository = SyncLogRepository(db_manager)
+
+    async def fetch_from_akshare(self, code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """
+        从 Akshare 获取日线数据 (作为 Tushare 的降级方案)
+        :param code: 股票代码 (如 000001)
+        :param start_date: YYYYMMDD
+        :param end_date: YYYYMMDD
+        """
+        try:
+            symbol = code.split('.')[0]
+            # Akshare 接受 YYYYMMDD
+            def _fetch():
+                return ak.stock_zh_a_hist(symbol=symbol, period="daily", start_date=start_date, end_date=end_date, adjust="qfq")
+            
+            df = await asyncio.to_thread(_fetch)
+            if df is not None and not df.empty:
+                 # Standardize columns to Tushare format
+                 # Akshare: 日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额...
+                 df = df.rename(columns={
+                     '日期': 'trade_date',
+                     '开盘': 'open',
+                     '收盘': 'close',
+                     '最高': 'high',
+                     '最低': 'low',
+                     '成交量': 'vol',
+                     '成交额': 'amount'
+                 })
+                 # Convert date format to YYYYMMDD to match Tushare
+                 df['trade_date'] = pd.to_datetime(df['trade_date']).dt.strftime('%Y%m%d')
+                 
+                 # Convert amount from Yuan to Thousands (Tushare standard)
+                 if 'amount' in df.columns:
+                     df['amount'] = df['amount'] / 1000.0
+                     
+                 return df
+            return None
+        except Exception as e:
+            logger.warning(f"Akshare fallback failed for {code}: {e}")
+            return None
 
     async def get_batch_stocks(self, batch_id: int) -> List[str]:
         """获取批次下的股票代码列表"""
@@ -139,10 +181,13 @@ class StockSyncService:
                 
         return new_df[columns_order] if set(columns_order).issubset(new_df.columns) else new_df
 
-    async def get_mixed_history(self, code: str, days: int = 250, split_date_str: str = "2025-12-22") -> Dict[str, Any]:
+    async def get_mixed_history(self, code: str, days: int = 250, split_date_str: Optional[str] = None) -> Dict[str, Any]:
         """
         混合获取历史数据: CSV (<= split_date) + Tushare (> split_date)
         """
+        if not split_date_str:
+            split_date_str = get_settings().tushare_incremental_start_date or "2025-12-22"
+
         try:
             # 1. CSV Data
             csv_path = self._find_csv_path(code)
@@ -188,6 +233,11 @@ class StockSyncService:
             # Fetch from Tushare
             # Note: get_daily is async and rate limited
             df_ts = await self.tushare_service.get_daily(ts_code, start_date_ts, today_str)
+            
+            # Fallback to Akshare
+            if df_ts is None:
+                logger.warning(f"Tushare get_mixed_history failed for {code}, trying Akshare fallback...")
+                df_ts = await self.fetch_from_akshare(code, start_date_ts, today_str)
             
             if df_ts is not None and not df_ts.empty:
                 # Normalize Tushare Data
@@ -392,13 +442,22 @@ class StockSyncService:
 
 
 
-    async def sync_tushare_increment(self, batch_id: int, start_date_str: str = "2025-12-23", stock_codes: Optional[List[str]] = None) -> Dict[str, Any]:
+    async def sync_tushare_increment(self, batch_id: int, start_date_str: Optional[str] = None, stock_codes: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         Tushare增量同步
         :param batch_id: 批次ID
         :param start_date_str: 开始日期 (含)
         :param stock_codes: 指定同步的股票代码列表 (可选)
         """
+        if not start_date_str:
+            # Default to settings date + 1 day
+            split_date_str = get_settings().tushare_incremental_start_date or "2025-12-22"
+            try:
+                split_date = datetime.strptime(split_date_str, "%Y-%m-%d").date()
+                start_date_str = (split_date + timedelta(days=1)).strftime("%Y-%m-%d")
+            except ValueError:
+                start_date_str = "2025-12-23"
+
         # Create Log
         log = await self.log_repository.create_log(
             task_type=SyncTaskType.TUSHARE_INCREMENT,
@@ -478,8 +537,16 @@ class StockSyncService:
             # Use rate-limited async wrapper
             df = await self.tushare_service.get_daily(ts_code=ts_code, start_date=ts_start_date, end_date=today_str)
             
+            # Fallback to AkShare
+            if df is None:
+                logger.info(f"Tushare returned None for {code}, attempting AkShare fallback...")
+                df = await self.fetch_from_akshare(code, ts_start_date, today_str)
+                if df is not None and not df.empty and 'amount' in df.columns:
+                     # AkShare amount is usually in Yuan, Tushare is in Thousands.
+                     df['amount'] = df['amount'] / 1000.0
+            
             if df is None or df.empty:
-                 return {"success": True, "inserted": 0, "csv_appended": 0, "message": "No data from Tushare"}
+                 return {"success": True, "inserted": 0, "csv_appended": 0, "message": "No data from Tushare or AkShare"}
             
             # Tushare 返回字段: ts_code, trade_date, open, high, low, close, pre_close, change, pct_chg, vol, amount
             

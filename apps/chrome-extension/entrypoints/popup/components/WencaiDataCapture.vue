@@ -145,6 +145,38 @@ const captureWencaiData = async () => {
       throw new Error('无法获取当前标签页');
     }
 
+    // 同步Cookie到后端
+    if (tab.url) {
+      try {
+        captureProgress.value = '同步Cookie...';
+        const urlObj = new URL(tab.url);
+        // 获取所有相关的cookie (主域)
+        // 注意：chrome.cookies.getAll 需要 host_permissions 或 cookies 权限
+        // 获取 iwencai.com 和 10jqka.com.cn 的 cookie
+        const domains = ['iwencai.com', '10jqka.com.cn'];
+        const allCookies = [];
+        
+        for (const domain of domains) {
+            const cookies = await chrome.cookies.getAll({ domain });
+            if (cookies && cookies.length > 0) {
+                allCookies.push(...cookies);
+                // 分域名同步
+                await fetch('http://localhost:8000/api/v1/cookies', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        domain: domain,
+                        cookies: cookies
+                    })
+                });
+            }
+        }
+        console.log('Cookies synced successfully');
+      } catch (cookieError) {
+        console.warn('Cookie同步失败，但不影响主流程:', cookieError);
+      }
+    }
+
     // 注入内容脚本并执行解析
     captureProgress.value = '注入解析脚本...';
     progressPercentage.value = 40;

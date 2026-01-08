@@ -101,6 +101,9 @@ class AkshareService:
                         "low": float(row['最低']),
                         "vol": int(float(row['成交量'])), # Ensure int for BigInteger
                         "amount": float(row['成交额']), # Usually in Yuan
+                        "change": float(row['涨跌额']) if '涨跌额' in row else 0.0,
+                        "pct_chg": float(row['涨跌幅']) if '涨跌幅' in row else 0.0,
+                        "turnover_rate": float(row['换手率']) if '换手率' in row else 0.0,
                         "adj_factor": 1.0
                     }
                     

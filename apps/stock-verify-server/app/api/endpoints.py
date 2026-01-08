@@ -69,28 +69,21 @@ async def send_simulation_signal(req: SignalRequest):
     logger.info(f"Sending simulation signal for {req.code} on {req.trade_date}")
     
     # Construct payload expected by backend validation endpoint
-    # Schema: WencaiValidateRequest(stock_code, check_date, query_template)
-    
-    payload = {
-        "stock_code": req.code,
-        "check_date": req.trade_date,
-    }
-    
-    # Add extra fields if present (e.g. query_template)
-    if hasattr(req, "query_template"):
-        payload["query_template"] = getattr(req, "query_template")
-    # Also check if it's in the extra dict if pydantic puts it there
-    if hasattr(req, "__dict__"):
-         for key, value in req.__dict__.items():
-             if key not in ["code", "trade_date"] and key in ["query_template"]:
-                 payload[key] = value
-
-    async with httpx.AsyncClient(timeout=120.0) as http:
+    # Assuming backend has an endpoint /api/v1/test-tool/validate or similar
+    # If not, we might need to use a different endpoint or the generic ingest one.
+    # Based on original test-tool.html, it calls /api/v1/test-tool/validate
+    req.code = req.code.replace(".SH", "").replace(".SZ", "")
+    # We will use httpx directly here or via client if extended
+    async with httpx.AsyncClient() as http:
         try:
             # Forward to backend
             resp = await http.post(
                 f"{client.BASE_URL}/wencai/validate", 
-                json=payload
+                json={
+                    "data": {
+                        "stock_code": req.code
+                    }
+                }
             )
             resp.raise_for_status()
             data = resp.json()
@@ -99,10 +92,8 @@ async def send_simulation_signal(req: SignalRequest):
             return {"status": "success", "backend_response": data}
             
         except Exception as e:
-            import traceback
             logger.error(f"Failed to send signal: {e}")
-            logger.error(traceback.format_exc())
-            return {"status": "error", "message": f"{type(e).__name__}: {str(e)}"}
+            return {"status": "error", "message": str(e)}
 
 @router.get("/verify/{stock_code}")
 async def verify_status(stock_code: str, db: AsyncSession = Depends(get_db)):

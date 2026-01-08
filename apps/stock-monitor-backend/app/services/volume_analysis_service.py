@@ -18,29 +18,260 @@ from ..models.stock_daily import StockDaily, StockScoreResult
 from ..models.stock import StockInfo
 from ..models.tag_management import StockTagInfo, StockTagRelation
 from ..database import db_manager
+from .stock_data_manager import StockDataManager
 
 from loguru import logger
 
 class VolumeAnalysisService:
     
+    # Configuration
+    SCORE_WINDOW_DAYS = 250  # 总分计算窗口（天）
+    HISTORY_LOAD_DAYS = 400  # 计算时加载的历史数据天数
+    BASELINE_LOAD_DAYS = 100 # 前端展示/基准加载天数
+
+    # Tag Definitions and Scores (Shared)
+    TAG_SCORES = {
+        '涨停': -100,
+        '3倍量': 300,
+        '2倍量': 200,
+        '60日地量': 600,
+        '30日地量': 300,
+        '20日地量': 200,
+        '10日地量': 100,
+        '5日地量': 50
+    }
+
     @staticmethod
-    async def generate_daily_tags(code: str, target_date: date, session: AsyncSession):
+    def calculate_scores_batch(df, group_col=None):
+        """
+        Apply volume anomaly scoring rules to a Pandas DataFrame.
+        Expects columns: 'vol', 'close', 'trade_date'.
+        Returns a Series with daily scores.
+        """
+        import pandas as pd
+        import numpy as np
+
+        # Ensure sorted
+        if group_col:
+            df = df.sort_values([group_col, 'trade_date'])
+        else:
+            df = df.sort_values('trade_date')
+        
+        # Calculate shifted values
+        if group_col:
+            grouper = df.groupby(group_col)
+            df['prev_vol'] = grouper['vol'].shift(1)
+            df['prev_close'] = grouper['close'].shift(1)
+        else:
+            df['prev_vol'] = df['vol'].shift(1)
+            df['prev_close'] = df['close'].shift(1)
+        
+        # Initialize score
+        scores = pd.Series(0, index=df.index)
+        
+        # 1. Volume Multiplier
+        mask_valid_vol = df['prev_vol'] > 0
+        ratio = pd.Series(0.0, index=df.index)
+        ratio[mask_valid_vol] = df.loc[mask_valid_vol, 'vol'] / df.loc[mask_valid_vol, 'prev_vol']
+        
+        scores[ratio >= 3.0] += VolumeAnalysisService.TAG_SCORES['3倍量']
+        scores[(ratio >= 2.0) & (ratio < 3.0)] += VolumeAnalysisService.TAG_SCORES['2倍量']
+        
+        # 2. Limit Up
+        mask_valid_close = df['prev_close'] > 0
+        pct_chg = pd.Series(0.0, index=df.index)
+        pct_chg[mask_valid_close] = (df.loc[mask_valid_close, 'close'] - df.loc[mask_valid_close, 'prev_close']) / df.loc[mask_valid_close, 'prev_close']
+        
+        scores[pct_chg > 0.095] += VolumeAnalysisService.TAG_SCORES['涨停']
+        
+        # 3. Low Volume
+        has_low_vol = pd.Series(False, index=df.index)
+        
+        windows = [
+            (60, VolumeAnalysisService.TAG_SCORES['60日地量']),
+            (30, VolumeAnalysisService.TAG_SCORES['30日地量']),
+            (20, VolumeAnalysisService.TAG_SCORES['20日地量']),
+            (10, VolumeAnalysisService.TAG_SCORES['10日地量']),
+            (5, VolumeAnalysisService.TAG_SCORES['5日地量'])
+        ]
+        
+        for window, score_val in windows:
+            if group_col:
+                # prev_vol is already shifted 1, so rolling(window) on it gives min of [i-1...i-window]
+                past_min = df.groupby(group_col)['prev_vol'].transform(lambda x: x.rolling(window).min())
+            else:
+                past_min = df['prev_vol'].rolling(window).min()
+            
+            condition = (df['vol'] < past_min) & (~has_low_vol) & (df['vol'] > 0)
+            scores[condition] += score_val
+            has_low_vol = has_low_vol | condition
+            
+        return scores
+
+    @staticmethod
+    async def get_anomalies(code: str, start_date: date, end_date: date, session: AsyncSession) -> List[Dict[str, Any]]:
+        """
+        获取指定时间范围内的成交量异动分析结果 (Server-side implementation of test-tool logic)
+        """
+        # Ensure data is available via StockDataManager
+        stock_data_manager = StockDataManager(db_manager)
+        
+        # Load enough history for calculation (e.g. 100 days before start_date)
+        # We fetch a generous amount to cover the range + lookback
+        # Note: get_stock_data syncs if needed
+        # We fetch 1000 records to be safe for historical analysis, or just enough?
+        # If we need specific range, StockDataManager might need a range query method, 
+        # but currently get_stock_data(limit) gets latest N. 
+        # For historical range far back, this might be an issue if limit is small.
+        # But for "monitoring" context, usually we look at recent data.
+        # Let's assume 500 is enough for now, or improve StockDataManager later.
+        
+        # Use existing session if possible, but StockDataManager uses its own session factory.
+        # That's okay, they are read operations.
+        
+        all_data = await stock_data_manager.get_stock_data(code, limit=1000)
+        
+        if not all_data:
+            return []
+            
+        # Filter in memory (since we want to ensure sync happened)
+        # all_data is sorted desc by default from get_stock_data
+        
+        # Sort asc for processing
+        data = sorted(all_data, key=lambda x: x.trade_date)
+        
+        # Filter for [start_date - 100, end_date]
+        history_start = start_date - timedelta(days=100)
+        data = [d for d in data if d.trade_date >= history_start and d.trade_date <= end_date]
+        
+        if not data:
+            return []
+            
+        # Convert to list of dicts or objects for processing
+        # We need to map the logic from JS:
+        # 1. Volume Multiplier (2x, 3x)
+        # 2. Limit Up (9.5%+)
+        # 3. Low Volume (5, 10, 20, 30, 60 days)
+        
+        results = []
+        
+        # We need at least 1 day prior for volume multiplier
+        # We process from index 1 to end
+        
+        # Tag Definitions and Scores (mirrors JS)
+        TAG_SCORES = VolumeAnalysisService.TAG_SCORES
+        
+        # Color index for frontend consistency (optional, but good for UI)
+        colors = [
+            '#FF00FF', '#00FFFF', '#FFA500', '#00FF00', '#FF0000', '#FFFF00', 
+            '#8A2BE2', '#7FFF00', '#DC143C', '#00CED1', '#FF1493', '#FFD700'
+        ]
+        color_idx = 0
+        last_found_index = -1
+        
+        for i in range(1, len(data)):
+            current = data[i]
+            # Skip if before requested start_date
+            if current.trade_date < start_date:
+                continue
+                
+            prev = data[i-1]
+            
+            cur_vol = float(current.vol or 0)
+            prev_vol = float(prev.vol or 0)
+            cur_close = float(current.close or 0)
+            prev_close = float(prev.close or 0)
+            
+            triggered_tags = []
+            
+            # 1. Volume Multiplier
+            ratio = 0.0
+            vol_tag = None
+            if prev_vol > 0:
+                ratio = cur_vol / prev_vol
+                if ratio >= 3.0:
+                    vol_tag = '3倍量'
+                elif ratio >= 2.0:
+                    vol_tag = '2倍量'
+            
+            if vol_tag:
+                triggered_tags.append(vol_tag)
+                
+            # 2. Limit Up
+            is_limit_up = False
+            if prev_close > 0:
+                pct_chg = (cur_close - prev_close) / prev_close
+                if pct_chg > 0.095: # > 9.5%
+                    is_limit_up = True
+                    triggered_tags.append('涨停')
+            
+            # 3. Low Volume
+            low_tags = []
+            # Check windows: 60, 30, 20, 10, 5
+            # JS Logic: checks in order and breaks? No, JS:
+            # if (check(60)) { ... } else if (check(30)) ...
+            # So only the longest period is recorded.
+            
+            def check_low_vol(days):
+                if i < days: return False
+                # slice data[i-days : i] -> past 'days' records excluding current?
+                # JS: daily_data[-(days+1):-1] where current is last.
+                # Here current is data[i]. So past is data[i-days : i].
+                past_vols = [float(d.vol or 0) for d in data[i-days : i]]
+                if not past_vols: return False
+                min_past = min(past_vols)
+                return cur_vol < min_past
+
+            if check_low_vol(60): low_tags.append('60日地量')
+            elif check_low_vol(30): low_tags.append('30日地量')
+            elif check_low_vol(20): low_tags.append('20日地量')
+            elif check_low_vol(10): low_tags.append('10日地量')
+            elif check_low_vol(5): low_tags.append('5日地量')
+            
+            if low_tags:
+                triggered_tags.extend(low_tags)
+            
+            if triggered_tags:
+                desc_str = ", ".join(triggered_tags)
+                
+                # Calculate distance
+                distance = '-'
+                if last_found_index != -1:
+                    distance = str(i - last_found_index)
+                
+                results.append({
+                    "date": current.trade_date.isoformat(),
+                    "volume": cur_vol,
+                    "prevDate": prev.trade_date.isoformat(),
+                    "prevVolume": prev_vol,
+                    "ratio": round(ratio, 2),
+                    "distance": distance,
+                    "open": float(current.open or 0),
+                    "close": float(current.close or 0),
+                    "isLimitUp": is_limit_up,
+                    "description": desc_str,
+                    "color": colors[color_idx % len(colors)],
+                    "visible": True,
+                    "id": f"anomaly-{current.trade_date.isoformat()}"
+                })
+                
+                color_idx += 1
+                last_found_index = i
+                
+        # Return reversed (newest first) as per JS
+        return list(reversed(results))
+
+    @staticmethod
+    async def generate_daily_tags(code: str, target_date: date, session: AsyncSession, sync_if_missing: bool = True):
         """
         生成指定日期股票的标签（基于成交量异动）
         并更新到 stock_tag_relations 表
         """
         # 1. 获取数据 (Target Date + Past 100 days)
         start_date = target_date - timedelta(days=100) 
-        stmt = select(StockDaily).where(
-            and_(
-                StockDaily.code == code,
-                StockDaily.trade_date >= start_date,
-                StockDaily.trade_date <= target_date
-            )
-        ).order_by(StockDaily.trade_date.asc())
-        
-        result = await session.execute(stmt)
-        daily_data = result.scalars().all()
+        stock_data_manager = StockDataManager(db_manager)
+        daily_data = await stock_data_manager.get_stock_data(code, start_date=start_date, end_date=target_date, sync_if_missing=sync_if_missing)
+        daily_data = sorted(daily_data, key=lambda x: x.trade_date)
         
         if not daily_data:
             return
@@ -120,21 +351,35 @@ class VolumeAnalysisService:
             
             tag_ids.append(tag_info.id)
             
-        # Delete old relations for "calculation" tags
-        subq = select(StockTagInfo.id).where(StockTagInfo.tag_type == "calculation")
-        
-        stmt = delete(StockTagRelation).where(
+        # Optimize: Diff-based update to reduce locking
+        # 1. Get existing tags for this stock (calculation type)
+        subq_ids = select(StockTagInfo.id).where(StockTagInfo.tag_type == "calculation")
+        stmt_exist = select(StockTagRelation.tag_id).where(
             and_(
                 StockTagRelation.stock_code == code,
-                StockTagRelation.tag_id.in_(subq)
+                StockTagRelation.tag_id.in_(subq_ids)
             )
         )
-        await session.execute(stmt)
+        res_exist = await session.execute(stmt_exist)
+        existing_tag_ids = set(res_exist.scalars().all())
+        new_tag_ids = set(tag_ids)
         
-        # Insert new
-        for tid in tag_ids:
-            rel = StockTagRelation(stock_code=code, tag_id=tid)
-            session.add(rel)
+        to_delete = existing_tag_ids - new_tag_ids
+        to_add = new_tag_ids - existing_tag_ids
+        
+        if to_delete:
+            stmt = delete(StockTagRelation).where(
+                and_(
+                    StockTagRelation.stock_code == code,
+                    StockTagRelation.tag_id.in_(to_delete)
+                )
+            )
+            await session.execute(stmt)
+            
+        if to_add:
+            for tid in to_add:
+                rel = StockTagRelation(stock_code=code, tag_id=tid)
+                session.add(rel)
 
     @staticmethod
     async def analyze_all_stocks(batch_size: int = 5):
@@ -609,8 +854,8 @@ class VolumeAnalysisService:
         await VolumeAnalysisService.save_baseline(code, baseline, session)
         
         # 5. Calculate and Update Total Score in StockInfo
-        # We need to query DB for the total score over last 250 days
-        cutoff_date = datetime.now().date() - timedelta(days=250)
+        # We need to query DB for the total score over last SCORE_WINDOW_DAYS days
+        cutoff_date = datetime.now().date() - timedelta(days=VolumeAnalysisService.SCORE_WINDOW_DAYS)
         stmt_score = select(func.sum(StockScoreResult.total_score)).where(
             StockScoreResult.code == code,
             StockScoreResult.trade_date >= cutoff_date
@@ -690,7 +935,19 @@ class VolumeAnalysisService:
     @staticmethod
     async def save_baseline(code: str, baseline_data: Dict[str, Any], session: AsyncSession):
         """
-        保存基准数据
+        保存基准数据 (StockVolumeBaseline)
+        
+        基准量计算规则:
+        1. 3倍量/2倍量: 记录最近一次发生3倍/2倍量的日期和收盘价。
+           - 用于判断后续缩量回调的支撑位置。
+        2. 地量 (Low Volume): 记录最近一次5/10/20/30/60日地量的日期和成交量。
+           - 5日地量: 最近5个交易日成交量最小
+           - 60日地量: 最近60个交易日成交量最小 (长期底部信号)
+        
+        监控报警来源:
+        - 每日监控 (MonitorEngine) 会读取此表中的基准数据。
+        - 将今日实时成交量/收盘价与基准数据进行对比。
+        - 例如: 今日缩量至60日地量水平 -> 触发报警。
         """
         stmt = select(StockVolumeBaseline).where(StockVolumeBaseline.code == code)
         result = await session.execute(stmt)
@@ -701,6 +958,7 @@ class VolumeAnalysisService:
             session.add(record)
             
         # Update 3x/2x
+        # 规则: 总是更新为最新的日期 (Latest Date)
         if 'latest_3x_record' in baseline_data:
             rec = baseline_data['latest_3x_record']
             if not record.last_3x_date or rec['date'] >= record.last_3x_date:
@@ -714,6 +972,7 @@ class VolumeAnalysisService:
                 record.last_2x_close = Decimal(str(rec['close']))
                 
         # Update Low Vol
+        # 规则: 总是更新为最新的日期
         if 'latest_low_vol_records' in baseline_data:
             for days, data in baseline_data['latest_low_vol_records'].items():
                 date_attr = f"last_{days}d_low_vol_date"

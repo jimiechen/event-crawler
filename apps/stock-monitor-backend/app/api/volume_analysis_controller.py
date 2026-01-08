@@ -5,8 +5,9 @@
 """
 
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from sqlalchemy import select, func, desc
+from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
@@ -129,6 +130,25 @@ async def log_rule_calculation(req: LogRequest, session: AsyncSession = Depends(
     """
     await VolumeAnalysisService.log_rule_calculation(req.code, req.rule_name, req.is_match, req.details, session)
     return BaseResponse(message="日志已记录")
+
+@router.get("/anomalies", summary="Get volume anomalies for a stock")
+async def get_volume_anomalies(
+    code: str = Query(..., description="Stock Code"),
+    start_date: date = Query(..., description="Start Date"),
+    end_date: date = Query(..., description="End Date"),
+    session: AsyncSession = Depends(get_db_session)
+):
+    """
+    Get volume anomalies for a specific stock in a date range.
+    Replaces client-side detection in test-tool.html.
+    """
+    try:
+        results = await VolumeAnalysisService.get_anomalies(code, start_date, end_date, session)
+        return BaseResponse(success=True, data=results)
+    except Exception as e:
+        import logging
+        logging.error(f"Error getting anomalies: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/log-alert", response_model=BaseResponse)
 async def log_alert(req: AlertRequest, session: AsyncSession = Depends(get_db_session)):
