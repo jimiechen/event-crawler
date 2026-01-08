@@ -18,8 +18,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from app.database import DatabaseManager
 from app.services.pathway_engine import PathwayVolumePriceEngine
-from app.models.stock_daily import StockDaily
-from app.models.stock_score_result import StockScoreResult
+from app.models.stock_daily import StockDaily, StockScoreResult
 from app.models.stock import StockInfo
 
 
@@ -28,10 +27,10 @@ class PathwayAcceptanceTest:
 
     def __init__(self):
         self.test_config = {
-            'focus_symbol': '603601',
+            'focus_symbol': '603601.SH',
             'test_start': '2025-11-20',
             'test_end': '2025-12-10',
-            'csv_path': '/Volumes/MacintoshHD/data/daily'
+            'csv_path': '/Users/mac/Downloads/daily'
         }
         self.results = []
         self.rankings = {}
@@ -58,6 +57,19 @@ class PathwayAcceptanceTest:
         
         try:
             df = pd.read_csv(csv_path)
+            
+            column_mapping = {
+                '股票代码': 'code',
+                '交易日期': 'trade_date',
+                '开盘价': 'open',
+                '最高价': 'high',
+                '最低价': 'low',
+                '收盘价': 'close',
+                '成交量(手)': 'vol',
+                '成交额(千元)': 'amount'
+            }
+            df = df.rename(columns=column_mapping)
+            
             df['trade_date'] = pd.to_datetime(df['trade_date'], errors='coerce')
             
             start_date = pd.to_datetime(self.test_config['test_start'])

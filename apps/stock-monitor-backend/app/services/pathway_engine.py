@@ -10,9 +10,7 @@ from typing import Dict, List, Any, Callable, Optional
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
-
-from app.models.stock_daily import StockDaily
-from app.models.stock_score_result import StockScoreResult
+from app.models.stock_daily import StockDaily, StockScoreResult
 from app.models.stock import StockInfo
 
 
@@ -87,7 +85,7 @@ class PathwayVolumePriceEngine:
 
         try:
             stmt = select(StockDaily).where(
-                StockDaily.symbol == symbol,
+                StockDaily.code == symbol,
                 StockDaily.trade_date <= trade_date
             ).order_by(StockDaily.trade_date.desc()).limit(60)
 
@@ -267,7 +265,7 @@ class PathwayVolumePriceEngine:
         """为指定日期计算评分"""
         try:
             stmt = select(StockDaily).where(
-                StockDaily.symbol == symbol,
+                StockDaily.code == symbol,
                 StockDaily.trade_date == trade_date
             )
 
@@ -290,7 +288,7 @@ class PathwayVolumePriceEngine:
 
         try:
             stmt = select(StockDaily).where(
-                StockDaily.symbol == symbol,
+                StockDaily.code == symbol,
                 StockDaily.trade_date >= start_date,
                 StockDaily.trade_date <= end_date
             ).order_by(StockDaily.trade_date)
