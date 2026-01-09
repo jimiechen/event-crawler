@@ -11,7 +11,8 @@ import asyncio
 from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Optional
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import text, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import DatabaseManager
 from app.models.stock_daily import StockDaily
@@ -19,10 +20,12 @@ from app.repositories.stock_daily_repository import StockDailyRepository
 from app.repositories.sync_log_repository import SyncLogRepository
 from app.models.sync_log import SyncTaskType, SyncTaskStatus
 from app.services.tushare_service import TushareService
+from app.services.pathway_engine import PathwayVolumePriceEngine
 from app.config.settings import get_settings
 
 
 import akshare as ak
+from app.services.pathway_engine import PathwayVolumePriceEngine
 
 class StockSyncService:
     def __init__(self, db_manager: DatabaseManager):
@@ -30,6 +33,8 @@ class StockSyncService:
         self.tushare_service = TushareService(db_manager)
         self.repository = StockDailyRepository(db_manager)
         self.log_repository = SyncLogRepository(db_manager)
+        self.pathway_engine = None
+        self.pathway_enabled = get_settings().pathway_enabled
 
     async def fetch_from_akshare(self, code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """
@@ -434,6 +439,23 @@ class StockSyncService:
                     continue
             
             inserted_count = await self.repository.batch_save_daily_data_ignore(cleaned_records)
+            
+            if self.pathway_enabled:
+                try:
+                    async with self.db_manager.get_session() as session:
+                        self.pathway_engine = PathwayVolumePriceEngine(session)
+                        for record in cleaned_records:
+                            stmt = select(StockDaily).where(
+                                StockDaily.code == record['code'],
+                                StockDaily.trade_date == record['trade_date']
+                            )
+                            result = await session.execute(stmt)
+                            stock_daily = result.scalar_one_or_none()
+                            if stock_daily:
+                                await self.pathway_engine.process_new_data(stock_daily)
+                except Exception as e:
+                    logger.error(f"Pathway处理失败: {e}")
+            
             return {"success": True, "inserted": inserted_count}
 
         except Exception as e:
@@ -646,10 +668,26 @@ class StockSyncService:
                     # Maybe just log it.
 
             return {"success": True, "inserted": inserted_count, "csv_appended": csv_appended_count}
-
+        
         except Exception as e:
             logger.error(f"Error syncing Tushare for {code}: {e}")
             return {"success": False, "message": str(e)}
+        
+        if self.pathway_enabled:
+            try:
+                async with self.db_manager.get_session() as session:
+                    self.pathway_engine = PathwayVolumePriceEngine(session)
+                    for record in db_data_list:
+                        stmt = select(StockDaily).where(
+                            StockDaily.code == record['code'],
+                            StockDaily.trade_date == record['trade_date']
+                        )
+                        result = await session.execute(stmt)
+                        stock_daily = result.scalar_one_or_none()
+                        if stock_daily:
+                            await self.pathway_engine.process_new_data(stock_daily)
+            except Exception as e:
+                logger.error(f"Pathway处理失败: {e}")
 
     async def check_csv_health(self) -> Dict[str, Any]:
         """

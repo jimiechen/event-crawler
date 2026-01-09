@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     tushare_token: Optional[str] = Field(default=None, description="Tushare API Token")
     tushare_incremental_start_date: str = Field(default="2025-12-22", description="Tushare增量同步默认起始日期")
     
+    # Pathway配置
+    pathway_enabled: bool = Field(default=False, description="是否启用Pathway引擎")
+    pathway_csv_path: str = Field(default="/Users/mac/Downloads/daily", description="Pathway CSV路径")
+    pathway_snapshot_dir: str = Field(default="./data/pathway_snapshots", description="Pathway快照目录")
+    
     # CSV Data Path
     csv_data_path_stock_daily: str = Field(default="/Volumes/MacintoshHD/data/daily", description="股票日线数据CSV存储路径")
 
