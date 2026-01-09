@@ -1,0 +1,142 @@
+# Pre-commit configuration for Event-Crawler Project
+# See https://pre-commit.com for more information
+
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  # Python hooks
+  - repo: https://github.com/psf/black
+    rev: 24.4.0
+    hooks:
+      - id: black
+        name: Black formatter
+        language_version: python3.9
+        entry: black
+        args: [--config, pyproject.toml]
+        types: [python]
+        exclude: ^(venv/|build/|dist/|.tox/)
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: isort import sorter
+        language_version: python3.9
+        entry: isort
+        args: [--settings-path, pyproject.toml]
+        types: [python]
+        exclude: ^(venv/|build/|dist/|.tox/)
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        name: flake8 linter
+        language_version: python3.9
+        entry: flake8
+        args: [--config=.flake8, --max-line-length=120, --ignore=E203,W503]
+        types: [python]
+        exclude: ^(venv/|build/|dist/|.tox/)
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.1
+    hooks:
+      - id: mypy
+        name: mypy type checker
+        entry: mypy
+        language_version: python3.9
+        args: [--config-file=pyproject.toml]
+        types: [python]
+        exclude: ^(venv/|build/|dist/|.tox/)
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.9
+    hooks:
+      - id: bandit
+        name: bandit security linter
+        language_version: python3.9
+        entry: bandit
+        args: [-c, pyproject.toml]
+        types: [python]
+        exclude: ^(venv/|build/|dist/|.tox/)
+
+  # TypeScript/JavaScript hooks
+  - repo: https://github.com/pre-commit/mirrors-eslint
+    rev: v8.57.0
+    hooks:
+      - id: eslint
+        name: ESLint
+        entry: eslint
+        args: [--fix, --max-warnings=0]
+        types_or: [javascript, ts, tsx, vue]
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+  - repo: https://github.com/pre-commit/mirrors-prettier
+    rev: v4.0.0-alpha.8
+    hooks:
+      - id: prettier
+        name: Prettier
+        entry: prettier
+        args: [--write, --config=.prettierrc]
+        types_or: [javascript, ts, tsx, vue, json, md, css]
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+  # General hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim Trailing Whitespace
+        entry: trailing-whitespace-fixer
+        types: [text, markdown, python, javascript, ts, vue]
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+      - id: end-of-file-fixer
+        name: Fix End of Files
+        entry: end-of-file-fixer
+        types: [text, markdown, python, javascript, ts, vue]
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+      - id: check-yaml
+        name: Check YAML
+        entry: check-yaml
+        types: [yaml]
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+      - id: check-toml
+        name: Check TOML
+        entry: check-toml
+        types: [toml]
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+      - id: check-added-large-files
+        name: Check for large files
+        entry: check-added-large-files
+        args: ['--maxkb=1000', '--enforce-all']
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+        entry: check-merge-conflict
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+      - id: debug-statements
+        name: Debug Statements (Python)
+        entry: debug-statements
+        language: python
+        types: [python]
+        exclude: ^(venv/|build/|dist/|.tox/)
+
+      - id: check-json
+        name: Check JSON
+        entry: check-json
+        types: [json]
+        exclude: ^(node_modules/|dist/|build/|.output/)
+
+# CI configuration
+ci:
+  autofix_prs: true
+  autofix_commit_msg: 'chore: auto-fix by pre-commit hooks'
+  autoupdate_commit_msg: 'chore: [pre-commit.ci] autoupdate'
+  autoupdate_schedule: weekly
+  skip: [mypy, flake8]
+  submodules: false

@@ -1,0 +1,91 @@
+#!/bin/bash
+# Pre-push hook for Event-Crawler Project
+# This hook runs before pushing to remote
+
+echo "Running pre-push checks..."
+
+# Get the root directory of the git repository
+GIT_ROOT=$(git rev-parse --show-toplevel)
+cd "$GIT_ROOT"
+
+# Run tests for Python project
+if [ -f "apps/stock-monitor-backend/requirements.txt" ]; then
+    echo "Running Python tests..."
+    
+    # Check if pytest is installed
+    if command -v pytest &> /dev/null; then
+        pytest apps/stock-monitor-backend/tests/ --cov=apps/stock-monitor-backend/app --cov-report=term-missing --cov-fail-under=80
+        if [ $? -ne 0 ]; then
+            echo "❌ Python tests failed. Fix failing tests before pushing."
+            exit 1
+        fi
+        echo "✅ Python tests passed"
+    else
+        echo "⚠️  pytest is not installed. Skipping Python tests."
+    fi
+fi
+
+# Run tests for TypeScript/JavaScript project
+if [ -f "apps/chrome-extension/package.json" ]; then
+    echo "Running TypeScript/JavaScript tests..."
+    
+    # Check if Jest is installed
+    if [ -f "apps/chrome-extension/node_modules/.bin/jest" ]; then
+        cd apps/chrome-extension
+        npm run test
+        if [ $? -ne 0 ]; then
+            echo "❌ TypeScript/JavaScript tests failed. Fix failing tests before pushing."
+            exit 1
+        fi
+        echo "✅ TypeScript/JavaScript tests passed"
+        cd "$GIT_ROOT"
+    else
+        echo "⚠️  Jest is not installed. Skipping TypeScript/JavaScript tests."
+    fi
+fi
+
+# Run security audit for Python dependencies
+if [ -f "apps/stock-monitor-backend/requirements.txt" ]; then
+    echo "Running security audit for Python dependencies..."
+    
+    # Check if pip-audit is installed
+    if command -v pip-audit &> /dev/null; then
+        pip-audit apps/stock-monitor-backend/
+        if [ $? -ne 0 ]; then
+            echo "❌ Security audit found vulnerabilities. Please review before pushing."
+            echo "Run 'pip-audit apps/stock-monitor-backend/' for details."
+            exit 1
+        fi
+        echo "✅ Security audit passed"
+    else
+        echo "⚠️  pip-audit is not installed. Skipping security audit."
+    fi
+fi
+
+# Run security audit for npm dependencies
+if [ -f "apps/chrome-extension/package.json" ]; then
+    echo "Running security audit for npm dependencies..."
+    
+    # Check if npm audit is available
+    cd apps/chrome-extension
+    npm audit --production
+    if [ $? -ne 0 ]; then
+        echo "❌ Security audit found vulnerabilities. Please review before pushing."
+        echo "Run 'npm audit fix' to fix vulnerabilities."
+        exit 1
+    fi
+    echo "✅ Security audit passed"
+    cd "$GIT_ROOT"
+fi
+
+# Check for TODO or FIXME comments
+echo "Checking for TODO or FIXME comments..."
+TODO_COUNT=$(git diff --cached --name-only --diff-filter=ACM | xargs grep -h "TODO\|FIXME" | wc -l)
+if [ $TODO_COUNT -gt 0 ]; then
+    echo "❌ Found $TODO_COUNT TODO or FIXME comments in staged files."
+    echo "Please resolve TODO or FIXME comments before pushing."
+    exit 1
+fi
+echo "✅ No TODO or FIXME comments found"
+
+echo "✅ All pre-push checks passed!"

@@ -1,0 +1,141 @@
+#!/bin/sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Pre-commit hook for Event-Crawler Project
+# This hook runs before a commit is made
+
+echo "Running pre-commit checks..."
+
+# Get the root directory of the git repository
+GIT_ROOT=$(git rev-parse --show-toplevel)
+cd "$GIT_ROOT"
+
+# Check if we're in a Python project
+if [ -f "apps/stock-monitor-backend/requirements.txt" ]; then
+    echo "Checking Python code..."
+    
+    # Check if Black is installed
+    if command -v black &> /dev/null; then
+        echo "Running Black formatter..."
+        black --check apps/stock-monitor-backend/
+        if [ $? -ne 0 ]; then
+            echo "❌ Black check failed. Run 'black apps/stock-monitor-backend/' to fix."
+            exit 1
+        fi
+        echo "✅ Black check passed"
+    else
+        echo "⚠️  Black is not installed. Skipping Black check."
+    fi
+    
+    # Check if isort is installed
+    if command -v isort &> /dev/null; then
+        echo "Running isort..."
+        isort --check-only apps/stock-monitor-backend/
+        if [ $? -ne 0 ]; then
+            echo "❌ isort check failed. Run 'isort apps/stock-monitor-backend/' to fix."
+            exit 1
+        fi
+        echo "✅ isort check passed"
+    else
+        echo "⚠️  isort is not installed. Skipping isort check."
+    fi
+    
+    # Check if mypy is installed
+    if command -v mypy &> /dev/null; then
+        echo "Running mypy type checker..."
+        mypy apps/stock-monitor-backend/
+        if [ $? -ne 0 ]; then
+            echo "❌ mypy check failed. Fix type errors before committing."
+            exit 1
+        fi
+        echo "✅ mypy check passed"
+    else
+        echo "⚠️  mypy is not installed. Skipping mypy check."
+    fi
+    
+    # Check if pylint is installed
+    if command -v pylint &> /dev/null; then
+        echo "Running pylint..."
+        pylint apps/stock-monitor-backend/ --output-format=text --score=no
+        if [ $? -ne 0 ]; then
+            echo "❌ pylint check failed. Fix pylint errors before committing."
+            exit 1
+        fi
+        echo "✅ pylint check passed"
+    else
+        echo "⚠️  pylint is not installed. Skipping pylint check."
+    fi
+    
+    # Run pytest
+    if command -v pytest &> /dev/null; then
+        echo "Running pytest..."
+        pytest apps/stock-monitor-backend/tests/ --cov=apps/stock-monitor-backend/app --cov-report=term-missing --cov-fail-under=80
+        if [ $? -ne 0 ]; then
+            echo "❌ pytest failed. Fix failing tests before committing."
+            exit 1
+        fi
+        echo "✅ pytest passed"
+    else
+        echo "⚠️  pytest is not installed. Skipping pytest check."
+    fi
+fi
+
+# Check if we're in a TypeScript/JavaScript project
+if [ -f "apps/chrome-extension/package.json" ]; then
+    echo "Checking TypeScript/JavaScript code..."
+    
+    # Check if ESLint is installed
+    if [ -f "apps/chrome-extension/node_modules/.bin/eslint" ]; then
+        echo "Running ESLint..."
+        cd apps/chrome-extension
+        npx eslint "src/**/*.{ts,tsx,vue}"
+        if [ $? -ne 0 ]; then
+            echo "❌ ESLint check failed. Run 'npx eslint --fix src/**/*.{ts,tsx,vue}' to fix."
+            exit 1
+        fi
+        echo "✅ ESLint check passed"
+        cd "$GIT_ROOT"
+    else
+        echo "⚠️  ESLint is not installed. Skipping ESLint check."
+    fi
+    
+    # Check if Prettier is installed
+    if [ -f "apps/chrome-extension/node_modules/.bin/prettier" ]; then
+        echo "Running Prettier..."
+        cd apps/chrome-extension
+        npx prettier --check "src/**/*.{ts,tsx,vue}"
+        if [ $? -ne 0 ]; then
+            echo "❌ Prettier check failed. Run 'npx prettier --write src/**/*.{ts,tsx,vue}' to fix."
+            exit 1
+        fi
+        echo "✅ Prettier check passed"
+        cd "$GIT_ROOT"
+    else
+        echo "⚠️  Prettier is not installed. Skipping Prettier check."
+    fi
+fi
+
+# Check for large files
+echo "Checking for large files..."
+LARGE_FILES=$(git diff --cached --name-only --diff-filter=A | xargs -I {} find {} -size +100k 2>/dev/null)
+if [ -n "$LARGE_FILES" ]; then
+    echo "❌ Large files detected:"
+    echo "$LARGE_FILES"
+    echo "Please remove or compress large files before committing."
+    exit 1
+fi
+echo "✅ No large files detected"
+
+# Check for sensitive data
+echo "Checking for sensitive data..."
+SENSITIVE_PATTERNS=("password" "token" "secret" "api_key" "private_key")
+for pattern in "${SENSITIVE_PATTERNS[@]}"; do
+    if git diff --cached --name-only | grep -i "$pattern" > /dev/null; then
+        echo "❌ Sensitive data detected: $pattern"
+        echo "Please remove sensitive data before committing."
+        exit 1
+    fi
+done
+echo "✅ No sensitive data detected"
+
+echo "✅ All pre-commit checks passed!"

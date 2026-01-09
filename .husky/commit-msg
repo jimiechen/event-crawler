@@ -1,0 +1,74 @@
+#!/bin/sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# Commit-msg hook for Event-Crawler Project
+# This hook validates the commit message format
+
+echo "Validating commit message..."
+
+# Get the commit message
+COMMIT_MSG_FILE=$1
+COMMIT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Define commit message pattern
+# Format: <type>(<scope>): <subject>
+# Types: feat, fix, docs, style, refactor, perf, test, chore
+COMMIT_PATTERN="^(feat|fix|docs|style|refactor|perf|test|chore)(\(.+\))?: .{1,50}"
+
+# Check if commit message matches the pattern
+if ! [[ "$COMMIT_MSG" =~ $COMMIT_PATTERN ]]; then
+    echo "❌ Commit message format is invalid."
+    echo ""
+    echo "Expected format: <type>(<scope>): <subject>"
+    echo ""
+    echo "Allowed types:"
+    echo "  feat     - 新功能"
+    echo "  fix      - 修复Bug"
+    echo "  docs     - 文档更新"
+    echo "  style    - 代码格式（不影响功能）"
+    echo "  refactor - 重构（不是新功能也不是修复）"
+    echo "  perf     - 性能优化"
+    echo "  test     - 测试相关"
+    echo "  chore    - 构建/工具相关"
+    echo ""
+    echo "Example:"
+    echo "  feat(api): 添加股票信息API"
+    echo "  fix: 修复数据去重问题"
+    echo "  docs: 更新API文档"
+    exit 1
+fi
+
+# Check if subject is too long
+SUBJECT=$(echo "$COMMIT_MSG" | sed 's/^[^ ]* //' | cut -d':' -f2 | cut -d' ' -f1 | sed 's/^ *//')
+if [ ${#SUBJECT} -gt 50 ]; then
+    echo "❌ Commit subject is too long (max 50 characters)."
+    echo "Current length: ${#SUBJECT}"
+    echo "Subject: $SUBJECT"
+    exit 1
+fi
+
+# Check if subject ends with a period
+if [[ "$SUBJECT" =~ \.$ ]]; then
+    echo "❌ Commit subject should not end with a period."
+    echo "Subject: $SUBJECT"
+    exit 1
+fi
+
+# Check if subject uses imperative mood
+if [[ "$SUBJECT" =~ ^(添加|修复|更新|删除|实现|完成|优化|重构|测试) ]]; then
+    echo "❌ Commit subject should use imperative mood (祈使句）。"
+    echo "Subject: $SUBJECT"
+    echo ""
+    echo "Good examples:"
+    echo "  feat: 添加股票监控功能"
+    echo "  fix: 修复数据去重问题"
+    echo "  docs: 更新API文档"
+    echo ""
+    echo "Bad examples:"
+    echo "  feat: 添加了股票监控功能"
+    echo "  fix: 修复了数据去重问题"
+    echo "  docs: 更新了API文档"
+    exit 1
+fi
+
+echo "✅ Commit message format is valid!"
