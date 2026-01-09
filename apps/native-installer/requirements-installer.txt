@@ -1,0 +1,55 @@
+# 打包工具
+pyinstaller>=6.0.0
+pyinstaller-versionfile>=0.2.0
+
+# 浏览器自动化
+playwright>=1.40.0
+
+# Web框架
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# 数据库
+sqlalchemy>=2.0.23
+asyncpg>=0.29.0
+aiomysql>=0.2.0
+alembic>=1.13.0
+
+# Redis
+redis>=5.0.1
+aioredis>=2.0.1
+
+# 日志
+loguru>=0.7.2
+
+# 工具库
+python-multipart>=0.0.6
+aiofiles>=23.2.1
+beautifulsoup4>=4.12.2
+lxml>=4.9.0
+requests>=2.31.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-dotenv>=1.0.0
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 定时任务
+APScheduler>=3.10.0
+
+# 系统工具
+psutil>=5.9.0
+pywin32>=306; sys_platform == 'win32'
+pyobjc>=9.0; sys_platform == 'darwin'
+
+# 加密和压缩
+pycryptodome>=3.19.0
+py7zr>=0.20.0
+
+# 安装包生成
+nsis>=0.1.0; sys_platform == 'win32'
+dmgbuild>=1.6.0; sys_platform == 'darwin'

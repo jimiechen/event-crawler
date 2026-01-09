@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCP UI 测试</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        .tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .tab {
+            flex: 1;
+            padding: 12px 16px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 14px;
+            color: #6c757d;
+            transition: all 0.2s;
+        }
+        .tab.active {
+            background: white;
+            color: #007bff;
+            border-bottom: 2px solid #007bff;
+        }
+        .tab-content {
+            padding: 20px;
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .mcp-section {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+        .mcp-section-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #212529;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        .mcp-status-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .mcp-status-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px;
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            text-align: center;
+        }
+        .mcp-status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-bottom: 4px;
+        }
+        .mcp-status-indicator.connected {
+            background: #28a745;
+        }
+        .mcp-status-indicator.disconnected {
+            background: #dc3545;
+        }
+        .mcp-status-indicator.unknown {
+            background: #6c757d;
+        }
+        .mcp-scenarios {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .mcp-scenario-btn {
+            padding: 8px 12px;
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mcp-scenario-btn:hover {
+            background: #007bff;
+            color: white;
+        }
+        .mcp-param-grid {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+        .mcp-param-input, .mcp-param-textarea {
+            padding: 8px;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .mcp-param-textarea {
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            resize: vertical;
+            min-height: 60px;
+        }
+        .mcp-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+        .mcp-btn {
+            padding: 8px 16px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            background: white;
+        }
+        .mcp-btn.primary {
+            background: #007bff;
+            color: white;
+            border-color: #007bff;
+        }
+        .mcp-btn.success {
+            background: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+        .mcp-btn.info {
+            background: #17a2b8;
+            color: white;
+            border-color: #17a2b8;
+        }
+        .mcp-result {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 16px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .mcp-result pre {
+            margin: 0;
+            font-size: 12px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="tabs">
+            <button class="tab" onclick="showTab('monitor')">数据监控</button>
+            <button class="tab" onclick="showTab('status')">系统状态</button>
+            <button class="tab active" onclick="showTab('mcp')">MCP测试</button>
+            <button class="tab" onclick="showTab('config')">配置管理</button>
+        </div>
+
+        <div id="monitor" class="tab-content">
+            <h3>数据监控</h3>
+            <p>同花顺股票数据监控功能...</p>
+        </div>
+
+        <div id="status" class="tab-content">
+            <h3>系统状态</h3>
+            <p>系统健康状态监控...</p>
+        </div>
+
+        <div id="mcp" class="tab-content active">
+            <div class="mcp-section">
+                <div class="mcp-section-title">🔧 MCP调试工具</div>
+                
+                <div class="mcp-status-grid">
+                    <div class="mcp-status-item">
+                        <div class="mcp-status-label">MCP服务</div>
+                        <div class="mcp-status-indicator unknown"></div>
+                        <div class="mcp-status-text">未知</div>
+                    </div>
+                    <div class="mcp-status-item">
+                        <div class="mcp-status-label">Chrome扩展</div>
+                        <div class="mcp-status-indicator unknown"></div>
+                        <div class="mcp-status-text">未知</div>
+                    </div>
+                    <div class="mcp-status-item">
+                        <div class="mcp-status-label">Native Host</div>
+                        <div class="mcp-status-indicator unknown"></div>
+                        <div class="mcp-status-text">未知</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mcp-section">
+                <div class="mcp-section-title">⚡ 快速测试场景</div>
+                
+                <div class="mcp-scenarios">
+                    <button class="mcp-scenario-btn">导航测试</button>
+                    <button class="mcp-scenario-btn">Alert测试</button>
+                    <button class="mcp-scenario-btn">获取标题</button>
+                    <button class="mcp-scenario-btn">获取标签页</button>
+                </div>
+            </div>
+
+            <div class="mcp-section">
+                <div class="mcp-section-title">⚙️ 参数配置</div>
+                
+                <div class="mcp-param-grid">
+                    <input type="text" class="mcp-param-input" placeholder="工具名称" value="chrome_navigate">
+                    <textarea class="mcp-param-textarea" placeholder="JSON参数">{"url": "https://example.com"}</textarea>
+                </div>
+            </div>
+
+            <div class="mcp-section">
+                <div class="mcp-section-title">🚀 执行操作</div>
+                
+                <div class="mcp-actions">
+                    <button class="mcp-btn primary">执行工具</button>
+                    <button class="mcp-btn success">连接MCP</button>
+                    <button class="mcp-btn info">验证参数</button>
+                    <button class="mcp-btn">Ping测试</button>
+                    <button class="mcp-btn">获取工具列表</button>
+                </div>
+            </div>
+
+            <div class="mcp-section">
+                <div class="mcp-section-title">📋 执行结果</div>
+                
+                <div class="mcp-result">
+                    <pre>等待执行结果...</pre>
+                </div>
+            </div>
+
+            <div class="mcp-section">
+                <div class="mcp-section-title">🛠️ 可用工具</div>
+                
+                <div class="mcp-tools-list">
+                    <div class="mcp-tool-item">
+                        <div class="mcp-tool-name">chrome_navigate</div>
+                        <div class="mcp-tool-description">导航到指定URL</div>
+                    </div>
+                    <div class="mcp-tool-item">
+                        <div class="mcp-tool-name">chrome_get_page_content</div>
+                        <div class="mcp-tool-description">获取页面内容</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="config" class="tab-content">
+            <h3>配置管理</h3>
+            <p>系统配置选项...</p>
+        </div>
+    </div>
+
+    <script>
+        function showTab(tabName) {
+            // 隐藏所有标签页内容
+            const contents = document.querySelectorAll('.tab-content');
+            contents.forEach(content => content.classList.remove('active'));
+            
+            // 移除所有标签页的active状态
+            const tabs = document.querySelectorAll('.tab');
+            tabs.forEach(tab => tab.classList.remove('active'));
+            
+            // 显示选中的标签页内容
+            document.getElementById(tabName).classList.add('active');
+            
+            // 设置对应标签页为active状态
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>

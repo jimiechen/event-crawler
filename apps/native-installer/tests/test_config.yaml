@@ -1,0 +1,739 @@
+# 测试配置文件
+
+## 测试环境配置
+
+### 通用配置
+
+```yaml
+test_environment:
+  os_type: "Darwin"  # Windows, Darwin, Linux
+  python_version: "3.11.0"
+  test_timeout: 300  # 测试超时时间（秒）
+  
+  # 项目路径
+  project_root: "/Users/mac/StudioProjects/open-citycloud/projects/event-crawler/apps/native-installer"
+  
+  # 测试输出
+  output_dir: "test_results"
+  log_dir: "test_logs"
+  
+  # 测试覆盖
+  coverage_enabled: true
+  coverage_threshold: 80  # 代码覆盖率阈值（%）
+```
+
+### 单元测试配置
+
+```yaml
+unit_tests:
+  enabled: true
+  test_files:
+    - "tests/test_installer.py"
+  
+  # 测试框架
+  framework: "pytest"
+  options:
+    - "-v"
+    - "--tb=short"
+    - "--cov=src"
+    - "--cov-report=html"
+    - "--cov-report=term"
+  
+  # 测试分组
+  groups:
+    - name: "launcher"
+      pattern: "TestLauncher"
+    - name: "browser_manager"
+      pattern: "TestBrowserManager"
+    - name: "extension_loader"
+      pattern: "TestExtensionLoader"
+    - name: "build_manager"
+      pattern: "TestBuildManager"
+```
+
+### 验收测试配置
+
+```yaml
+acceptance_tests:
+  enabled: true
+  test_file: "tests/acceptance_test_installer.py"
+  
+  # 测试阶段
+  phases:
+    - name: "项目结构测试"
+      priority: 1
+      required: true
+    - name: "源代码语法测试"
+      priority: 2
+      required: true
+    - name: "配置文件测试"
+      priority: 3
+      required: true
+    - name: "文档完整性测试"
+      priority: 4
+      required: true
+    - name: "跨平台兼容性测试"
+      priority: 5
+      required: true
+    - name: "依赖完整性测试"
+      priority: 6
+      required: true
+    - name: "构建准备测试"
+      priority: 7
+      required: true
+  
+  # 测试标准
+  criteria:
+    all_required: true  # 所有必需测试必须通过
+    min_pass_rate: 0.95  # 最小通过率 95%
+    allow_warnings: true  # 允许警告但不阻塞
+```
+
+### 平台测试配置
+
+```yaml
+platform_tests:
+  # macOS 测试
+  macos:
+    enabled: true
+    vm_required: false  # 是否需要虚拟机
+    
+    # 测试项目
+    test_items:
+      - name: "应用包生成"
+        command: "python scripts/build.py"
+        expected_output: "dist/StockMonitor.app"
+      - name: "DMG 生成"
+        command: "python scripts/setup_macos.py"
+        expected_output: "build/macos/StockMonitor.dmg"
+      - name: "应用安装"
+        command: "cp -R dist/StockMonitor.app /Applications/"
+        expected_output: "/Applications/StockMonitor.app"
+      - name: "应用启动"
+        command: "open /Applications/StockMonitor.app"
+        expected_output: "running process"
+      - name: "Web 服务访问"
+        url: "http://localhost:8000"
+        expected_status: 200
+      - name: "Chrome 扩展加载"
+        check: "chrome://extensions/"
+        expected_extension: "StockMonitor Extension"
+      - name: "应用卸载"
+        command: "~/Library/Application\\ Support/StockMonitor/uninstall.sh"
+        expected_output: "removed"
+  
+  # Windows 测试
+  windows:
+    enabled: false  # 当前环境为 macOS，暂不启用
+    vm_required: true
+    
+    # 测试项目
+    test_items:
+      - name: "可执行文件生成"
+        command: "python scripts/build.py"
+        expected_output: "dist/StockMonitor/StockMonitor.exe"
+      - name: "安装程序生成"
+        command: "python scripts/setup_windows.py"
+        expected_output: "build/windows/StockMonitor-Setup.exe"
+      - name: "应用安装"
+        command: "StockMonitor-Setup.exe"
+        expected_output: "C:\\Program Files\\StockMonitor"
+      - name: "应用启动"
+        command: "StockMonitor.exe"
+        expected_output: "running process"
+      - name: "Web 服务访问"
+        url: "http://localhost:8000"
+        expected_status: 200
+      - name: "Chrome 扩展加载"
+        check: "chrome://extensions/"
+        expected_extension: "StockMonitor Extension"
+      - name: "应用卸载"
+        command: "uninstall.exe"
+        expected_output: "removed"
+```
+
+### 功能测试配置
+
+```yaml
+functional_tests:
+  # 应用启动测试
+  startup:
+    enabled: true
+    tests:
+      - name: "启动时间"
+        threshold: 15  # 最大启动时间（秒）
+      - name: "启动日志"
+        check_errors: false
+      - name: "进程检查"
+        check_running: true
+  
+  # Web 服务测试
+  web_service:
+    enabled: true
+    base_url: "http://localhost:8000"
+    tests:
+      - name: "健康检查 API"
+        endpoint: "/api/v1/health"
+        method: "GET"
+        expected_status: 200
+      - name: "API 文档访问"
+        endpoint: "/docs"
+        method: "GET"
+        expected_status: 200
+      - name: "ReDoc 文档访问"
+        endpoint: "/redoc"
+        method: "GET"
+        expected_status: 200
+      - name: "静态文件访问"
+        endpoint: "/static/js/navbar.js"
+        method: "GET"
+        expected_status: 200
+  
+  # 浏览器自动化测试
+  browser_automation:
+    enabled: true
+    tests:
+      - name: "浏览器启动"
+        headless: true
+      - name: "页面导航"
+        url: "https://example.com"
+        timeout: 30
+      - name: "页面截图"
+        save_path: "test_screenshot.png"
+      - name: "JavaScript 执行"
+        script: "document.title"
+      - name: "元素点击"
+        selector: "button"
+      - name: "表单填充"
+        selector: "input"
+        value: "test"
+      - name: "Cookie 管理"
+        action: "get_cookies"
+  
+  # Chrome 扩展测试
+  chrome_extension:
+    enabled: true
+    tests:
+      - name: "扩展加载"
+        check_manifest: true
+      - name: "扩展权限"
+        required_permissions:
+          - "nativeMessaging"
+          - "tabs"
+          - "activeTab"
+      - name: "扩展功能"
+        test_features:
+          - "background script"
+          - "content script"
+          - "popup"
+      - name: "扩展通信"
+        test_native_messaging: true
+```
+
+### 性能测试配置
+
+```yaml
+performance_tests:
+  # 启动性能测试
+  startup:
+    enabled: true
+    tests:
+      - name: "冷启动时间"
+        iterations: 3
+        threshold: 15  # 秒
+      - name: "热启动时间"
+        iterations: 3
+        threshold: 5  # 秒
+      - name: "内存占用"
+        threshold: 500  # MB
+      - name: "CPU 占用"
+        threshold: 30  # %
+  
+  # 运行性能测试
+  runtime:
+    enabled: true
+    duration: 300  # 测试持续时间（秒）
+    tests:
+      - name: "CPU 占用率"
+        threshold: 30  # %
+        interval: 10  # 采样间隔（秒）
+      - name: "内存占用率"
+        threshold: 1024  # MB
+        interval: 10
+      - name: "响应时间"
+        endpoint: "/api/v1/health"
+        threshold: 1000  # 毫秒
+        interval: 10
+  
+  # 资源使用测试
+  resource:
+    enabled: true
+    tests:
+      - name: "磁盘 I/O"
+        threshold: 100  # MB/s
+      - name: "网络 I/O"
+        threshold: 10  # MB/s
+      - name: "文件描述符"
+        threshold: 1024  # 数量
+```
+
+### 集成测试配置
+
+```yaml
+integration_tests:
+  # 完整构建流程测试
+  build_flow:
+    enabled: true
+    steps:
+      - name: "清理构建目录"
+        command: "python scripts/build.py --clean"
+      - name: "准备资源文件"
+        command: "python scripts/build.py --prepare"
+      - name: "安装依赖"
+        command: "python scripts/build.py --install-deps"
+      - name: "安装浏览器"
+        command: "python scripts/build.py --install-browsers"
+      - name: "执行打包"
+        command: "python scripts/build.py --build"
+      - name: "生成安装程序"
+        command: "python scripts/build.py --installer"
+  
+  # 资源集成测试
+  resource_integration:
+    enabled: true
+    tests:
+      - name: "Chrome 扩展集成"
+        source: "../chrome-extension"
+        target: "resources/chrome-extension"
+      - name: "CSV 数据集成"
+        source: "/Volumes/MacintoshHD/data/daily"
+        target: "resources/csv-data"
+        sample_size: 10  # 复制样本数量
+      - name: "配置文件集成"
+        source: "../stock-monitor-backend/config"
+        target: "resources/configs"
+      - name: "静态文件集成"
+        source: "../stock-monitor-backend/static"
+        target: "resources/static"
+```
+
+### 报告配置
+
+```yaml
+reporting:
+  # 报告格式
+  format: "markdown"  # markdown, html, json, xml
+  
+  # 报告内容
+  sections:
+    - name: "测试概述"
+      enabled: true
+    - name: "测试结果"
+      enabled: true
+    - name: "测试统计"
+      enabled: true
+    - name: "测试结论"
+      enabled: true
+    - name: "遗留问题"
+      enabled: true
+    - name: "改进建议"
+      enabled: true
+  
+  # 报告输出
+  output:
+    directory: "test_reports"
+    filename_template: "test_report_{timestamp}.md"
+    include_screenshots: true
+    include_logs: true
+    include_coverage: true
+  
+  # 报告通知
+  notifications:
+    enabled: false
+    channels:
+      - type: "email"
+        recipients: ["test@example.com"]
+      - type: "slack"
+        webhook: "https://hooks.slack.com/services/xxx"
+      - type: "console"
+        level: "info"
+```
+
+### 持续集成配置
+
+```yaml
+ci_cd:
+  # GitHub Actions 配置
+  github_actions:
+    enabled: false
+    triggers:
+      - push
+      - pull_request
+      - schedule:
+        - cron: "0 0 * * *"  # 每天午夜运行
+    
+    jobs:
+      - name: "单元测试"
+        runs-on: ["macos-latest", "windows-latest"]
+        steps:
+          - name: "设置 Python"
+            uses: "actions/setup-python@v4"
+            with:
+              python-version: "3.11"
+          - name: "安装依赖"
+            run: "pip install -r requirements-installer.txt"
+          - name: "运行单元测试"
+            run: "python tests/test_installer.py"
+          - name: "生成覆盖率报告"
+            run: "pytest --cov=src --cov-report=xml"
+          - name: "上传覆盖率"
+            uses: "codecov/codecov-action@v3"
+      
+      - name: "验收测试"
+        runs-on: ["macos-latest"]
+        steps:
+          - name: "设置 Python"
+            uses: "actions/setup-python@v4"
+            with:
+              python-version: "3.11"
+          - name: "运行验收测试"
+            run: "python tests/acceptance_test_installer.py"
+          - name: "上传测试报告"
+            uses: "actions/upload-artifact@v3"
+            with:
+              name: "test-report"
+              path: "ACCEPTANCE_REPORT.md"
+```
+
+### 调试配置
+
+```yaml
+debugging:
+  # 日志级别
+  log_level: "DEBUG"  # DEBUG, INFO, WARNING, ERROR
+  
+  # 调试输出
+  verbose: true
+  show_stack_trace: true
+  
+  # 断点
+  breakpoints:
+    enabled: false
+    locations: []
+  
+  # 性能分析
+  profiling:
+    enabled: false
+    tool: "cProfile"  # cProfile, pyinstrument
+    output_format: "pstats"
+```
+
+### Mock 配置
+
+```yaml
+mocking:
+  # 外部服务 Mock
+  external_services:
+    - name: "database"
+      enabled: true
+      mock_data: "tests/mock_data/database.json"
+    - name: "redis"
+      enabled: true
+      mock_data: "tests/mock_data/redis.json"
+    - name: "tushare"
+      enabled: true
+      mock_data: "tests/mock_data/tushare.json"
+  
+  # 文件系统 Mock
+  filesystem:
+    - name: "chrome_extension"
+      enabled: true
+      mock_path: "tests/mock_data/chrome_extension"
+    - name: "csv_data"
+      enabled: true
+      mock_path: "tests/mock_data/csv_data"
+```
+
+### 测试数据配置
+
+```yaml
+test_data:
+  # CSV 测试数据
+  csv_data:
+    source: "/Volumes/MacintoshHD/data/daily"
+    sample_stocks:
+      - "000001.SZ"
+      - "600000.SH"
+      - "603601.SH"
+    date_range:
+      start: "2025-01-01"
+      end: "2025-01-31"
+  
+  # Chrome 扩展测试数据
+  chrome_extension:
+    source: "../chrome-extension"
+    test_manifest:
+      name: "StockMonitor Extension"
+      version: "1.0.0"
+      manifest_version: 3
+      permissions:
+        - "nativeMessaging"
+        - "tabs"
+        - "activeTab"
+  
+  # Mock 数据
+  mock_data:
+    database:
+      enabled: true
+      path: "tests/mock_data/database.json"
+    api_responses:
+      enabled: true
+      path: "tests/mock_data/api_responses.json"
+```
+
+### 安全测试配置
+
+```yaml
+security_tests:
+  # 权限测试
+  permissions:
+    enabled: true
+    tests:
+      - name: "文件访问权限"
+        check_read_write: true
+      - name: "网络访问权限"
+        check_firewall: true
+      - name: "进程权限"
+        check_admin: false
+  
+  # 输入验证测试
+  input_validation:
+    enabled: true
+    tests:
+      - name: "SQL 注入"
+        payloads:
+          - "'; DROP TABLE users; --"
+          - "' OR '1'='1"
+      - name: "XSS 攻击"
+        payloads:
+          - "<script>alert('xss')</script>"
+          - "<img src=x onerror=alert('xss')>"
+      - name: "路径遍历"
+        payloads:
+          - "../../../etc/passwd"
+          - "..\\..\\..\\..\\windows\\system32"
+  
+  # 认证测试
+  authentication:
+    enabled: true
+    tests:
+      - name: "弱密码"
+        passwords:
+          - "123456"
+          - "password"
+          - "admin"
+      - name: "暴力破解防护"
+        max_attempts: 5
+        lockout_duration: 300  # 秒
+```
+
+### 兼容性测试配置
+
+```yaml
+compatibility_tests:
+  # Python 版本兼容性
+  python_versions:
+    - "3.11"
+    - "3.10"
+    - "3.9"
+  
+  # 操作系统兼容性
+  operating_systems:
+    - name: "macOS"
+      versions:
+        - "10.15 (Catalina)"
+        - "11.0 (Big Sur)"
+        - "12.0 (Monterey)"
+        - "13.0 (Ventura)"
+        - "14.0 (Sonoma)"
+    - name: "Windows"
+      versions:
+        - "10"
+        - "11"
+    - name: "Linux"
+      versions:
+        - "Ubuntu 20.04"
+        - "Ubuntu 22.04"
+        - "Debian 11"
+  
+  # 浏览器兼容性
+  browsers:
+    - name: "Chromium"
+      versions:
+        - "120"
+        - "121"
+        - "122"
+    - name: "Chrome"
+      versions:
+        - "120"
+        - "121"
+        - "122"
+```
+
+### 回归测试配置
+
+```yaml
+regression_tests:
+  # 回归测试套件
+  suite: "regression"
+  
+  # 测试用例
+  test_cases:
+    - id: "REG-001"
+      name: "应用启动回归测试"
+      priority: "critical"
+      description: "验证应用启动功能未受影响"
+    - id: "REG-002"
+      name: "浏览器自动化回归测试"
+      priority: "high"
+      description: "验证浏览器自动化功能未受影响"
+    - id: "REG-003"
+      name: "Chrome 扩展回归测试"
+      priority: "high"
+      description: "验证 Chrome 扩展功能未受影响"
+    - id: "REG-004"
+      name: "数据加载回归测试"
+      priority: "medium"
+      description: "验证数据加载功能未受影响"
+  
+  # 回归测试触发条件
+  triggers:
+    - type: "code_change"
+      paths:
+        - "src/launcher.py"
+        - "src/browser_manager.py"
+        - "src/extension_loader.py"
+    - type: "dependency_update"
+      packages:
+        - "playwright"
+        - "pyinstaller"
+```
+
+### 压力测试配置
+
+```yaml
+stress_tests:
+  # 负载测试
+  load:
+    enabled: false
+    tests:
+      - name: "并发请求测试"
+        concurrent_users: 100
+        duration: 300  # 秒
+      - name: "大数据量测试"
+        data_size: "1GB"
+      - name: "长时间运行测试"
+        duration: 86400  # 24 小时
+  
+  # 内存泄漏测试
+  memory_leak:
+    enabled: false
+    tests:
+      - name: "浏览器实例泄漏"
+        iterations: 100
+        check_interval: 10  # 秒
+      - name: "文件描述符泄漏"
+        iterations: 1000
+        check_interval: 1  # 秒
+  
+  # 资源限制测试
+  resource_limits:
+    enabled: false
+    tests:
+      - name: "低内存测试"
+        memory_limit: "256MB"
+      - name: "低磁盘空间测试"
+        disk_limit: "100MB"
+      - name: "网络限制测试"
+        bandwidth_limit: "1Mbps"
+```
+
+### 可访问性测试配置
+
+```yaml
+accessibility_tests:
+  # 键盘导航
+  keyboard:
+    enabled: true
+    tests:
+      - name: "Tab 键导航"
+      - name: "Enter 键确认"
+      - name: "Escape 键取消"
+  
+  # 屏幕阅读器
+  screen_reader:
+    enabled: true
+    tools:
+      - "VoiceOver (macOS)"
+      - "NVDA (Windows)"
+      - "Orca (Linux)"
+  
+  # 高对比度
+  high_contrast:
+    enabled: true
+    modes:
+      - "高对比度模式"
+      - "反转颜色"
+      - "灰度模式"
+  
+  # 字体大小
+  font_size:
+    enabled: true
+    levels:
+      - "标准"
+      - "大"
+      - "特大"
+```
+
+### 本地化测试配置
+
+```yaml
+localization_tests:
+  # 支持的语言
+  languages:
+    - code: "zh-CN"
+      name: "简体中文"
+      enabled: true
+    - code: "en-US"
+      name: "英语（美国）"
+      enabled: false
+    - code: "ja-JP"
+      name: "日语"
+      enabled: false
+  
+  # 日期和时间格式
+  datetime_formats:
+    - code: "zh-CN"
+      date_format: "YYYY-MM-DD"
+      time_format: "HH:mm:ss"
+    - code: "en-US"
+      date_format: "MM/DD/YYYY"
+      time_format: "hh:mm:ss A"
+  
+  # 数字和货币格式
+  number_formats:
+    - code: "zh-CN"
+      decimal_separator: "."
+      thousands_separator: ","
+      currency_symbol: "¥"
+    - code: "en-US"
+      decimal_separator: "."
+      thousands_separator: ","
+      currency_symbol: "$"
+```
+
+---
+
+**配置文件版本**: v1.0
+**最后更新**: 2025-01-08
+**维护者**: AI Assistant

@@ -1,0 +1,52 @@
+crawler:
+  delay: 2
+  max_retries: 3
+  timeout: 30000
+  
+  proxy:
+    enabled: false
+    list: []
+  
+  user_agents:
+    - "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    - "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+    - "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+
+platforms:
+  weibo:
+    enabled: true
+    max_count: 100
+    scroll_delay: 2
+  
+  douyin:
+    enabled: true
+    max_count: 100
+    scroll_delay: 2
+  
+  xiaohongshu:
+    enabled: true
+    max_count: 100
+    scroll_delay: 2
+  
+  bilibili:
+    enabled: true
+    max_count: 100
+    scroll_delay: 2
+
+  okooo:
+    enabled: true
+    max_count: 100
+    scroll_delay: 2
+
+storage:
+  type: sqlite
+  path: ./data/crawler.db
+
+api:
+  host: 0.0.0.0
+  port: 5006
+  debug: false
+
+logging:
+  level: INFO
+  file: ./logs/crawler.log
