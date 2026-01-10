@@ -153,7 +153,7 @@ void main() {
           volume: 10000,
           amount: 107000,
         ),
-      ];
+      );
 
       IndicatorCalculator.calculateVolumeMA(data);
 

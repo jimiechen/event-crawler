@@ -25,13 +25,18 @@ class CSVDataService {
     final manifest = await rootBundle.loadString('AssetManifest.json');
     final Map<String, dynamic> manifestMap = json.decode(manifest);
     
-    return manifestMap.keys
+    final stockCodes = manifestMap.keys
         .where((key) => key.startsWith('assets/csv_data/'))
         .map((key) {
           final fileName = key.split('/').last;
           return fileName.substring(0, fileName.lastIndexOf('.'));
         })
         .toList();
+    
+    print('CSVDataService: getAvailableStockCodes() - 找到 ${stockCodes.length} 个股票代码');
+    print('CSVDataService: getAvailableStockCodes() - 股票代码: $stockCodes');
+    
+    return stockCodes;
   }
   
   Future<List<StockData>> loadStockData(String stockCode) async {
@@ -54,8 +59,13 @@ class CSVDataService {
   }
   
   Future<List<StockData>> _parseCSVData(String stockCode) async {
+    print('CSVDataService: _parseCSVData() - 开始解析股票 $stockCode 的CSV文件');
+    
     final rawData = await rootBundle.loadString('$_dataPath$stockCode.csv');
+    print('CSVDataService: _parseCSVData() - 原始数据长度: ${rawData.length}');
+    
     final lines = const LineSplitter().convert(rawData);
+    print('CSVDataService: _parseCSVData() - 解析后行数: ${lines.length}');
     
     final List<StockData> stockDataList = [];
     
@@ -63,17 +73,21 @@ class CSVDataService {
       if (line.trim().isEmpty || line.startsWith('股票代码')) continue;
       
       final values = line.split(',');
-      if (values.length < 11) continue;
+      if (values.length < 11) {
+        print('CSVDataService: _parseCSVData() - 跳过行: $line (values.length: ${values.length})');
+        continue;
+      }
       
       try {
         final stockData = StockData.fromCSV(values);
         stockDataList.add(stockData);
-      } catch (_) {
-        
+      } catch (e) {
+        print('CSVDataService: _parseCSVData() - 解析错误: $e, 行: $line');
       }
     }
     
     stockDataList.sort((a, b) => a.date.compareTo(b.date));
+    print('CSVDataService: _parseCSVData() - 解析完成，股票数据数量: ${stockDataList.length}');
     
     return stockDataList;
   }
@@ -102,6 +116,8 @@ class CSVDataService {
   }
   
   Future<List<StockData>> getRandomStockData(int dataLength) async {
+    print('CSVDataService: getRandomStockData() - 开始获取随机股票数据，需要长度: $dataLength');
+    
     final availableStocks = await getAvailableStockCodes();
     
     if (availableStocks.isEmpty) {
@@ -110,17 +126,20 @@ class CSVDataService {
     
     final random = Random();
     final selectedStock = availableStocks[random.nextInt(availableStocks.length)];
+    print('CSVDataService: getRandomStockData() - 选择的股票: $selectedStock');
     
     final stockData = await loadStockData(selectedStock);
+    print('CSVDataService: getRandomStockData() - 股票数据长度: ${stockData.length}');
     
-    if (stockData.length < dataLength + 100) {
+    if (stockData.length < dataLength) {
+      print('CSVDataService: getRandomStockData() - 股票数据长度不足，重新选择');
       return getRandomStockData(dataLength);
     }
     
-    const minStartIndex = 100;
-    final maxStartIndex = stockData.length - dataLength;
-    final startIndex = minStartIndex + random.nextInt(maxStartIndex - minStartIndex);
+    final randomStartIndex = random.nextInt(stockData.length - dataLength + 1);
+    final endIndex = randomStartIndex + dataLength - 1;
+    print('CSVDataService: getRandomStockData() - 随机起始索引: $randomStartIndex, 结束索引: $endIndex');
     
-    return stockData.sublist(startIndex, startIndex + dataLength);
+    return stockData.sublist(randomStartIndex, endIndex + 1);
   }
 }

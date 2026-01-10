@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:kliner_trainer/models/blind_test_session.dart';
 import 'package:kliner_trainer/models/stock_data.dart';
+import 'package:kliner_trainer/models/blind_test_session.dart';
 
 void main() {
   group('BlindTestSession', () {
@@ -27,6 +27,8 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 30,
       );
 
       expect(session.stockCode, '603601.SH');
@@ -34,6 +36,8 @@ void main() {
       expect(session.data, data);
       expect(session.startDate, DateTime(2023, 1, 1));
       expect(session.endDate, DateTime(2023, 1, 31));
+      expect(session.startIndex, 0);
+      expect(session.endIndex, 30);
       expect(session.userOperation, isNull);
     });
 
@@ -73,6 +77,8 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 1,
       );
 
       expect(session.currentPrice, 10.90);
@@ -114,6 +120,8 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 1,
       );
 
       expect(session.changePercent, 5.0);
@@ -126,6 +134,8 @@ void main() {
         data: [],
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 0,
       );
 
       expect(session.changePercent, 0.0);
@@ -155,6 +165,8 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 9,
       );
 
       expect(session.technicalSignal, TradingSignal.hold);
@@ -190,6 +202,8 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 13,
       );
 
       expect(session.technicalSignal, TradingSignal.buy);
@@ -225,6 +239,8 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 13,
       );
 
       expect(session.technicalSignal, TradingSignal.strongBuy);
@@ -259,6 +275,8 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 13,
       );
 
       expect(session.technicalSignal, TradingSignal.sell);
@@ -293,9 +311,25 @@ void main() {
         data: data,
         startDate: DateTime(2023, 1, 1),
         endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 13,
       );
 
       expect(session.technicalSignal, TradingSignal.hold);
+    });
+
+    test('should return display info correctly', () {
+      final session = BlindTestSession(
+        stockCode: '603601.SH',
+        stockName: '测试股票',
+        data: [],
+        startDate: DateTime(2023, 1, 1),
+        endDate: DateTime(2023, 1, 31),
+        startIndex: 0,
+        endIndex: 30,
+      );
+
+      expect(session.displayInfo, '测试股票 (603601.SH) - 第1天至第31天');
     });
   });
 }

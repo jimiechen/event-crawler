@@ -14,6 +14,8 @@ class BlindTestSession {
   final List<StockData> data;
   final DateTime startDate;
   final DateTime endDate;
+  final int startIndex;
+  final int endIndex;
   
   OperationRecord? userOperation;
   
@@ -23,6 +25,9 @@ class BlindTestSession {
     required this.data,
     required this.startDate,
     required this.endDate,
+    required this.startIndex,
+    required this.endIndex,
+    this.userOperation,
   });
   
   double get currentPrice => data.last.close;
@@ -57,5 +62,9 @@ class BlindTestSession {
     } else {
       return TradingSignal.hold;
     }
+  }
+  
+  String get displayInfo {
+    return '$stockName ($stockCode) - 第${startIndex + 1}天至第${endIndex + 1}天';
   }
 }

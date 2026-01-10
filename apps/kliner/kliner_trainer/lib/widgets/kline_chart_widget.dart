@@ -134,6 +134,7 @@ class _KLineChartContentState extends State<_KLineChartContent> {
   double scale = 1.0;
   Offset? tapPosition;
   StockData? selectedData;
+  int visibleCount = 60;
 
   TrainingController get controller => Get.find<TrainingController>();
 
@@ -144,7 +145,7 @@ class _KLineChartContentState extends State<_KLineChartContent> {
     
     final adjustedVisibleEnd = (visibleStart + (visibleEnd - visibleStart) / scale).round();
     final end = adjustedVisibleEnd < data.length ? adjustedVisibleEnd : data.length;
-
+    
     final visibleData = data.sublist(visibleStart, end);
     final priceRange = _calculatePriceRange(visibleData);
     final maxPrice = priceRange['max']!;
@@ -153,16 +154,19 @@ class _KLineChartContentState extends State<_KLineChartContent> {
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
         final delta = details.primaryDelta ?? 0;
-        final shift = (delta / 10).round();
+        final shift = (delta / 10).toInt();
         setState(() {
-          visibleStart = (visibleStart - shift).clamp(0, data.length - 30);
-          visibleEnd = (visibleEnd - shift).clamp(30, data.length);
+          visibleStart = (visibleStart - shift).clamp(0, data.length - 10);
+          visibleEnd = (visibleEnd - shift).clamp(10, data.length);
         });
       },
       onScaleUpdate: (details) {
         if (details.scale != 1.0) {
           setState(() {
-            scale = (scale * details.scale).clamp(0.5, 3.0);
+            final newVisibleCount = (visibleCount / details.scale).clamp(10, 30);
+            visibleCount = newVisibleCount.toInt();
+            final diff = newVisibleCount - (visibleEnd - visibleStart);
+            visibleEnd = (visibleEnd + diff).clamp(10, data.length).toInt();
           });
         }
       },
@@ -226,6 +230,36 @@ class _KLineChartContentState extends State<_KLineChartContent> {
               chartWidth: MediaQuery.of(context).size.width - 60,
               chartHeight: MediaQuery.of(context).size.height * 0.7 * 0.7 - 30,
             ),
+          Positioned(
+            left: 10,
+            bottom: 10,
+            child: Row(
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left, color: Colors.blue),
+                  onPressed: () {
+                    setState(() {
+                      final shift = visibleCount;
+                      visibleStart = (visibleStart - shift).clamp(0, data.length - 10);
+                      visibleEnd = (visibleEnd - shift).clamp(10, data.length);
+                    });
+                  },
+                  tooltip: '上一日',
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right, color: Colors.blue),
+                  onPressed: () {
+                    setState(() {
+                      final shift = visibleCount;
+                      visibleStart = (visibleStart + shift).clamp(0, data.length - 10);
+                      visibleEnd = (visibleEnd + shift).clamp(10, data.length);
+                    });
+                  },
+                  tooltip: '下一日',
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

@@ -18,8 +18,6 @@ class OperationPanelWidget extends GetView<TrainingController> {
           const SizedBox(height: 16),
           _buildOperationButtons(),
           const SizedBox(height: 16),
-          _buildReasonInput(),
-          const SizedBox(height: 16),
           _buildQuickTips(),
         ],
       ),
@@ -31,7 +29,7 @@ class OperationPanelWidget extends GetView<TrainingController> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          '选择仓位 (1-5层):',
+          '选择仓位:',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 8),
@@ -51,7 +49,7 @@ class OperationPanelWidget extends GetView<TrainingController> {
                         : Colors.black,
                   ),
                   onPressed: () => controller.positionLevel.value = level,
-                  child: Text('$level层'),
+                  child: Text('${level}万'),
                 )),
               ),
             );
@@ -59,8 +57,8 @@ class OperationPanelWidget extends GetView<TrainingController> {
         ),
         const SizedBox(height: 8),
         Obx(() => Text(
-          '当前仓位: ${controller.positionLevel.value}层 '
-          '(${(controller.totalCapital.value * controller.positionLevel.value / 5).toStringAsFixed(0)}元)',
+          '当前仓位: ${controller.positionLevel.value}万 '
+          '(${(controller.positionLevel.value * 10000).toStringAsFixed(0)}元)',
           style: const TextStyle(fontSize: 12, color: Colors.grey),
         )),
       ],
@@ -118,27 +116,6 @@ class OperationPanelWidget extends GetView<TrainingController> {
     );
   }
   
-  Widget _buildReasonInput() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          '操作理由（可选）:',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          maxLines: 2,
-          decoration: InputDecoration(
-            hintText: '请输入您的分析依据...',
-            border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.all(12),
-          ),
-        ),
-      ],
-    );
-  }
-  
   Widget _buildQuickTips() {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -151,7 +128,7 @@ class OperationPanelWidget extends GetView<TrainingController> {
         children: [
           Row(
             children: [
-              Icon(Icons.lightbulb, size: 16, color: Colors.blue[800]),
+              Icon(Icons.lightbulb, size: 16, color: Colors.blue),
               const SizedBox(width: 4),
               Text(
                 '操作提示',

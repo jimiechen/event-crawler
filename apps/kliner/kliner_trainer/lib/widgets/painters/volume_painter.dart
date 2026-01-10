@@ -165,7 +165,7 @@ class VolumePainter extends CustomPainter {
     double maxVolume,
   ) {
     final axisPaint = Paint()
-      ..color = Colors.grey[400]!
+      ..color = const Color(0xFFBDBDBD)
       ..strokeWidth = 1.0;
 
     canvas.drawLine(

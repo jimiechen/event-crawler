@@ -14,6 +14,8 @@ class OperationRecord {
   final String stockName;
   final DateTime stockDate;
   final String reason;
+  double purchasePrice;
+  double profitPercent;
   double? profit;
   int points = 0;
   
@@ -27,6 +29,8 @@ class OperationRecord {
     required this.stockName,
     required this.stockDate,
     required this.reason,
+    this.purchasePrice = 0.0,
+    this.profitPercent = 0.0,
   });
   
   Map<String, dynamic> toJson() {
@@ -40,6 +44,8 @@ class OperationRecord {
       'stockName': stockName,
       'stockDate': stockDate.toIso8601String(),
       'reason': reason,
+      'purchasePrice': purchasePrice,
+      'profitPercent': profitPercent,
       'profit': profit,
       'points': points,
     };
@@ -62,10 +68,12 @@ class OperationRecord {
       price: (json['price'] as num).toDouble(),
       stockCode: json['stockCode'] as String,
       stockName: json['stockName'] as String,
-      stockDate: DateTime.parse(json['stockDate'] as String),
+      stockDate: DateTime.parse(json['lateDate'] as String),
       reason: json['reason'] as String,
     );
     
+    record.purchasePrice = json['purchasePrice'] as double? ?? 0.0;
+    record.profitPercent = json['profitPercent'] as double? ?? 0.0;
     record.profit = json['profit'] as double?;
     record.points = json['points'] as int? ?? 0;
     

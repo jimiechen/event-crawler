@@ -66,7 +66,7 @@ class KLinePainter extends CustomPainter {
     List<StockData> visibleData,
   ) {
     final gridPaint = Paint()
-      ..color = Colors.grey[300]!
+      ..color = const Color(0xFFD3D3D3)
       ..strokeWidth = 0.5;
 
     final horizontalLines = 5;

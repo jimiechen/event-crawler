@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import 'pages/training_page.dart';
+import 'controllers/training_controller.dart';
+import 'services/csv_data_service.dart';
+import 'services/storage_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  Get.put(TrainingController());
+  Get.put(CSVDataService());
+  Get.put(StorageService());
+  
   runApp(const MyApp());
 }
 
