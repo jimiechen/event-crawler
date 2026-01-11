@@ -75,15 +75,26 @@ class CSVDataService {
       final values = line.split(',');
       if (values.length < 11) {
         print('CSVDataService: _parseCSVData() - 跳过行: $line (values.length: ${values.length})');
+        // 如果是第一行或看起来像数据的行，打印更多信息
+        if (values.isNotEmpty && values[0].contains(RegExp(r'\d'))) {
+          print('CSVDataService: 警告 - 数据列数不足 (期望11，实际${values.length}): $values');
+          print('CSVDataService: 原始内容: $line');
+        }
         continue;
       }
       
       try {
         final stockData = StockData.fromCSV(values);
         stockDataList.add(stockData);
-      } catch (e) {
+      } catch (e, stackTrace) {
         print('CSVDataService: _parseCSVData() - 解析错误: $e, 行: $line');
+        print('CSVDataService: 错误详情 - values: $values');
+        print('CSVDataService: 堆栈: $stackTrace');
       }
+    }
+    
+    if (stockDataList.isEmpty) {
+      print('CSVDataService: 警告 - 股票 $stockCode 解析后没有有效数据！');
     }
     
     stockDataList.sort((a, b) => a.date.compareTo(b.date));

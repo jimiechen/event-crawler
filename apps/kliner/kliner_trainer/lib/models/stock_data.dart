@@ -16,6 +16,7 @@ class StockData {
   double volumeMa5 = 0.0;
   double volumeMa60 = 0.0;
   bool isLowVolume = false;
+  bool isHighVolume = false; // 3倍量
   
   StockData({
     required this.code,

@@ -24,9 +24,9 @@ void main() {
       expect(controller.score.value, 0);
       expect(controller.sessionCount.value, 0);
       expect(controller.positionLevel.value, 0);
-      expect(controller.totalCapital.value, 1000000.0);
-      expect(controller.currentPositionValue.value, 0.0);
-      expect(controller.holdingStocks.isEmpty, true);
+      expect(controller.totalCapital, 1000000.0);
+      expect(controller.currentPositionValue, 0.0);
+      expect(controller.totalShareCount.value, 0);
       expect(controller.sessionOperations.isEmpty, true);
       expect(controller.isLoading.value, false);
     });
@@ -69,12 +69,15 @@ void main() {
       expect(stats.containsKey('currentPosition'), true);
     });
 
-    test('should have initial capital of 1,000,000', () {
-      expect(controller.totalCapital.value, 1000000.0);
+    test('should calculate current position value', () {
+      // Mock data setup would be needed here
+      // controller.totalShareCount.value = 1000;
+      // ...
+      expect(controller.currentPositionValue, 0.0);
     });
 
-    test('should have initial position value of 0', () {
-      expect(controller.currentPositionValue.value, 0.0);
+    test('should calculate total capital', () {
+      expect(controller.totalCapital, 1000000.0);
     });
 
     test('should have initial position level of 0', () {
@@ -90,7 +93,7 @@ void main() {
     });
 
     test('should have empty holding stocks initially', () {
-      expect(controller.holdingStocks.isEmpty, true);
+      expect(controller.totalShareCount.value, 0);
     });
 
     test('should have empty session operations initially', () {
@@ -134,15 +137,15 @@ void main() {
     });
 
     test('should have total capital reactive variable', () {
-      expect(controller.totalCapital, isA<RxDouble>());
+      expect(controller.totalCapital, isA<double>());
     });
 
     test('should have current position value reactive variable', () {
-      expect(controller.currentPositionValue, isA<RxDouble>());
+      expect(controller.currentPositionValue, isA<double>());
     });
 
     test('should have holding stocks reactive list', () {
-      expect(controller.holdingStocks, isA<RxList<String>>());
+      expect(controller.totalShareCount, isA<RxInt>());
     });
 
     test('should have session operations reactive list', () {

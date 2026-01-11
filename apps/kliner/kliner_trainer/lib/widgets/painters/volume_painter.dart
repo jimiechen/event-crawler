@@ -35,21 +35,59 @@ class VolumePainter extends CustomPainter {
 
     final chartWidth = size.width - paddingRight;
     final chartHeight = size.height - paddingBottom;
+    
+    // 动态计算蜡烛宽度
+    final count = visibleData.length;
+    final totalCandleWidth = count > 0 ? chartWidth / count : this.candleWidth + this.candleSpacing;
+    final candleWidth = totalCandleWidth * 0.8;
+    final candleSpacing = totalCandleWidth * 0.2;
 
     final volumeRange = _calculateVolumeRange(visibleData);
     final maxVolume = volumeRange['max']!;
 
-    _drawVolumeBars(canvas, chartWidth, chartHeight, maxVolume, visibleData);
+    _drawVolumeBars(canvas, chartWidth, chartHeight, maxVolume, visibleData, candleWidth, candleSpacing);
 
     if (showVolumeMA5) {
-      _drawVolumeMALine(canvas, chartWidth, chartHeight, maxVolume, visibleData, Colors.blue, 'volumeMa5');
+      _drawVolumeMALine(canvas, chartWidth, chartHeight, maxVolume, visibleData, Colors.blue, 'volumeMa5', candleWidth, candleSpacing);
     }
 
     if (showVolumeMA60) {
-      _drawVolumeMALine(canvas, chartWidth, chartHeight, maxVolume, visibleData, Colors.orange, 'volumeMa60');
+      _drawVolumeMALine(canvas, chartWidth, chartHeight, maxVolume, visibleData, Colors.orange, 'volumeMa60', candleWidth, candleSpacing);
     }
 
+    _drawVolumeInfo(canvas, visibleData);
+
     _drawVolumeAxis(canvas, size, chartHeight, maxVolume);
+  }
+  
+  void _drawVolumeInfo(Canvas canvas, List<StockData> visibleData) {
+    if (visibleData.isEmpty) return;
+    
+    final currentData = visibleData.last;
+    
+    double x = 10;
+    const double y = 5;
+    
+    // 显示具体数值到单位万
+    if (showVolumeMA5) {
+      final text = 'VOL5: ${_formatVolume(currentData.volumeMa5)}';
+      _drawText(canvas, text, Offset(x, y), fontSize: 10, color: Colors.blue, fontWeight: FontWeight.bold);
+      x += _measureText(text) + 10;
+    }
+    
+    if (showVolumeMA60) {
+      final text = 'VOL60: ${_formatVolume(currentData.volumeMa60)}';
+      _drawText(canvas, text, Offset(x, y), fontSize: 10, color: Colors.orange, fontWeight: FontWeight.bold);
+    }
+  }
+  
+  double _measureText(String text, {double fontSize = 10}) {
+    final textPainter = TextPainter(
+      text: TextSpan(text: text, style: TextStyle(fontSize: fontSize)),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    return textPainter.width;
   }
 
   List<StockData> _getVisibleData() {
@@ -70,12 +108,14 @@ class VolumePainter extends CustomPainter {
     double chartHeight,
     double maxVolume,
     List<StockData> visibleData,
+    double candleWidth,
+    double candleSpacing,
   ) {
     final totalCandleWidth = candleWidth + candleSpacing;
     final availableWidth = chartWidth;
-    final numCandles = (availableWidth / totalCandleWidth).floor();
+    final numCandles = (availableWidth / totalCandleWidth).ceil();
 
-    for (int i = 0; i < visibleData.length && i < numCandles; i++) {
+    for (int i = 0; i < visibleData.length && i <= numCandles; i++) {
       final d = visibleData[i];
       final x = i * totalCandleWidth + candleSpacing / 2;
 
@@ -89,6 +129,27 @@ class VolumePainter extends CustomPainter {
 
       if (showLowVolumeAlert && d.isLowVolume) {
         barPaint.color = Colors.blue.withOpacity(0.8);
+        _drawText(
+          canvas, 
+          '地', 
+          Offset(x, y - 12), 
+          fontSize: 10, 
+          color: Colors.blue,
+          fontWeight: FontWeight.bold,
+          align: TextAlign.center,
+        );
+      }
+      
+      if (d.isHighVolume) {
+        _drawText(
+          canvas, 
+          '3倍', 
+          Offset(x, y - 12), 
+          fontSize: 8, 
+          color: Colors.purple,
+          fontWeight: FontWeight.bold,
+          align: TextAlign.center,
+        );
       }
 
       canvas.drawRect(
@@ -102,6 +163,36 @@ class VolumePainter extends CustomPainter {
       );
     }
   }
+  
+  void _drawText(
+    Canvas canvas,
+    String text,
+    Offset offset, {
+    double fontSize = 12,
+    Color color = Colors.black,
+    FontWeight fontWeight = FontWeight.normal,
+    TextAlign align = TextAlign.left,
+  }) {
+    final textStyle = TextStyle(color: color, fontSize: fontSize, fontWeight: fontWeight);
+    final textSpan = TextSpan(text: text, style: textStyle);
+    final textPainter = TextPainter(
+      text: textSpan,
+      textDirection: TextDirection.ltr,
+      textAlign: align,
+    );
+    textPainter.layout();
+    
+    double dx = offset.dx;
+    double dy = offset.dy;
+    
+    if (align == TextAlign.center) {
+      dx -= textPainter.width / 2;
+    } else if (align == TextAlign.right) {
+      dx -= textPainter.width;
+    }
+    
+    textPainter.paint(canvas, Offset(dx, dy));
+  }
 
   void _drawVolumeMALine(
     Canvas canvas,
@@ -111,6 +202,8 @@ class VolumePainter extends CustomPainter {
     List<StockData> visibleData,
     Color color,
     String maType,
+    double candleWidth,
+    double candleSpacing,
   ) {
     if (visibleData.length < 2) return;
 
@@ -195,22 +288,7 @@ class VolumePainter extends CustomPainter {
     return volume.toStringAsFixed(0);
   }
 
-  void _drawText(
-    Canvas canvas,
-    String text,
-    Offset offset, {
-    double fontSize = 12,
-    Color color = Colors.black,
-  }) {
-    final textStyle = TextStyle(color: color, fontSize: fontSize);
-    final textSpan = TextSpan(text: text, style: textStyle);
-    final textPainter = TextPainter(
-      text: textSpan,
-      textDirection: TextDirection.ltr,
-    );
-    textPainter.layout();
-    textPainter.paint(canvas, offset);
-  }
+
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => true;

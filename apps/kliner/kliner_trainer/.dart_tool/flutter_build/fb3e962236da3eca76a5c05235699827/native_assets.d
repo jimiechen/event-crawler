@@ -1,0 +1,1 @@
+ /Users/mac/StudioProjects/MineplanetGo/outModules/event-crawler/apps/kliner/kliner_trainer/.dart_tool/flutter_build/fb3e962236da3eca76a5c05235699827/native_assets.yaml: 

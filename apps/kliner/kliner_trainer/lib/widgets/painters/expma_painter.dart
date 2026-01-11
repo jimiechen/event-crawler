@@ -11,6 +11,8 @@ class ExpmaPainter extends CustomPainter {
   final double paddingBottom;
   final bool showExpma5;
   final bool showExpma13;
+  final double? maxPrice;
+  final double? minPrice;
 
   ExpmaPainter({
     required this.data,
@@ -22,6 +24,8 @@ class ExpmaPainter extends CustomPainter {
     this.paddingBottom = 30.0,
     this.showExpma5 = true,
     this.showExpma13 = true,
+    this.maxPrice,
+    this.minPrice,
   });
 
   @override
@@ -33,18 +37,88 @@ class ExpmaPainter extends CustomPainter {
 
     final chartWidth = size.width - paddingRight;
     final chartHeight = size.height - paddingBottom;
+    
+    // Dynamic candle width calculation
+    final count = visibleData.length;
+    final totalCandleWidth = count > 0 ? chartWidth / count : this.candleWidth + this.candleSpacing;
+    final candleWidth = totalCandleWidth * 0.8;
+    final candleSpacing = totalCandleWidth * 0.2;
 
-    final priceRange = _calculatePriceRange(visibleData);
-    final maxPrice = priceRange['max']!;
-    final minPrice = priceRange['min']!;
+    double maxPrice;
+    double minPrice;
+
+    if (this.maxPrice != null && this.minPrice != null) {
+      maxPrice = this.maxPrice!;
+      minPrice = this.minPrice!;
+    } else {
+      final priceRange = _calculatePriceRange(visibleData);
+      maxPrice = priceRange['max']!;
+      minPrice = priceRange['min']!;
+    }
 
     if (showExpma5) {
-      _drawExpmaLine(canvas, chartWidth, chartHeight, maxPrice, minPrice, visibleData, Colors.yellow, 'expma5');
+      _drawExpmaLine(canvas, chartWidth, chartHeight, maxPrice, minPrice, visibleData, Colors.blue, 'expma5', candleWidth, candleSpacing);
     }
 
     if (showExpma13) {
-      _drawExpmaLine(canvas, chartWidth, chartHeight, maxPrice, minPrice, visibleData, Colors.purple, 'expma13');
+      _drawExpmaLine(canvas, chartWidth, chartHeight, maxPrice, minPrice, visibleData, Colors.purple, 'expma13', candleWidth, candleSpacing);
     }
+    
+    _drawExpmaInfo(canvas, visibleData);
+  }
+
+  void _drawExpmaInfo(Canvas canvas, List<StockData> visibleData) {
+    if (visibleData.isEmpty) return;
+    
+    // 获取当前K线（最后一个可见数据）
+    final currentData = visibleData.last;
+    
+    double x = 10;
+    // 调整Y坐标，避开顶部标题（假设标题高度约30）
+    const double y = 40; 
+    
+    if (showExpma5) {
+      final text = 'EXPMA5: ${currentData.expma5.toStringAsFixed(2)}';
+      _drawText(canvas, text, Offset(x, y), color: Colors.blue, fontWeight: FontWeight.bold);
+      x += _measureText(text) + 10;
+    }
+    
+    if (showExpma13) {
+      final text = 'EXPMA13: ${currentData.expma13.toStringAsFixed(2)}';
+      _drawText(canvas, text, Offset(x, y), color: Colors.purple, fontWeight: FontWeight.bold);
+    }
+  }
+
+  double _measureText(String text, {double fontSize = 10}) {
+    final textPainter = TextPainter(
+      text: TextSpan(text: text, style: TextStyle(fontSize: fontSize)),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    return textPainter.width;
+  }
+
+  void _drawText(
+    Canvas canvas,
+    String text,
+    Offset offset, {
+    double fontSize = 10,
+    Color color = Colors.black,
+    FontWeight fontWeight = FontWeight.normal,
+  }) {
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: text, 
+        style: TextStyle(
+          color: color, 
+          fontSize: fontSize,
+          fontWeight: fontWeight,
+        )
+      ),
+      textDirection: TextDirection.ltr,
+    );
+    textPainter.layout();
+    textPainter.paint(canvas, offset);
   }
 
   List<StockData> _getVisibleData() {
@@ -72,6 +146,8 @@ class ExpmaPainter extends CustomPainter {
     List<StockData> visibleData,
     Color color,
     String expmaType,
+    double candleWidth,
+    double candleSpacing,
   ) {
     if (visibleData.length < 2) return;
 
@@ -84,7 +160,7 @@ class ExpmaPainter extends CustomPainter {
 
     for (int i = 0; i < visibleData.length && i < numCandles; i++) {
       final d = visibleData[i];
-      final x = i * totalCandleWidth + candleSpacing / 2;
+      final x = i * totalCandleWidth + totalCandleWidth / 2; // Center of candle
 
       double expmaValue;
       if (expmaType == 'expma5') {
@@ -103,17 +179,15 @@ class ExpmaPainter extends CustomPainter {
       path.moveTo(points.first.dx, points.first.dy);
 
       for (int i = 1; i < points.length; i++) {
-        final p0 = points[i - 1];
-        final p1 = points[i];
-        final cp1 = Offset((p0.dx + p1.dx) / 2, p0.dy);
-        final cp2 = Offset((p0.dx + p1.dx) / 2, p1.dy);
-        path.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, p1.dx, p1.dy);
+        path.lineTo(points[i].dx, points[i].dy);
       }
 
       final paint = Paint()
         ..color = color
         ..strokeWidth = 2.0
-        ..style = PaintingStyle.stroke;
+        ..style = PaintingStyle.stroke
+        ..strokeJoin = StrokeJoin.round
+        ..strokeCap = StrokeCap.round;
 
       canvas.drawPath(path, paint);
     }
