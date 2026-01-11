@@ -10,8 +10,10 @@ from sqlalchemy.dialects.mysql import insert
 from app.models.stock_daily import StockDailyTemp, StockDaily
 from app.models.pattern_config import PatternConfig, PatternStockPool
 from app.services.stock_service import StockService
+from app.services.pathway_engine import PathwayVolumePriceEngine
 from app.utils.technical_indicators import calculate_expma
 from app.utils.morphology_recognition import check_bullish_engulfing, check_bottom_fractal, check_shooting_star
+from loguru import logger
 # Avoid circular import by using TYPE_CHECKING or local import if needed, 
 # but StockSyncService is high level. Let's try direct import or handle dynamically.
 # For now, I will add the field to __init__ and import inside methods or if safe.
@@ -301,43 +303,73 @@ class PatternAnalysisService:
     async def check_low_volume_alert(self, stock_code: str) -> Dict[str, Any]:
         """
         检查是否满足地量条件 (用于实时监控)
-        地量定义：当前成交量 < 5日均量 * 0.5 (可配置)
+        使用 Pathway 引擎计算
         """
         try:
             # 1. 获取实时数据 (akshare or tushare or wencai)
             # 这里为了速度，可以使用 akshare 的实时接口
-            df_hist = await asyncio.to_thread(ak.stock_zh_a_hist, symbol=stock_code.split('.')[0], period="daily", adjust="qfq")
+            clean_code = stock_code.split('.')[0]
+            df_hist = await asyncio.to_thread(ak.stock_zh_a_hist, symbol=clean_code, period="daily", adjust="qfq")
             
             if df_hist.empty or len(df_hist) < 5:
                 return {"is_low_vol": False, "msg": "Insufficient data"}
+            
+            # 2. Prepare data for Pathway (descending order)
+            df_desc = df_hist.sort_values(by='日期', ascending=False)
+            
+            history_dicts = []
+            for _, row in df_desc.iterrows():
+                history_dicts.append({
+                    'open': row['开盘'],
+                    'close': row['收盘'],
+                    'high': row['最高'],
+                    'low': row['最低'],
+                    'vol': row['成交量'],
+                    'trade_date': row['日期']
+                })
+            
+            # 3. Calculate tags
+            tags = self.pathway_engine.calculate_tags(history_dicts)
+            
+            # 4. Check for '地量比率' or 'N日地量'
+            is_low = False
+            current_vol = 0.0
+            avg_vol_5 = 0.0 
+            ratio = 0.0
+            
+            if history_dicts:
+                current_vol = history_dicts[0]['vol']
+            
+            # Check tags
+            for tag in tags:
+                if tag['name'] == '地量比率':
+                    is_low = True
+                    ratio = tag['value'] # current / avg
+                    if ratio > 0:
+                        avg_vol_5 = current_vol / ratio
                 
-            # 计算5日均量 (不包含今天，如果今天是收盘后)
-            # 如果是盘中，最后一行是今天。我们需要比较今天的实时量 vs 过去5天的均量
-            # 假设 df_hist 包含了今天(实时)的数据
+                # Also consider strict low volume as an alert
+                if '日地量' in tag['name']:
+                    is_low = True
+                    # If we didn't get avg from '地量比率', we might need to calc it manually or just leave as 0
+                    # But usually if it's strict low volume, it's also likely low volume ratio (unless volatility is high)
             
-            last_record = df_hist.iloc[-1]
-            past_5_days = df_hist.iloc[-6:-1] # 前5天
-            
-            avg_vol_5 = past_5_days['成交量'].mean()
-            current_vol = last_record['成交量']
-            
-            # 获取配置
-            stmt = select(PatternConfig).where(PatternConfig.pattern_code == 'low_volume_ratio')
-            res = await self.db.execute(stmt)
-            config = res.scalar_one_or_none()
-            ratio = float(config.score) if config else 0.6 # 默认0.6倍以下算地量
-            
-            is_low = bool(current_vol < (avg_vol_5 * ratio))
-            
+            # If still 0, calculate manually for display purposes (fallback)
+            if avg_vol_5 == 0 and len(history_dicts) >= 6:
+                past_5_vols = [d['vol'] for d in history_dicts[1:6]]
+                avg_vol_5 = sum(past_5_vols) / 5
+                if avg_vol_5 > 0:
+                    ratio = current_vol / avg_vol_5
+
             return {
                 "is_low_vol": is_low,
                 "current_vol": float(current_vol),
                 "avg_vol_5": float(avg_vol_5),
-                "ratio": float(current_vol / avg_vol_5) if avg_vol_5 > 0 else 0
+                "ratio": float(ratio)
             }
             
         except Exception as e:
-            print(f"Error checking low volume for {stock_code}: {e}")
+            logger.error(f"Error checking low volume for {stock_code}: {e}")
             return {"is_low_vol": False, "msg": str(e)}
 
     async def analyze_history_and_score(self, stock_code: str, analysis_date: Optional[date] = None) -> Dict[str, Any]:
@@ -348,7 +380,6 @@ class PatternAnalysisService:
         """
         try:
             # 1. Fetch History Data (Last 250 days preferred for mixed history)
-            # akshare expects 6 digit code. remove suffix if present.
             clean_code = stock_code.split('.')[0]
             
             df = pd.DataFrame()
@@ -361,7 +392,6 @@ class PatternAnalysisService:
                     df = pd.DataFrame(result["data"])
                     # Ensure columns match internal expectations
                     # get_mixed_history returns: code, trade_date, open, high, low, close, vol, amount
-                    # internal logic uses: date, open, close, high, low, volume
                     if not df.empty:
                         df = df.rename(columns={
                             'trade_date': 'date', 
@@ -396,55 +426,60 @@ class PatternAnalysisService:
                 if df.empty or len(df) < 20:
                      return {"score": 0, "reason": "Insufficient data after date filter"}
             
-            # 2. Calculate EXPMA
-            df['expma13'] = calculate_expma(df['close'], 13)
-            current_close = df.iloc[-1]['close']
-            current_expma = df.iloc[-1]['expma13']
+            # 2. Use Pathway Engine to calculate tags and score
+            # Convert DataFrame to list of dicts (descending order)
+            # Pathway expects: open, close, high, low, vol, trade_date
             
-            # 3. Morphology Analysis (Last 3 days)
-            if len(df) < 3:
-                 return {"score": 0, "reason": "Insufficient data for pattern", "expma_ok": current_close > current_expma}
+            # Sort descending first
+            df_desc = df.sort_values(by='date', ascending=False)
             
-            last_3_days = df.iloc[-3:].to_dict('records')
+            history_dicts = []
+            for _, row in df_desc.iterrows():
+                history_dicts.append({
+                    'open': row['open'],
+                    'close': row['close'],
+                    'high': row['high'],
+                    'low': row['low'],
+                    'vol': row['volume'],
+                    'trade_date': row['date']
+                })
+                
+            tags = self.pathway_engine.calculate_tags(history_dicts)
             
-            k1, k2, k3 = last_3_days[0], last_3_days[1], last_3_days[2] # k3 is today
-            
-            # Load configs
-            stmt = select(PatternConfig).where(PatternConfig.is_enabled == True)
-            res = await self.db.execute(stmt)
-            configs = {c.pattern_code: float(c.score) for c in res.scalars().all()}
+            # 3. Format result for PatternAnalysisService
+            # PatternAnalysisService expects: score, patterns (list of strings), expma_ok, latest_close, latest_expma
             
             score = 0
             patterns = []
+            expma_ok = False
+            latest_expma = 0
+            latest_close = float(df_desc.iloc[0]['close'])
             
-            # 2-Day Patterns (k2, k3) - 阳包阴
-            if check_bullish_engulfing(k2, k3):
-                s = configs.get("bullish_engulfing", 200)
-                score += s
-                patterns.append(f"阳包阴(+{s})")
+            for tag in tags:
+                score += tag.get('score', 0)
+                name = tag.get('name')
                 
-            # 3-Day Patterns (k1, k2, k3) - 底分型
-            if check_bottom_fractal(k1, k2, k3):
-                s = configs.get("bottom_fractal", 300)
-                score += s
-                patterns.append(f"底分型(+{s})")
-                
-            # 1-Day Pattern (k3) - 冲高回落
-            if check_shooting_star(k3):
-                s = configs.get("shooting_star", 50)
-                score += s
-                patterns.append(f"冲高回落(+{s})")
-                
+                if name == 'EXPMA13上方':
+                    expma_ok = True
+                    latest_expma = tag.get('value')
+                elif name != 'basic_info':
+                    # Format pattern string: "Name(+Score)"
+                    s = tag.get('score', 0)
+                    if s != 0:
+                        patterns.append(f"{name}({'+' if s>0 else ''}{s})")
+                    else:
+                        patterns.append(name)
+
             return {
                 "score": score,
                 "patterns": patterns,
-                "expma_ok": current_close > current_expma,
-                "latest_close": current_close,
-                "latest_expma": current_expma
+                "expma_ok": expma_ok,
+                "latest_close": latest_close,
+                "latest_expma": latest_expma
             }
             
         except Exception as e:
-            print(f"Error analyzing stock {stock_code}: {e}")
+            logger.error(f"Error analyzing stock {stock_code}: {e}")
             return {"score": 0, "reason": str(e)}
 
     async def analyze_patterns(self, stock_code: str) -> Dict[str, Any]:

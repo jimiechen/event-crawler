@@ -19,6 +19,7 @@ from ..models.stock import StockInfo
 from ..models.tag_management import StockTagInfo, StockTagRelation
 from ..database import db_manager
 from .stock_data_manager import StockDataManager
+from .pathway_engine import PathwayVolumePriceEngine
 
 from loguru import logger
 
@@ -440,39 +441,21 @@ class VolumeAnalysisService:
     @staticmethod
     async def analyze_stock(code: str, session: AsyncSession = None, is_realtime: bool = False):
         """
-        全流程分析：计算 -> 保存（含重试）
+        全流程分析：使用Pathway引擎 -> 更新旧表（含重试）
         """
-        # Phase 1: Calculation (Read-Only / Long Running)
-        # We use a dedicated read session if none provided, or use provided one.
-        read_session = session or db_manager.session_factory()
-        should_close_read = session is None
-        
-        calc_results = None
-        try:
-            calc_results = await VolumeAnalysisService._calculate_stock_internal(code, read_session, is_realtime)
-        except Exception as e:
-            logger.error(f"Calculation failed for {code}: {e}")
-            raise e
-        finally:
-            if should_close_read:
-                await read_session.close()
+        # If external session provided, just run logic
+        if session:
+            return await VolumeAnalysisService._analyze_stock_impl(code, session)
 
-        if not calc_results or calc_results.get("should_skip"):
-            return calc_results.get("baseline", {})
-            
         # Phase 2: Persistence (Write / Short Transaction)
         # This is where retries happen for deadlocks.
         retries = 3
         last_error = None
         
         for attempt in range(retries):
-            # If external session provided, just save and let caller handle commit/rollback
-            if session:
-                return await VolumeAnalysisService._save_stock_internal(code, calc_results, session)
-
             write_session = db_manager.session_factory()
             try:
-                result = await VolumeAnalysisService._save_stock_internal(code, calc_results, write_session)
+                result = await VolumeAnalysisService._analyze_stock_impl(code, write_session)
                 await write_session.commit()
                 return result
             except Exception as e:
@@ -496,6 +479,108 @@ class VolumeAnalysisService:
         # If we exhausted retries
         logger.error(f"Failed to save {code} after {retries} attempts. Last error: {last_error}")
         raise last_error
+
+    @staticmethod
+    async def _analyze_stock_impl(code: str, session: AsyncSession) -> Dict[str, Any]:
+        """
+        使用Pathway引擎执行分析
+        """
+        if "." in code:
+            code = code.split(".")[0]
+            
+        # 1. Get latest stock data
+        stmt = select(StockDaily).where(StockDaily.code == code).order_by(StockDaily.trade_date.desc()).limit(1)
+        result = await session.execute(stmt)
+        stock_daily = result.scalar_one_or_none()
+        
+        if not stock_daily:
+            logger.warning(f"No data for {code}")
+            return {}
+
+        # 2. Run Pathway Engine
+        engine = PathwayVolumePriceEngine(session)
+        # process_new_data saves to StockScoreResult and StockInfo
+        pathway_result = await engine.process_new_data(stock_daily)
+        
+        # 3. Update Legacy Tables (StockVolumeBaseline, VolumeAnalysisResult)
+        await VolumeAnalysisService._update_legacy_tables(session, code, stock_daily, pathway_result)
+        
+        return pathway_result
+
+    @staticmethod
+    async def _update_legacy_tables(session: AsyncSession, code: str, stock_daily: StockDaily, pathway_result: Dict):
+        """
+        更新旧表数据 (StockVolumeBaseline, VolumeAnalysisResult)
+        """
+        tags = pathway_result.get('tags', [])
+        trade_date = stock_daily.trade_date
+        
+        # --- Update VolumeAnalysisResult ---
+        # Only if we want to track anomalies in the old table
+        for tag in tags:
+            name = tag['name']
+            value = tag['value']
+            score = tag.get('score', 0)
+            
+            # Map tag name to analysis_type or similar
+            # Existing types: '3倍量', '60日地量' etc.
+            if name in VolumeAnalysisService.TAG_SCORES:
+                # Check if already exists
+                stmt = select(VolumeAnalysisResult).where(
+                    VolumeAnalysisResult.code == code,
+                    VolumeAnalysisResult.trade_date == trade_date,
+                    VolumeAnalysisResult.analysis_type == name
+                )
+                res = await session.execute(stmt)
+                existing = res.scalar_one_or_none()
+                
+                if not existing:
+                    entry = VolumeAnalysisResult(
+                        code=code,
+                        trade_date=trade_date,
+                        analysis_type=name,
+                        value=value,
+                        description=f"Pathway: {name}",
+                        extra_data={"score": score}
+                    )
+                    session.add(entry)
+
+        # --- Update StockVolumeBaseline ---
+        # 1. Get or Create Baseline
+        stmt = select(StockVolumeBaseline).where(StockVolumeBaseline.code == code)
+        res = await session.execute(stmt)
+        baseline = res.scalar_one_or_none()
+        
+        if not baseline:
+            baseline = StockVolumeBaseline(code=code)
+            session.add(baseline)
+        
+        # 2. Update fields based on tags
+        for tag in tags:
+            name = tag['name']
+            value = float(tag['value'])
+            
+            if name == '3倍量':
+                baseline.last_3x_date = trade_date
+                baseline.last_3x_close = stock_daily.close
+            elif name == '2倍量':
+                baseline.last_2x_date = trade_date
+                baseline.last_2x_close = stock_daily.close
+            elif name == '5日地量':
+                baseline.last_5d_low_vol_date = trade_date
+                baseline.last_5d_low_vol = stock_daily.vol
+            elif name == '10日地量':
+                baseline.last_10d_low_vol_date = trade_date
+                baseline.last_10d_low_vol = stock_daily.vol
+            elif name == '20日地量':
+                baseline.last_20d_low_vol_date = trade_date
+                baseline.last_20d_low_vol = stock_daily.vol
+            elif name == '30日地量':
+                baseline.last_30d_low_vol_date = trade_date
+                baseline.last_30d_low_vol = stock_daily.vol
+            elif name == '60日地量':
+                baseline.last_60d_low_vol_date = trade_date
+                baseline.last_60d_low_vol = stock_daily.vol
 
     @staticmethod
     async def _calculate_stock_internal(code: str, session: AsyncSession, is_realtime: bool = False) -> Dict[str, Any]:
