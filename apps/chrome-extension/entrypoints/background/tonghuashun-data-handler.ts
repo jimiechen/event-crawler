@@ -12,7 +12,7 @@ interface TongHuaShunDataState {
 }
 
 // 后端API配置
-const BACKEND_CONFIG = {
+export const BACKEND_CONFIG = {
   baseUrl: 'http://localhost:8001',
   endpoints: {
     batchData: '/api/v1/stocks/data/batch',

@@ -35,7 +35,7 @@ export interface TimestampedStockInfo extends StockInfo {
   qualityScore?: number; // 数据质量评分
 }
 
-export interface TimestampedStockData extends StockData {
+export interface TimestampedStockData extends Omit<StockData, 'timestamp'> {
   timestamp: number;
   source: string;
   qualityScore?: number;
@@ -280,7 +280,7 @@ export class DataDeduplicationOptimizer {
         );
         
       case 'merge':
-        return this.mergeItems(items);
+        return this.mergeItems(items as any) as unknown as T;
         
       default:
         return items[0];
@@ -379,7 +379,7 @@ export class DataDeduplicationOptimizer {
     }
     
     // 有涨跌幅数据加分
-    if (data.change !== undefined) {
+    if (data.change_percent !== undefined) {
       score += 0.2;
     }
     

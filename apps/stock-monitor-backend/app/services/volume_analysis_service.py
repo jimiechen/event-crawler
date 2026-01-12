@@ -483,30 +483,233 @@ class VolumeAnalysisService:
     @staticmethod
     async def _analyze_stock_impl(code: str, session: AsyncSession) -> Dict[str, Any]:
         """
-        使用Pathway引擎执行分析
+        使用Pathway向量化引擎执行分析
         """
         if "." in code:
             code = code.split(".")[0]
             
-        # 1. Get latest stock data
-        stmt = select(StockDaily).where(StockDaily.code == code).order_by(StockDaily.trade_date.desc()).limit(1)
+        # 1. 获取历史数据（最近400天）
+        stmt = select(StockDaily).where(StockDaily.code == code).order_by(StockDaily.trade_date.desc()).limit(400)
         result = await session.execute(stmt)
-        stock_daily = result.scalar_one_or_none()
+        daily_data = result.scalars().all()
         
-        if not stock_daily:
-            logger.warning(f"No data for {code}")
+        if not daily_data or len(daily_data) < 2:
+            logger.warning(f"股票 {code} 数据不足，跳过分析")
             return {}
-
-        # 2. Run Pathway Engine
-        engine = PathwayVolumePriceEngine(session)
-        # process_new_data saves to StockScoreResult and StockInfo
-        pathway_result = await engine.process_new_data(stock_daily)
         
-        # 3. Update Legacy Tables (StockVolumeBaseline, VolumeAnalysisResult)
-        await VolumeAnalysisService._update_legacy_tables(session, code, stock_daily, pathway_result)
+        # 2. 转换为DataFrame
+        import pandas as pd
+        df = pd.DataFrame([{
+            'trade_date': d.trade_date,
+            'open': float(d.open) if d.open else 0,
+            'close': float(d.close) if d.close else 0,
+            'high': float(d.high) if d.high else 0,
+            'low': float(d.low) if d.low else 0,
+            'vol': float(d.vol) if d.vol else 0
+        } for d in daily_data])
         
-        return pathway_result
-
+        # 3. 使用向量化引擎批量计算
+        from app.services.pathway_vectorized_engine import PathwayVectorizedEngine
+        vectorized_engine = PathwayVectorizedEngine(session)
+        await vectorized_engine._ensure_tag_scores()
+        
+        result_df = vectorized_engine.calculate_batch(df)
+        
+        # 4. 保存结果到数据库
+        await VolumeAnalysisService._save_vectorized_results(code, result_df, session)
+        
+        # 5. 更新baseline
+        await VolumeAnalysisService._update_baseline_from_vectorized(code, result_df, session)
+        
+        # 6. 聚合总分
+        latest = result_df.iloc[-1]
+        total_score = float(latest['total_score']) if 'total_score' in latest else 0
+        
+        # 7. 更新stock_info
+        stmt_info = select(StockInfo).where(StockInfo.code == code)
+        res_info = await session.execute(stmt_info)
+        info = res_info.scalar_one_or_none()
+        
+        if info:
+            info.volume_anomaly_score = int(total_score)
+            info.score_update_time = datetime.now()
+        else:
+            # 创建新记录
+            new_info = StockInfo(
+                code=code,
+                name=f'股票{code}',
+                volume_anomaly_score=int(total_score),
+                score_update_time=datetime.now()
+            )
+            session.add(new_info)
+        
+        # 8. 返回结果
+        return {
+            'code': code,
+            'total_score': total_score,
+            'daily_score': float(latest['daily_score']) if 'daily_score' in latest else 0,
+            'tags': latest['tags_str'].split(',') if 'tags_str' in latest else [],
+            'trade_date': latest['trade_date']
+        }
+    
+    @staticmethod
+    async def _save_vectorized_results(code: str, result_df, session: AsyncSession):
+        """
+        保存向量化计算结果到数据库
+        
+        Args:
+            code: 股票代码
+            result_df: 向量化计算结果DataFrame
+            session: 数据库会话
+        """
+        from app.models.stock_daily import StockScoreResult
+        
+        for _, row in result_df.iterrows():
+            # 解析tags_str
+            tags_str = row.get('tags_str', '')
+            tags = tags_str.split(',') if tags_str else []
+            
+            # 构建rule_scores
+            rule_scores = {}
+            for tag in tags:
+                if tag and tag != 'basic_info':
+                    rule_scores[tag] = VolumeAnalysisService.TAG_SCORES.get(tag, 0)
+            
+            # 检查是否已存在
+            stmt = select(StockScoreResult).where(
+                StockScoreResult.code == code,
+                StockScoreResult.trade_date == row['trade_date']
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            
+            if existing:
+                # 更新
+                existing.total_score = row.get('daily_score', 0)
+                existing.rule_scores = rule_scores
+                existing.updated_at = datetime.now()
+            else:
+                # 插入
+                score_result = StockScoreResult(
+                    code=code,
+                    trade_date=row['trade_date'],
+                    rule_scores=rule_scores,
+                    total_score=row.get('daily_score', 0),
+                    pool_type='all'
+                )
+                session.add(score_result)
+        
+        await session.commit()
+        logger.debug(f"💾 已保存 {len(result_df)} 条评分结果")
+    
+    @staticmethod
+    async def _update_baseline_from_vectorized(code: str, result_df, session: AsyncSession):
+        """
+        从向量化结果更新baseline（带Redis缓存失效）
+        
+        Args:
+            code: 股票代码
+            result_df: 向量化计算结果DataFrame
+            session: 数据库会话
+        """
+        from app.services.redis_cache_service import redis_cache_service
+        from app.models.volume_analysis import StockVolumeBaseline
+        
+        # 获取最新数据
+        latest = result_df.iloc[-1]
+        
+        # 查找最近的3倍量和2倍量
+        vol_3x_rows = result_df[result_df['tags_str'].str.contains('3倍量', na=False)]
+        vol_2x_rows = result_df[result_df['tags_str'].str.contains('2倍量', na=False)]
+        
+        # 获取最近的3倍量
+        if not vol_3x_rows.empty:
+            last_3x = vol_3x_rows.iloc[-1]
+            last_3x_date = last_3x['trade_date']
+            last_3x_close = last_3x['close']
+        else:
+            last_3x_date = None
+            last_3x_close = None
+        
+        # 获取最近的2倍量
+        if not vol_2x_rows.empty:
+            last_2x = vol_2x_rows.iloc[-1]
+            last_2x_date = last_2x['trade_date']
+            last_2x_close = last_2x['close']
+        else:
+            last_2x_date = None
+            last_2x_close = None
+        
+        # 查找最近的地量
+        vol_60d_rows = result_df[result_df['tags_str'].str.contains('60日地量', na=False)]
+        vol_30d_rows = result_df[result_df['tags_str'].str.contains('30日地量', na=False)]
+        vol_20d_rows = result_df[result_df['tags_str'].str.contains('20日地量', na=False)]
+        vol_10d_rows = result_df[result_df['tags_str'].str.contains('10日地量', na=False)]
+        vol_5d_rows = result_df[result_df['tags_str'].str.contains('5日地量', na=False)]
+        
+        # 获取最近的地量
+        def get_latest_vol(rows):
+            if rows.empty:
+                return None, None
+            latest = rows.iloc[-1]
+            return latest['trade_date'], latest['vol']
+        
+        last_60d_date, last_60d_vol = get_latest_vol(vol_60d_rows)
+        last_30d_date, last_30d_vol = get_latest_vol(vol_30d_rows)
+        last_20d_date, last_20d_vol = get_latest_vol(vol_20d_rows)
+        last_10d_date, last_10d_vol = get_latest_vol(vol_10d_rows)
+        last_5d_date, last_5d_vol = get_latest_vol(vol_5d_rows)
+        
+        # 更新或创建baseline
+        stmt = select(StockVolumeBaseline).where(StockVolumeBaseline.code == code)
+        result = await session.execute(stmt)
+        baseline = result.scalar_one_or_none()
+        
+        if baseline:
+            # 更新
+            baseline.last_3x_date = last_3x_date
+            baseline.last_3x_close = last_3x_close
+            baseline.last_2x_date = last_2x_date
+            baseline.last_2x_close = last_2x_close
+            baseline.last_5d_low_vol_date = last_5d_date
+            baseline.last_5d_low_vol = last_5d_vol
+            baseline.last_10d_low_vol_date = last_10d_date
+            baseline.last_10d_low_vol = last_10d_vol
+            baseline.last_20d_low_vol_date = last_20d_date
+            baseline.last_20d_low_vol = last_20d_vol
+            baseline.last_30d_low_vol_date = last_30d_date
+            baseline.last_30d_low_vol = last_30d_vol
+            baseline.last_60d_low_vol_date = last_60d_date
+            baseline.last_60d_low_vol = last_60d_vol
+            baseline.updated_at = datetime.now()
+        else:
+            # 创建
+            baseline = StockVolumeBaseline(
+                code=code,
+                last_3x_date=last_3x_date,
+                last_3x_close=last_3x_close,
+                last_2x_date=last_2x_date,
+                last_2x_close=last_2x_close,
+                last_5d_low_vol_date=last_5d_date,
+                last_5d_low_vol=last_5d_vol,
+                last_10d_low_vol_date=last_10d_date,
+                last_10d_low_vol=last_10d_vol,
+                last_20d_low_vol_date=last_20d_date,
+                last_20d_low_vol=last_20d_vol,
+                last_30d_low_vol_date=last_30d_date,
+                last_30d_low_vol=last_30d_vol,
+                last_60d_low_vol_date=last_60d_date,
+                last_60d_low_vol=last_60d_vol
+            )
+            session.add(baseline)
+        
+        await session.commit()
+        
+        # 删除Redis缓存，强制下次从数据库读取
+        redis_cache_service.delete_baseline(code)
+        
+        logger.debug(f"💾 已更新baseline: {code}")
+  
     @staticmethod
     async def _update_legacy_tables(session: AsyncSession, code: str, stock_daily: StockDaily, pathway_result: Dict):
         """
@@ -985,8 +1188,23 @@ class VolumeAnalysisService:
     @staticmethod
     async def get_baseline(code: str, session: AsyncSession) -> Dict[str, Any]:
         """
-        获取最新的基准数据
+        获取最新的基准数据（带Redis缓存）
+        
+        Args:
+            code: 股票代码
+            session: 数据库会话
+        
+        Returns:
+            baseline数据字典
         """
+        from app.services.redis_cache_service import redis_cache_service
+        
+        # 1. 尝试从Redis缓存读取
+        cached_baseline = redis_cache_service.get_baseline(code)
+        if cached_baseline:
+            return cached_baseline
+        
+        # 2. 从数据库读取
         stmt = select(StockVolumeBaseline).where(StockVolumeBaseline.code == code)
         result = await session.execute(stmt)
         record = result.scalars().first()
@@ -1014,7 +1232,11 @@ class VolumeAnalysisService:
                         "date": date_val,
                         "value": float(vol_val) if vol_val else 0.0
                     }
-                    
+        
+        # 3. 写入Redis缓存（过期时间：1小时）
+        if baseline:
+            redis_cache_service.set_baseline(code, baseline, expire_seconds=3600)
+        
         return baseline
 
     @staticmethod

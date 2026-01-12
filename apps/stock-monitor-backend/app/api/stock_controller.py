@@ -300,7 +300,7 @@ async def submit_stock_data_batch(
     """批量提交股票数据"""
     try:
         stock_service = StockService(db)
-        data_list = [item.dict() for item in batch_data.data_list]
+        data_list = [item.model_dump() for item in batch_data.data_list]
         result = await stock_service.submit_stock_data(data_list)
         
         response_data = BatchSubmitResponse(**result)

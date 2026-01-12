@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
@@ -62,8 +62,7 @@ class CrawlerTargetResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class CookieUpdate(BaseModel):
     account_name: Optional[str] = None
@@ -95,8 +94,7 @@ class CrawlerResultResponse(BaseModel):
     data_id: Optional[str] = None
     crawled_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class ResponseModel(BaseModel):
     success: bool

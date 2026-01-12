@@ -10,7 +10,9 @@ export enum ErrorType {
   PARSING = 'PARSING',
   SYSTEM = 'SYSTEM',
   DOM = 'DOM',
-  TIMEOUT = 'TIMEOUT'
+  TIMEOUT = 'TIMEOUT',
+  VALIDATION = 'VALIDATION',
+  TEMPORARY = 'TEMPORARY'
 }
 
 // 错误严重级别

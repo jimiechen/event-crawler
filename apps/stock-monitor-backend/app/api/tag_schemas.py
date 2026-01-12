@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 # --- Tag Schemas ---
 
@@ -25,9 +25,8 @@ class TagResponse(TagBase):
     updated_at: datetime
     relation_created_at: Optional[datetime] = Field(None, description="关联时间")
     stocks: List[Dict[str, Any]] = Field(default_factory=list, description="关联股票列表 [{'code': '...', 'name': '...', 'daily_change': float}]")
-
-    class Config:
-        from_attributes = True
+    
+    model_config = ConfigDict(from_attributes=True)
 
 class TagListResponse(BaseModel):
     total: int
@@ -71,5 +70,4 @@ class OperationLogResponse(BaseModel):
     details: Optional[Dict[str, Any]]
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
