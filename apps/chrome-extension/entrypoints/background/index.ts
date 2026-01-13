@@ -5,6 +5,7 @@ import {
 } from './semantic-similarity';
 import { initStorageManagerListener } from './storage-manager';
 import { initThsPanelListener } from './thspanel-handler';
+import { initSSEListener } from './sse-handler';
 import { cleanupModelCache } from '@/utils/semantic-similarity-engine';
 import { stateSyncService } from '@/utils/state-sync-service';
 
@@ -23,6 +24,7 @@ export default defineBackground(() => {
   initSemanticSimilarityListener();
   initStorageManagerListener();
   initThsPanelListener();
+  initSSEListener(); // Start SSE Listener
   initializeSemanticEngineIfCached();
   
   // 定期清理过期状态

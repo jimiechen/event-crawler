@@ -7,7 +7,7 @@
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from .schemas import BaseResponse
 
 # Pagination Params usually are query params, but if we need a schema:
@@ -42,8 +42,7 @@ class StockDailyResponse(StockDailyBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- StockScoreResult Schemas ---
 class StockScoreResultBase(BaseModel):
@@ -62,8 +61,7 @@ class StockScoreResultResponse(StockScoreResultBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- TaskLog Schemas ---
 class TaskLogBase(BaseModel):
@@ -82,8 +80,7 @@ class TaskLogResponse(TaskLogBase):
     id: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 # --- API Responses ---
 class StockDailyListResponse(BaseResponse):

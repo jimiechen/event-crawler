@@ -8,10 +8,6 @@ import 'services/storage_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  Get.put(TrainingController());
-  Get.put(CSVDataService());
-  Get.put(StorageService());
-  
   runApp(const MyApp());
 }
 
@@ -21,6 +17,11 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GetMaterialApp(
+      initialBinding: BindingsBuilder(() {
+        Get.put(CSVDataService());
+        Get.put(StorageService());
+        Get.put(TrainingController());
+      }),
       title: 'K线双盲训练系统',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),

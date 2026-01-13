@@ -155,7 +155,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             message=exc.detail,
             error_code=f"HTTP_{exc.status_code}",
             details={"path": str(request.url)}
-        ).dict()
+        ).model_dump()
     )
 
 

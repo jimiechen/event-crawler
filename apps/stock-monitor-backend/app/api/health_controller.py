@@ -16,6 +16,7 @@ from ..database import get_db_session, db_manager
 from ..services.stock_service import StockService
 from ..services.monitor_service import MonitorService
 from ..services.data_dedup_service import DataDedupService
+from ..services.redis_cache_service import redis_cache_service
 from .schemas import BaseResponse, HealthResponse
 
 router = APIRouter(prefix="/api/v1/health", tags=["健康检查"])
@@ -65,6 +66,25 @@ async def detailed_health_check(
                 "response_time": time.time() - start_time
             }
             health_data["status"] = "degraded"
+            
+        # Redis连接检查
+        try:
+            redis_start = time.time()
+            redis_healthy = redis_cache_service.ping()
+            health_data["checks"]["redis"] = {
+                "status": "healthy" if redis_healthy else "unhealthy",
+                "response_time": time.time() - redis_start
+            }
+            if not redis_healthy:
+                health_data["status"] = "degraded"
+        except Exception as e:
+            logger.error(f"Redis健康检查失败: {e}")
+            health_data["checks"]["redis"] = {
+                "status": "unhealthy",
+                "error": str(e)
+            }
+            health_data["status"] = "degraded"
+
         
         # 服务状态检查
         try:

@@ -67,6 +67,32 @@ def setup_logging():
             diagnose=True
         )
     
+    # 数据一致性日志文件
+    consistency_log_path = str(log_path.parent / "data_consistency.log")
+    logger.add(
+        consistency_log_path,
+        format=log_format,
+        level="INFO",
+        rotation=settings.log_rotation,
+        retention=settings.log_retention,
+        compression="zip",
+        backtrace=True,
+        diagnose=True
+    )
+    
+    # 验收日志文件
+    acceptance_log_path = str(log_path.parent / "acceptance.log")
+    logger.add(
+        acceptance_log_path,
+        format=log_format,
+        level="INFO",
+        rotation=settings.log_rotation,
+        retention=settings.log_retention,
+        compression="zip",
+        backtrace=True,
+        diagnose=True
+    )
+    
     # 设置第三方库的日志级别
     import logging
     

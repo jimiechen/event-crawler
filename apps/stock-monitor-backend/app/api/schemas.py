@@ -9,7 +9,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime, date
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
 # 基础响应模型
@@ -63,8 +63,7 @@ class StockInfoResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StockDataCreate(BaseModel):
@@ -72,9 +71,9 @@ class StockDataCreate(BaseModel):
     stock_code: str = Field(..., min_length=6, max_length=6, description="股票代码")
     price: Decimal = Field(..., gt=0, description="股票价格")
     volume: int = Field(default=0, ge=0, description="成交量")
-    turnover: Decimal = Field(default=0, ge=0, description="成交额")
-    change_amount: Decimal = Field(default=0, description="涨跌额")
-    change_percent: Decimal = Field(default=0, description="涨跌幅")
+    turnover: Decimal = Field(default=Decimal(0), ge=0, description="成交额")
+    change_amount: Decimal = Field(default=Decimal(0), description="涨跌额")
+    change_percent: Decimal = Field(default=Decimal(0), description="涨跌幅")
     high_price: Optional[Decimal] = Field(None, gt=0, description="最高价")
     low_price: Optional[Decimal] = Field(None, gt=0, description="最低价")
     open_price: Optional[Decimal] = Field(None, gt=0, description="开盘价")
@@ -91,7 +90,7 @@ class StockDataCreate(BaseModel):
 
 class StockDataBatchCreate(BaseModel):
     """批量创建股票数据请求"""
-    data_list: List[StockDataCreate] = Field(..., min_items=1, max_items=1000, description="股票数据列表")
+    data_list: List[StockDataCreate] = Field(..., min_length=1, max_length=1000, description="股票数据列表")
 
 
 class StockDataResponse(BaseModel):
@@ -110,8 +109,7 @@ class StockDataResponse(BaseModel):
     timestamp: datetime = Field(alias="data_time")
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StockTdxRiskResponse(BaseModel):
@@ -134,8 +132,7 @@ class StockTdxRiskResponse(BaseModel):
     open_price: Optional[Decimal] = None
     timestamp: date
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StockDataQuery(BaseModel):
@@ -185,8 +182,7 @@ class MonitorResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MonitorWithStockResponse(BaseModel):
@@ -214,7 +210,7 @@ class MonitorWithDataResponse(BaseModel):
 
 class MonitorBatchCreate(BaseModel):
     """批量创建监控请求"""
-    stock_codes: List[str] = Field(..., min_items=1, max_items=100, description="股票代码列表")
+    stock_codes: List[str] = Field(..., min_length=1, max_length=100, description="股票代码列表")
     default_priority: int = Field(default=1, ge=1, le=10, description="默认优先级")
     
     @field_validator('stock_codes')
@@ -228,12 +224,12 @@ class MonitorBatchCreate(BaseModel):
 
 class MonitorBatchUpdate(BaseModel):
     """批量更新监控请求"""
-    updates: List[Dict[str, Any]] = Field(..., min_items=1, max_items=100, description="更新列表")
+    updates: List[Dict[str, Any]] = Field(..., min_length=1, max_length=100, description="更新列表")
 
 
 class MonitorBatchOperation(BaseModel):
     """批量操作监控请求"""
-    stock_codes: List[str] = Field(..., min_items=1, max_items=100, description="股票代码列表")
+    stock_codes: List[str] = Field(..., min_length=1, max_length=100, description="股票代码列表")
     
     @field_validator('stock_codes')
     @classmethod
@@ -422,8 +418,7 @@ class WencaiBatchResponse(BaseModel):
     completed_at: Optional[datetime]
     created_by: str
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WencaiStockResponse(BaseModel):
@@ -455,8 +450,7 @@ class WencaiStockResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # 网络数据相关模型
@@ -486,8 +480,7 @@ class NetworkDataResponse(BaseModel):
     timestamp: datetime
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class NetworkDataQuery(BaseModel):

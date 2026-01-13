@@ -5,6 +5,7 @@
 处理股票信息和股票数据的业务逻辑
 """
 
+import asyncio
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta, date, time
 from decimal import Decimal
@@ -25,6 +26,7 @@ from .tonghuashun_data_decoder import tonghuashun_decoder
 from .tushare_service import TushareService
 from .baostock_service import BaostockService
 from .akshare_service import AkshareService
+from .pathway_engine import PathwayVolumePriceEngine
 from app.database import db_manager
 
 class StockService:
@@ -37,6 +39,7 @@ class StockService:
         self.stock_daily_repo = StockDailyRepository(db_manager) # Initialize with db_manager
         self.dedup_repo = DataDedupRepository(session)
         self.dedup_service = DataDedupService(session)
+        self.pathway_engine = PathwayVolumePriceEngine(session)
     
     async def get_stock_info(self, stock_code: str) -> Optional[StockInfo]:
         """获取股票基本信息"""
@@ -219,6 +222,13 @@ class StockService:
                 'errors': errors
             }
             
+            # --- Pathway Real-time Integration ---
+            # Asynchronously process data for real-time alerts
+            # We fire and forget using asyncio.create_task to avoid blocking the response
+            if data_list:
+                asyncio.create_task(self.pathway_engine.process_realtime_batch(data_list))
+            # -------------------------------------
+
             logger.info(f"股票数据提交完成: {result}")
             return result
             
@@ -939,6 +949,10 @@ class StockService:
             
             logger.info(f"🎯 同花顺数据处理完成: 成功 {processed_count} 只，失败 {failed_count} 只")
             
+            # 如果有成功处理的数据，进行baseline校验
+            if processed_count > 0:
+                await self._check_baseline_for_realtime_data(decoded_stocks, request_timestamp)
+            
             return result
             
         except Exception as e:
@@ -1125,3 +1139,100 @@ class StockService:
         except Exception as e:
             logger.error(f"移动股票到信息表失败: {e}")
             raise
+    
+    async def _check_baseline_for_realtime_data(self, decoded_stocks: Dict[str, Any], request_timestamp: Optional[str]):
+        """
+        对实时数据进行baseline校验并生成预警（优化版）
+        
+        Args:
+            decoded_stocks: 解码后的股票数据字典
+            request_timestamp: 请求时间戳
+        """
+        from ..services.volume_analysis_service import VolumeAnalysisService
+        from ..models.volume_analysis import AlertRecord
+        from ..services.sse_service import sse_service
+        from ..services.redis_cache_service import redis_cache_service
+        
+        logger.info(f"🔍 开始对 {len(decoded_stocks)} 只股票进行baseline校验")
+        
+        for stock_code, stock_data in decoded_stocks.items():
+            try:
+                # 从Redis缓存获取baseline（更快）
+                baseline = redis_cache_service.get_baseline(stock_code)
+                
+                if not baseline:
+                    # 如果缓存不存在，从数据库获取
+                    baseline = await VolumeAnalysisService.get_baseline(stock_code, self.session)
+                    
+                    if not baseline:
+                        logger.debug(f"股票 {stock_code} 没有baseline数据，跳过校验")
+                        continue
+                else:
+                    logger.debug(f"✅ 从Redis缓存读取baseline: {stock_code}")
+                
+                # 校验地量和价格突破
+                alerts = []
+                current_volume = stock_data.get('volume', 0)
+                current_price = stock_data.get('current_price', 0)
+                stock_name = stock_data.get('stock_name', stock_code)
+                
+                # 1. 地量预警（从长周期到短周期检查）
+                for days in [60, 30, 20, 10, 5]:
+                    baseline_key = f'last_{days}d_low_vol'
+                    baseline_data = baseline.get(baseline_key)
+                    if baseline_data and baseline_data.get('value'):
+                        baseline_vol = float(baseline_data['value'])
+                        if current_volume <= baseline_vol:
+                            alerts.append({
+                                'alert_type': f'low_volume_{days}d',
+                                'message': f'{stock_name}({stock_code}) 触发{days}日地量预警',
+                                'current_vol': current_volume,
+                                'baseline_vol': baseline_vol
+                            })
+                            logger.info(f"⚠️ {stock_name}({stock_code}) 触发{days}日地量: 当前{current_volume} <= 基准{baseline_vol}")
+                            break # 只触发最长周期的地量
+                
+                # 2. 价格突破预警（3倍量收盘价）
+                baseline_3x = baseline.get('last_3x_close')
+                if baseline_3x and baseline_3x.get('value'):
+                    baseline_price = float(baseline_3x['value'])
+                    if current_price > baseline_price:
+                        alerts.append({
+                            'alert_type': 'price_breakout_3x',
+                            'message': f'{stock_name}({stock_code}) 突破3倍量收盘价',
+                            'current_price': current_price,
+                            'baseline_price': baseline_price
+                        })
+                        logger.info(f"📈 {stock_name}({stock_code}) 突破3倍量收盘价: 当前{current_price} > 基准{baseline_price}")
+                
+                # 保存预警记录
+                if alerts:
+                    for alert in alerts:
+                        alert_record = AlertRecord(
+                            code=stock_code,
+                            alert_type=alert['alert_type'],
+                            message=alert['message'],
+                            is_sent=False
+                        )
+                        self.session.add(alert_record)
+                    
+                    await self.session.flush()
+                    
+                    # SSE推送预警
+                    try:
+                        await sse_service.broadcast("realtime_alert", {
+                            'type': 'baseline_alert',
+                            'code': stock_code,
+                            'stock_name': stock_name,
+                            'alerts': alerts,
+                            'timestamp': datetime.now().isoformat()
+                        })
+                        logger.info(f"📢 已推送 {stock_code} 的 {len(alerts)} 个预警到前端")
+                    except Exception as sse_error:
+                        logger.error(f"SSE推送失败 {stock_code}: {sse_error}")
+            
+            except Exception as e:
+                logger.error(f"Baseline校验失败 {stock_code}: {e}")
+                continue
+        
+        logger.info(f"✅ Baseline校验完成")

@@ -27,15 +27,17 @@ class DataCleaner:
             "wencai_stocks",       # stock_code
             "monitor_list",        # stock_code
             "stock_info",          # code
-            "stock_daily",         # code / symbol?
+            "stock_daily",         # code
             "stock_daily_temp",    # code
             "stock_volume_baseline", # code
-            "stock_tag_relations", # stock_code
-            "stock_score_results", # code
-            "volume_analysis_results", # code ? (need to check if table exists)
+            # "stock_tag_relations", # stock_code (PROTECTED: Keep for analysis)
+            # "stock_score_results", # code (PROTECTED: Keep for analysis)
+            "volume_analysis_results", # code
             "alert_records",       # stock_code
             "wencai_data_dedup",   # stock_code
-            "stock_concepts"       # stock_code
+            "stock_concepts",      # stock_code
+            "wencai_crawl_batches", # id
+            # "stock_scores"         # code (PROTECTED: Keep for analysis)
         ]
         
         logger.info(f"Starting data cleanup for {stock_code}...")

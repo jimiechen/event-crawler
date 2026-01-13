@@ -51,6 +51,11 @@ class IndicatorCalculator {
       if (i >= 59) {
         data[i].isLowVolume = data[i].volume < data[i].volumeMa60 * 0.5;
       }
+      
+      // 3倍量判断: 成交量大于5日均量的3倍
+      if (data[i].volumeMa5 > 0) {
+        data[i].isHighVolume = data[i].volume > data[i].volumeMa5 * 3;
+      }
     }
   }
   

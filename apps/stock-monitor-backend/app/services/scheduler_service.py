@@ -28,8 +28,38 @@ class SchedulerService:
             logger.warning("Scheduler is already running")
             return
             
-        logger.info("Scheduler is disabled by user request.")
-        return
+        logger.info("Starting scheduler...")
+        
+        # 1. 盘后积分更新（15:30）
+        self.scheduler.add_job(
+            self.run_post_market_update,
+            CronTrigger(hour=15, minute=30),
+            id="post_market_update",
+            name="盘后积分更新",
+            replace_existing=True
+        )
+        
+        # 2. 每日验收测试（16:00）
+        self.scheduler.add_job(
+            self.run_daily_acceptance,
+            CronTrigger(hour=16, minute=0),
+            id="daily_acceptance",
+            name="每日验收测试",
+            replace_existing=True
+        )
+        
+        # 3. 盘中实时监控检查（14:00-15:00，每5分钟）
+        self.scheduler.add_job(
+            self.run_realtime_monitor_check,
+            CronTrigger(day_of_week='mon-fri', hour='14', minute='*/5'),
+            id="realtime_monitor",
+            name="盘中实时监控检查",
+            replace_existing=True
+        )
+        
+        self.scheduler.start()
+        self.is_running = True
+        logger.info("Scheduler started successfully")
 
         # logger.info("Starting scheduler...")
         
@@ -194,6 +224,95 @@ class SchedulerService:
                         logger.error(f"Error monitoring stock {stock.code}: {e}")
         except Exception as e:
             logger.error(f"Pool monitor failed: {e}")
+    
+    async def run_post_market_update(self):
+        """盘后积分更新任务"""
+        logger.info("盘后任务: 开始积分更新")
+        try:
+            # 1. 同步最新日线数据
+            await self._sync_latest_daily_data()
+            
+            # 2. 执行Pathway分析
+            from app.services.volume_analysis_service import VolumeAnalysisService
+            await VolumeAnalysisService.analyze_all_stocks(batch_size=10)
+            
+            # 3. 计算排名
+            await self._calculate_rankings()
+            
+            logger.info("盘后任务完成")
+        except Exception as e:
+            logger.error(f"盘后任务失败: {e}")
+    
+    async def _sync_latest_daily_data(self):
+        """同步最新日线数据"""
+        from app.services.stock_data_manager import StockDataManager
+        from app.models.stock import StockInfo
+        from sqlalchemy import select
+        
+        # 获取所有活跃股票
+        stmt = select(StockInfo.code).where(StockInfo.is_active == True)
+        result = await self.db_manager.session.execute(stmt)
+        codes = result.scalars().all()
+        
+        logger.info(f"开始同步 {len(codes)} 只活跃股票的日线数据")
+        
+        # 批量同步
+        stock_data_manager = StockDataManager(self.db_manager)
+        for code in codes:
+            try:
+                await stock_data_manager.sync_stock_daily(code)
+            except Exception as e:
+                logger.error(f"同步 {code} 日线数据失败: {e}")
+                continue
+        
+        logger.info("日线数据同步完成")
+    
+    async def _calculate_rankings(self):
+        """计算排名"""
+        from app.models.stock_daily import StockScoreResult
+        from sqlalchemy import select, update, func
+        from datetime import date
+        
+        # 1. 计算当日积分排名
+        stmt = select(
+            StockScoreResult.code,
+            StockScoreResult.trade_date,
+            StockScoreResult.total_score,
+            func.row_number().over(
+                order_by=StockScoreResult.total_score.desc()
+            ).label('ranking')
+        ).where(
+            StockScoreResult.trade_date == date.today()
+        )
+        result = await self.db_manager.session.execute(stmt)
+        
+        # 2. 更新排名
+        for row in result:
+            update_stmt = update(StockScoreResult).where(
+                StockScoreResult.code == row.code,
+                StockScoreResult.trade_date == row.trade_date
+            ).values(ranking=row.ranking)
+            await self.db_manager.session.execute(update_stmt)
+        
+        await self.db_manager.session.commit()
+        logger.info("排名计算完成")
+    
+    async def run_realtime_monitor_check(self):
+        """盘中实时监控检查（14:00-15:00）"""
+        logger.info("盘中监控检查")
+        # 这个任务主要用于检查是否有遗漏的数据
+        # 实时预警主要依靠浏览器插件推送触发
+    
+    async def run_daily_acceptance(self):
+        """每日验收测试（16:00）"""
+        logger.info("定时任务: 开始每日验收测试")
+        try:
+            async with self.db_manager.get_session() as session:
+                from app.services.daily_acceptance_service import daily_acceptance_service
+                await daily_acceptance_service.run_daily_acceptance(session)
+                logger.info("每日验收测试完成")
+        except Exception as e:
+            logger.error(f"每日验收测试失败: {e}")
 
 # 全局单例
 scheduler_service = SchedulerService()

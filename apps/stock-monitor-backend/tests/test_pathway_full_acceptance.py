@@ -29,7 +29,7 @@ class PathwayFullAcceptanceTest:
             'focus_symbol': '603601.SH',
             'test_start': '2025-11-20',
             'test_end': '2025-12-10',
-            'csv_path': '/Users/mac/Downloads/daily'
+            'csv_path': '/Volumes/MacintoshHD/data/daily'
         }
         self.results = []
         self.rankings = {}
