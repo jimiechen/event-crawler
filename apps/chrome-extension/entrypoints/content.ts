@@ -30,11 +30,6 @@ export default defineContentScript({
 // 检查同花顺登录状态
 function checkTonghuashunLogin(): boolean {
   try {
-    // 检查是否在同花顺域名
-    if (!window.location.hostname.includes('10jqka.com.cn')) {
-      return false;
-    }
-    
     // 根据用户提供的退出按钮来检测登录状态
     // 如果存在退出按钮，则表示已登录
     const exitButton = document.querySelector('a.banner-exit[data-statid="sns_my_timeline.tuichu"]');

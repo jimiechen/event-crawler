@@ -80,6 +80,13 @@
              >
                登录
              </button>
+             <button 
+               v-if="crawler.state === 'running' || crawler.state === 'warning'" 
+               class="action-btn sync-btn"
+               @click="syncSession(platforms.find(p => p.id === crawler.id))"
+             >
+               同步会话
+             </button>
              <span v-else class="status-ok">✓ Ready</span>
           </div>
         </div>
@@ -390,6 +397,68 @@ const syncCookies = async (p: PlatformConfig) => {
     }
   } catch (e) {
     console.error(`Error syncing cookies for ${p.name}`, e);
+  }
+};
+
+const syncSession = async (p: PlatformConfig) => {
+  try {
+    if (!chrome.cookies) return;
+    
+    // 获取Cookie
+    const cookies = await chrome.cookies.getAll({ domain: p.cookieDomain });
+    
+    // 获取账号昵称
+    const nickname = await verifyLogin(p);
+    
+    // 生成用户ID（使用Cookie中的特定字段）
+    const userId = cookies.find(c => c.name === (p.cookieName || 'user_id'))?.value || 
+                   cookies.find(c => c.name === 'sessionid')?.value || 
+                   'unknown';
+    
+    // 调用新的会话API
+    const res = await fetch('http://localhost:8000/api/v1/sessions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        platform_id: p.id,
+        user_id: userId,
+        account_name: nickname || userId,
+        cookies: cookies
+      })
+    });
+    
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        console.log(`Session synced for ${p.name}: ${data.data?.account_name}`);
+        syncedPlatforms.value.add(p.id);
+        // 刷新状态
+        await fetchCrawlerStatus();
+      } else {
+        console.error(`Failed to sync session for ${p.name}: ${data.message}`);
+      }
+    } else {
+      console.error(`Failed to sync session for ${p.name}`);
+    }
+  } catch (e) {
+    console.error(`Error syncing session for ${p.name}`, e);
+  }
+};
+
+const quickLogin = async (platformId: string) => {
+  try {
+    const platform = platforms.find(p => p.id === platformId);
+    if (!platform) {
+      console.error(`Platform not found: ${platformId}`);
+      return;
+    }
+    
+    // 打开平台首页
+    await chrome.tabs.create({ url: platform.url });
+  } catch (e) {
+    console.error(`Failed to open platform ${platformId}`, e);
   }
 };
 

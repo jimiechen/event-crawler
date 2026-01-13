@@ -11,29 +11,39 @@ import json
 import random
 import time
 from typing import List, Dict, Any, Optional
+from datetime import date as datetime_date
 from playwright.async_api import async_playwright, Page, BrowserContext
-from app.services.cookie_service import CookieService
-from app.services.wencai_service import WencaiService
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.wencai_service import WencaiService
+from app.crawler.base import CrawlerBase
 
 logger = logging.getLogger(__name__)
 
-class WencaiCrawler:
+class WencaiCrawler(CrawlerBase):
     def __init__(self, db: AsyncSession):
-        self.db = db
-        self.cookie_service = CookieService(db)
+        super().__init__(db, 'wencai')
         self.wencai_service = WencaiService(db)
         # 使用PC版搜索页面，通常结构更稳定且是表格形式
         self.base_url = "http://www.iwencai.com/stockpick/search"
+    
+    async def crawl(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        爬取方法（实现基类抽象方法）
+        """
+        # WencaiCrawler使用fetch_and_parse方法，这里只是满足基类要求
+        return await self.fetch_and_parse(*args, **kwargs)
 
-    async def fetch_and_parse(self, query: str, batch_name: str = None, target_stock_code: str = None) -> Dict[str, Any]:
+    async def fetch_and_parse(self, query: str, batch_name: str = None, target_stock_code: str = None, debug_url: str = None, target_date: datetime_date = None) -> Dict[str, Any]:
         """
         执行抓取并解析
         :param query: 搜索条件
         :param batch_name: 批次名称
         :param target_stock_code: 目标股票代码，如果提供则校验该股票是否存在于结果中
+        :param debug_url: 调试URL，如果提供则直接访问该URL而不是生成查询URL
+        :param target_date: 目标日期，用于生成特定日期的查询
         """
-        html_content = await self.fetch_page_source(query)
+        html_content = await self.fetch_page_source(query, debug_url=debug_url)
         
         if not html_content:
             logger.error("Failed to fetch page content")
@@ -109,149 +119,129 @@ class WencaiCrawler:
             "stocks": parsed_stocks
         }
 
-    async def fetch_page_source(self, query: str) -> Optional[str]:
+    async def fetch_page_source(self, query: str, debug_url: str = None) -> Optional[str]:
         """
-        使用Playwright获取页面源码
+        使用Playwright获取页面源码，支持WAP版和PC版自动切换
+        :param query: 搜索条件
+        :param debug_url: 调试URL，如果提供则直接访问该URL
         """
-        async with async_playwright() as p:
-            # 启动浏览器 (headless=True)
-            # 添加反爬参数
-            args = [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox',
-                '--disable-blink-features=AutomationControlled',
-                '--disable-infobars',
-                '--window-size=1920,1080'
-            ]
-            browser = await p.chromium.launch(headless=True, args=args)
-            
-            context = await browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                locale='zh-CN',
-                timezone_id='Asia/Shanghai'
-            )
-            
-            # 注入Cookies
-            await self._inject_cookies(context)
-            
-            # 添加更多反爬脚本
-            await context.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined
-                });
-            """)
-            
+        context = None
+        browser = None
+        
+        try:
+            # 使用基类方法创建浏览器上下文
+            context, session, browser = await self.create_browser_context()
             page = await context.new_page()
             
+            # 打印当前Cookie信息（调试功能）
+            cookies = await context.cookies()
+            logger.info(f"========== 调试信息：当前Cookie ==========")
+            for cookie in cookies:
+                logger.info(f"  {cookie['name']}: {cookie['value'][:50]}..." if len(cookie['value']) > 50 else f"  {cookie['name']}: {cookie['value']}")
+            logger.info(f"========== 共 {len(cookies)} 个Cookie ==========")
+            
+            # 如果提供了debug_url，直接访问
+            if debug_url:
+                logger.info(f"使用调试URL: {debug_url}")
+                await page.goto(debug_url, wait_until='networkidle', timeout=30000)
+                await asyncio.sleep(5)
+                
+                # 生成截图
+                screenshot_path = f"debug_wencai_{int(time.time())}.png"
+                await page.screenshot(path=screenshot_path, full_page=True)
+                logger.info(f"截图已保存到: {screenshot_path}")
+                
+                content = await page.content()
+                await self.sync_session(context, session)
+                return content
+            
+            # 优先尝试WAP版
+            wap_url = f"https://www.iwencai.com/unifiedwap/result?w={query}"
+            logger.info(f"Navigating to WAP URL: {wap_url}")
+            
             try:
-                # 构建URL
-                url = f"{self.base_url}?w={query}"
-                logger.info(f"Navigating to: {url}")
+                await page.goto(wap_url, wait_until='networkidle', timeout=30000)
+                # WAP版通常是动态加载，等待一段时间
+                await asyncio.sleep(5)
                 
-                # 访问页面
-                await page.goto(url, wait_until='networkidle', timeout=60000)
-                
-                # 等待表格加载
-                try:
-                    # 尝试等待常见的表格选择器
-                    # 问财的表格经常变，这里尝试几个可能的选择器
-                    # table: 标准表格
-                    # .iwc-table-body: 新版div表格
-                    # .static_table: 另一种可能的类名
-                    # .tib-table: 同花顺可能使用的类名
-                    selectors = ['table', '.iwc-table-body', '.static_table', '.tib-table', '.wencai-table']
-                    
-                    # 轮询检查选择器
-                    found_selector = False
-                    for _ in range(20): # 20 * 0.5s = 10s
-                        for selector in selectors:
-                            if await page.query_selector(selector):
-                                logger.info(f"Found table selector: {selector}")
-                                found_selector = True
-                                break
-                        if found_selector:
-                            break
-                        await asyncio.sleep(0.5)
-                        
-                    if not found_selector:
-                        logger.warning("No standard table selector found, waiting a bit more...")
-                        await asyncio.sleep(5)
-                        
-                except Exception as e:
-                    logger.warning(f"Wait for selector failed: {e}")
-                    await asyncio.sleep(5)
-                
-                # 获取内容
                 content = await page.content()
                 
-                # 简单的反爬检查 (如果内容太短或者包含特定验证码提示)
-                if "robot" in content.lower() or "验证码" in content:
-                    logger.warning("Detected anti-crawler mechanism")
-                    # 记录一小段内容以便调试
-                    logger.debug(f"Anti-crawler content snippet: {content[:500]}")
-                    return None
-                
-                # 同步最新的Cookies回数据库
-                await self._save_cookies_from_context(context, "iwencai.com")
-
-                return content
-                
+                # 检查WAP版是否有效（通过是否存在特定元素或反爬特征）
+                # 假设WAP版成功加载会有内容，如果被拦截会有验证码
+                if "验证码" not in content and "robot" not in content.lower():
+                    logger.info("WAP version loaded successfully")
+                    
+                    # 生成截图
+                    screenshot_path = f"debug_wencai_wap_{int(time.time())}.png"
+                    await page.screenshot(path=screenshot_path, full_page=True)
+                    logger.info(f"WAP版截图已保存到: {screenshot_path}")
+                    
+                    await self.sync_session(context, session)
+                    return content
+                else:
+                    logger.warning("WAP版遭遇反爬，尝试切换PC版...")
             except Exception as e:
-                logger.error(f"Playwright error: {e}")
+                logger.warning(f"WAP版访问失败: {e}，尝试切换PC版...")
+            
+            # 失败后尝试PC版
+            pc_url = f"http://www.iwencai.com/stockpick/search?w={query}"
+            logger.info(f"Navigating to PC URL: {pc_url}")
+            
+            await page.goto(pc_url, wait_until='networkidle', timeout=30000)
+            
+            # 等待表格加载
+            try:
+                # 尝试等待常见的表格选择器
+                selectors = ['table', '.iwc-table-body', '.static_table', '.tib-table', '.wencai-table']
+                
+                # 轮询检查选择器
+                found_selector = False
+                for _ in range(20): # 20 * 0.5s = 10s
+                    for selector in selectors:
+                        if await page.query_selector(selector):
+                            logger.info(f"Found table selector: {selector}")
+                            found_selector = True
+                            break
+                    if found_selector:
+                        break
+                    await asyncio.sleep(0.5)
+                    
+                if not found_selector:
+                    logger.warning("No standard table selector found, waiting a bit more...")
+                    await asyncio.sleep(5)
+                    
+            except Exception as e:
+                logger.warning(f"Wait for selector failed: {e}")
+                await asyncio.sleep(5)
+            
+            # 获取内容
+            content = await page.content()
+            
+            # 生成截图
+            screenshot_path = f"debug_wencai_pc_{int(time.time())}.png"
+            await page.screenshot(path=screenshot_path, full_page=True)
+            logger.info(f"PC版截图已保存到: {screenshot_path}")
+            
+            # 简单的反爬检查
+            if "robot" in content.lower() or "验证码" in content:
+                logger.warning("Detected anti-crawler mechanism")
+                logger.debug(f"Anti-crawler content snippet: {content[:500]}")
                 return None
-            finally:
+            
+            # 同步最新的Cookies回数据库
+            await self.sync_session(context, session)
+
+            return content
+            
+        except Exception as e:
+            logger.error(f"Playwright error: {e}")
+            return None
+        finally:
+            # 清理资源
+            if context:
                 await context.close()
+            if browser:
                 await browser.close()
 
-    async def _save_cookies_from_context(self, context: BrowserContext, domain: str):
-        """从Playwright上下文保存Cookies回数据库"""
-        try:
-            cookies = await context.cookies()
-            if cookies:
-                # 转换Playwright cookie格式为通用格式
-                formatted_cookies = []
-                for c in cookies:
-                    formatted_cookies.append({
-                        "name": c["name"],
-                        "value": c["value"],
-                        "domain": c["domain"],
-                        "path": c["path"]
-                    })
-                
-                await self.cookie_service.sync_cookies(domain, formatted_cookies)
-                logger.info(f"Synced {len(formatted_cookies)} cookies back to DB for {domain}")
-        except Exception as e:
-            logger.error(f"Failed to save cookies: {e}")
 
-    async def _inject_cookies(self, context: BrowserContext):
-        """注入Cookies"""
-        try:
-            # 获取 iwencai.com 的 cookies
-            cookies = await self.cookie_service.get_cookies("iwencai.com")
-            if not cookies:
-                # 尝试主域名
-                cookies = await self.cookie_service.get_cookies("10jqka.com.cn")
-            
-            if cookies:
-                # Playwright cookie format might differ slightly, ensure compatibility
-                formatted_cookies = []
-                for c in cookies:
-                    # Playwright needs 'name', 'value', 'domain', 'path'
-                    if 'name' in c and 'value' in c:
-                        fc = {
-                            'name': c['name'],
-                            'value': c['value'],
-                            'domain': c.get('domain', '.iwencai.com'),
-                            'path': c.get('path', '/')
-                        }
-                        formatted_cookies.append(fc)
-                
-                if formatted_cookies:
-                    await context.add_cookies(formatted_cookies)
-                    logger.info(f"Injected {len(formatted_cookies)} cookies")
-            else:
-                logger.warning("No cookies found for iwencai/10jqka")
-        except Exception as e:
-            logger.error(f"Cookie injection failed: {e}")
 

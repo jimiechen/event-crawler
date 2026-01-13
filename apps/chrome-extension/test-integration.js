@@ -182,7 +182,7 @@ function testAPIConfiguration() {
     try {
         // 模拟API配置
         const mockAPIConfig = {
-            baseURL: 'http://localhost:8001', // 修复后的端口
+            baseURL: 'http://localhost:8000', // 修复后的端口
             endpoints: {
                 stockData: '/api/stock/data',
                 stockInfo: '/api/stock/info',
@@ -195,7 +195,7 @@ function testAPIConfiguration() {
 
         // 验证端口配置
         const url = new URL(mockAPIConfig.baseURL);
-        const expectedPort = '8001';
+        const expectedPort = '8000';
         
         if (url.port !== expectedPort) {
             console.log(`   ❌ API端口配置错误: 期望 ${expectedPort}, 实际 ${url.port}`);

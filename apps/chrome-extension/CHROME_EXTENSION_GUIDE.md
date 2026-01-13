@@ -5,7 +5,7 @@
 ### 系统要求
 - ✅ Chrome浏览器 88+ 或 Edge浏览器 88+
 - ✅ 已完成项目构建（.output/chrome-mv3 目录存在）
-- ✅ 后端API服务运行在 http://localhost:8001
+- ✅ 后端API服务运行在 http://localhost:8000
 
 ### 构建状态检查
 ```bash
@@ -102,7 +102,7 @@ ls -la .output/chrome-mv3/
 ### API连接测试
 ```bash
 # 确认后端API服务运行
-curl http://localhost:8001/api/v1/health
+curl http://localhost:8000/api/v1/health
 # 应该返回健康检查响应
 
 # 检查扩展API调用
@@ -139,9 +139,9 @@ curl http://localhost:8001/api/v1/health
 #### 4. API连接失败
 **症状**：扩展显示网络错误  
 **解决方案**：
-- 确认后端服务运行：`curl http://localhost:8001/api/v1/health`
+- 确认后端服务运行：`curl http://localhost:8000/api/v1/health`
 - 检查防火墙设置
-- 确认API端口配置正确（8001）
+- 确认API端口配置正确（8000）
 
 ### 调试技巧
 

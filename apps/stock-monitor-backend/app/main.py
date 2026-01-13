@@ -33,7 +33,8 @@ settings = get_settings()
 setup_logging()
 
 # 导入控制器 (在日志配置后导入，确保日志sink正确设置)
-from .api import stock_controller, monitor_controller, health_controller, wencai_controller, network_controller, stock_daily_controller, favorites_controller, analysis_controller, trading_rules_controller, morphology_controller, test_tool_controller, system_controller, tag_controller, timed_task_controller, stock_score_controller, dashboard_controller, volume_analysis_controller, debug_controller, ranking_controller, stock_sync_controller, cookie_controller, crawler_controller, adb_controller, automation_controller, pattern_analysis_controller
+from .api import stock_controller, monitor_controller, health_controller, wencai_controller, network_controller, stock_daily_controller, favorites_controller, analysis_controller, trading_rules_controller, morphology_controller, test_tool_controller, system_controller, tag_controller, timed_task_controller, stock_score_controller, dashboard_controller, volume_analysis_controller, debug_controller, ranking_controller, stock_sync_controller, cookie_controller, crawler_controller, adb_controller, automation_controller, pattern_analysis_controller, platform_controller, session_controller, data_merge_controller
+from .api import generic_task_controller
 from .api.schemas import ErrorResponse
 
 
@@ -63,12 +64,18 @@ async def lifespan(app: FastAPI):
         # 初始化配置
         try:
             from .services.pattern_analysis_service import PatternAnalysisService
+            from .services.platform_service import PlatformService
             async with db_manager.get_session() as session:
                 pattern_service = PatternAnalysisService(session)
                 await pattern_service.init_configs()
                 logger.info("✅ 评分配置初始化完成")
+                
+                # 初始化平台配置
+                platform_service = PlatformService(session)
+                await platform_service.init_default_platforms()
+                logger.info("✅ 平台配置初始化完成")
         except Exception as e:
-            logger.warning(f"⚠️ 评分配置初始化失败: {e}")
+            logger.warning(f"⚠️ 初始化配置失败: {e}")
 
         # 启动任务执行器 (APScheduler)
         executor.start()
@@ -254,10 +261,22 @@ app.include_router(dashboard_controller.router)
 app.include_router(volume_analysis_controller.router)
 app.include_router(debug_controller.router)
 app.include_router(cookie_controller.router)
+
+# 注册SSE控制器
+try:
+    from .api import sse_controller
+    app.include_router(sse_controller.router)
+except ImportError as e:
+    logger.warning(f"未找到SSE控制器，跳过注册: {e}")
+
 app.include_router(crawler_controller.router)
 app.include_router(adb_controller.router)
 app.include_router(automation_controller.router)
 app.include_router(pattern_analysis_controller.router)
+app.include_router(platform_controller.router)
+app.include_router(session_controller.router)
+app.include_router(data_merge_controller.router)
+app.include_router(generic_task_controller.router)
 
 # 配置静态文件服务
 static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
@@ -327,13 +346,3 @@ def start_prod_server(host=None, port=None):
         log_level="warning",
         access_log=False
     )
-
-
-if __name__ == "__main__":
-    # 根据环境配置决定启动模式
-    if settings.is_production():
-        logger.info("🚀 启动生产服务器...")
-        start_prod_server()
-    else:
-        logger.info("🚀 启动开发服务器...")
-        start_dev_server()

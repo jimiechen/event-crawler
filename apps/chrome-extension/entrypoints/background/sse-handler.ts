@@ -7,7 +7,7 @@ import { BACKEND_CONFIG } from './tonghuashun-data-handler';
 export function initSSEListener() {
   console.log('Initializing SSE Listener...');
 
-  const sseUrl = `${BACKEND_CONFIG.baseUrl}/api/v1/sse/stream`;
+  const sseUrl = `${BACKEND_CONFIG.baseUrl}/api/sse/subscribe`;
   
   // Create EventSource connection
   const eventSource = new EventSource(sseUrl);

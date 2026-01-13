@@ -216,6 +216,99 @@ class TaskExecutor:
             if log_id in self.processing_ids:
                 self.processing_ids.remove(log_id)
 
+    async def execute_generic_task(self, task_id: int):
+        """执行通用定时任务"""
+        from app.database import db_manager
+        from app.services.generic_task_service import GenericTaskService
+        from app.services.task_execution_detail_service import TaskExecutionDetailService
+        
+        async with db_manager.session() as session:
+            task_service = GenericTaskService(session)
+            detail_service = TaskExecutionDetailService(session)
+            
+            task = await task_service.get_generic_task_by_id(task_id)
+            if not task or not task.is_active:
+                logger.warning(f"Task {task_id} not found or inactive")
+                return
+                
+            # Broadcast Start
+            await manager.broadcast({
+                "type": "generic_task_update",
+                "data": {"id": task_id, "status": "running", "name": task.name}
+            })
+            
+            # Create execution record
+            detail_id = await detail_service.create_execution_detail({
+                "task_id": task_id,
+                "start_time": datetime.now(),
+                "status": "running"
+            })
+            
+            try:
+                start_time = datetime.now()
+                url = task.api_endpoint
+                if not url.startswith("http"):
+                    url = f"http://localhost:8000{url}" 
+                
+                logger.info(f"Executing generic task {task_id}: {task.api_method} {url}")
+                
+                async with httpx.AsyncClient(timeout=float(task.timeout)) as client:
+                    if task.api_method.upper() == "POST":
+                        response = await client.post(url, json=task.request_params)
+                    else:
+                        response = await client.get(url, params=task.request_params)
+                    
+                    # Check status but don't raise yet
+                    success = response.status_code >= 200 and response.status_code < 300
+                    
+                    end_time = datetime.now()
+                    duration = (end_time - start_time).total_seconds()
+                    
+                    status = "success" if success else "failed"
+                    error_message = None if success else f"HTTP {response.status_code}: {response.text[:200]}"
+                    
+                    await detail_service.update_execution_detail(detail_id, {
+                        "end_time": end_time,
+                        "duration": duration,
+                        "status": status,
+                        "response_code": response.status_code,
+                        "response_data": response.text[:1000],
+                        "error_message": error_message
+                    })
+                    
+                    await task_service.update_generic_task(task_id, {
+                        "last_run_at": end_time,
+                        "last_run_status": status
+                    })
+                    
+                    # Broadcast Result
+                    await manager.broadcast({
+                        "type": "generic_task_update",
+                        "data": {"id": task_id, "status": status, "name": task.name, "message": f"Code: {response.status_code}"}
+                    })
+
+            except Exception as e:
+                end_time = datetime.now()
+                duration = (end_time - start_time).total_seconds()
+                logger.error(f"Generic Task {task_id} failed: {e}")
+                
+                await detail_service.update_execution_detail(detail_id, {
+                    "end_time": end_time,
+                    "duration": duration,
+                    "status": "failed",
+                    "error_message": str(e)
+                })
+                
+                await task_service.update_generic_task(task_id, {
+                    "last_run_at": end_time,
+                    "last_run_status": "failed"
+                })
+                
+                await manager.broadcast({
+                    "type": "generic_task_update",
+                    "data": {"id": task_id, "status": "failed", "name": task.name, "message": str(e)}
+                })
+
     async def run_batch(self, log_ids: List[int]):
         """Run a batch of tasks concurrently"""
         repo = TaskExecutionLogRepository(db_manager)
@@ -224,3 +317,4 @@ class TaskExecutor:
 
 # Global executor instance
 executor = TaskExecutor(concurrency=10)
+task_executor = executor

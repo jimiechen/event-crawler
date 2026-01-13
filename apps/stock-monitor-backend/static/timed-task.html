@@ -36,30 +36,43 @@
 
         <!-- Content: Task Control -->
         <div v-if="currentTab === 'control'" class="space-y-6">
-            <!-- Scheduled Tasks Management -->
+            <!-- Scheduled Tasks Management (Generic Tasks) -->
             <div class="bg-white p-6 rounded-lg shadow">
                 <div class="flex justify-between items-center mb-4">
-                    <h2 class="text-xl font-bold">定时任务管理</h2>
-                    <button @click="fetchScheduledTasks" class="text-blue-600 hover:text-blue-800 text-sm">
-                        🔄 刷新列表
-                    </button>
+                    <h2 class="text-xl font-bold">定时任务管理 (Generic)</h2>
+                    <div class="flex space-x-2">
+                         <div v-if="selectedGenericTaskIds.length > 0" class="flex items-center space-x-2 mr-4 bg-blue-50 px-3 py-1 rounded">
+                            <span class="text-sm text-blue-700 font-bold">已选 {{ selectedGenericTaskIds.length }} 项</span>
+                            <button @click="batchToggleGenericTasks(true)" class="bg-green-500 hover:bg-green-600 text-white text-xs px-2 py-1 rounded">批量启用</button>
+                            <button @click="batchToggleGenericTasks(false)" class="bg-yellow-500 hover:bg-yellow-600 text-white text-xs px-2 py-1 rounded">批量禁用</button>
+                        </div>
+                        <button @click="fetchGenericTasks" class="text-blue-600 hover:text-blue-800 text-sm">
+                            🔄 刷新列表
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="overflow-x-auto">
                     <table class="min-w-full leading-normal">
                         <thead>
                             <tr>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                                    <input type="checkbox" v-model="selectAllGeneric" @change="toggleSelectAllGeneric">
+                                </th>
                                 <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">ID</th>
                                 <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">任务名称</th>
                                 <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">CRON表达式</th>
                                 <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">状态</th>
-                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">上次运行</th>
-                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">下次运行</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">最近运行</th>
+                                <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">API</th>
                                 <th class="px-5 py-3 border-b-2 border-gray-200 bg-gray-100 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">操作</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="task in scheduledTasks" :key="task.id" class="hover:bg-gray-50">
+                            <tr v-for="task in genericTasks" :key="task.id" class="hover:bg-gray-50">
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm">
+                                    <input type="checkbox" v-model="selectedGenericTaskIds" :value="task.id">
+                                </td>
                                 <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ task.id }}</td>
                                 <td class="px-5 py-5 border-b border-gray-200 text-sm font-medium">
                                     {{ task.name }}
@@ -82,22 +95,29 @@
                                         {{ task.is_active ? '已启用' : '已禁用' }}
                                     </button>
                                 </td>
-                                <td class="px-5 py-5 border-b border-gray-200 text-sm">
-                                    <div>{{ formatTime(task.last_run_at) }}</div>
-                                    <span v-if="task.last_run_status === 'success'" class="text-xs text-green-600">成功</span>
-                                    <span v-else-if="task.last_run_status === 'failed'" class="text-xs text-red-600">失败</span>
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm cursor-pointer hover:bg-gray-50" @click="showTaskDetails(task)" title="点击查看详情">
+                                    <div :class="getStatusColor(task.last_run_status)">
+                                        {{ getStatusIcon(task.last_run_status) }} 
+                                        {{ task.last_run_status || '未执行' }}
+                                    </div>
+                                    <div class="text-xs text-gray-400 mt-1">
+                                        {{ formatTime(task.last_run_at) }}
+                                    </div>
                                 </td>
-                                <td class="px-5 py-5 border-b border-gray-200 text-sm text-gray-500">
-                                    {{ formatTime(task.next_run_at) }}
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm text-gray-500 text-xs">
+                                    {{ task.api_method }} {{ task.api_endpoint }}
                                 </td>
                                 <td class="px-5 py-5 border-b border-gray-200 text-sm">
-                                    <button @click="runTaskManually(task)" :disabled="loading" class="bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-semibold px-3 py-1 rounded transition-colors disabled:opacity-50">
-                                        立即运行
+                                    <button @click="runTaskManually(task)" :disabled="loading" class="bg-blue-100 hover:bg-blue-200 text-blue-800 text-xs font-semibold px-3 py-1 rounded transition-colors disabled:opacity-50 mr-2">
+                                        运行
+                                    </button>
+                                    <button @click="viewTaskHistory(task)" class="bg-gray-100 hover:bg-gray-200 text-gray-800 text-xs font-semibold px-3 py-1 rounded transition-colors">
+                                        历史
                                     </button>
                                 </td>
                             </tr>
-                            <tr v-if="scheduledTasks.length === 0">
-                                <td colspan="7" class="px-5 py-5 border-b border-gray-200 text-sm text-center text-gray-500">暂无定时任务</td>
+                            <tr v-if="genericTasks.length === 0">
+                                <td colspan="7" class="px-5 py-5 border-b border-gray-200 text-sm text-center text-gray-500">暂无通用任务</td>
                             </tr>
                         </tbody>
                     </table>
@@ -131,7 +151,7 @@
                 </div>
             </div>
 
-            <div class="bg-white p-6 rounded-lg shadow">
+            <div id="execution-list-section" class="bg-white p-6 rounded-lg shadow">
                 <h2 class="text-xl font-bold mb-4">任务执行列表</h2>
                 
                 <!-- Filter -->
@@ -220,8 +240,10 @@
                                     <span v-else-if="task.status === 'running'" class="bg-yellow-100 text-yellow-800 text-xs font-semibold px-2 py-1 rounded">执行中</span>
                                     <span v-else class="bg-gray-100 text-gray-800 text-xs font-semibold px-2 py-1 rounded">待执行</span>
                                 </td>
-                                <td class="px-5 py-5 border-b border-gray-200 text-sm truncate max-w-xs" :title="task.result_message">
-                                    {{ task.result_message }}
+                                <td class="px-5 py-5 border-b border-gray-200 text-sm max-w-xs truncate cursor-pointer hover:bg-gray-50" @click="showTaskDetails(task)" :title="task.result_message">
+                                    <span :class="{'text-red-600 font-bold': task.status === 'failed'}">
+                                        {{ task.result_message }}
+                                    </span>
                                 </td>
                                 <td class="px-5 py-5 border-b border-gray-200 text-sm">{{ formatTime(task.created_at) }}</td>
                                 <td class="px-5 py-5 border-b border-gray-200 text-sm">
@@ -567,6 +589,22 @@
                     if (!timeStr) return '-';
                     return new Date(timeStr).toLocaleString('zh-CN');
                 };
+
+                const getStatusColor = (status) => {
+                    switch(status) {
+                        case 'success': return 'text-green-600';
+                        case 'failed': return 'text-red-600 font-bold';
+                        case 'running': return 'text-blue-600';
+                        default: return 'text-gray-500';
+                    }
+                };
+
+                const getStatusIcon = (status) => {
+                    if (status === 'failed') return '⚠️';
+                    if (status === 'success') return '✅';
+                    if (status === 'running') return '⏳';
+                    return '';
+                };
                 
                 const formatDate = (dateStr) => {
                     if (!dateStr) return '-';
@@ -575,6 +613,26 @@
 
                 const openTestTool = (code) => {
                     window.open(`/static/test-tool.html?stockCode=${code}`, '_blank');
+                };
+
+                const showTaskDetails = (task) => {
+                    let msg = '';
+                    // GenericTask error message
+                    if (task.error_message) {
+                        msg += `[错误信息]\n${task.error_message}\n\n`;
+                    }
+                    // ExecutionLog result message
+                    if (task.result_message) {
+                        msg += `[执行结果]\n${task.result_message}\n\n`;
+                    }
+                    // GenericTask description
+                    if (task.description) {
+                         msg += `[描述]\n${task.description}\n\n`;
+                    }
+                    
+                    if (!msg) msg = '暂无详细信息';
+                    
+                    alert(`任务ID: ${task.id}\n任务名称: ${task.name || task.task_type || '未命名'}\n状态: ${task.last_run_status || task.status || '未知'}\n\n${msg}`);
                 };
 
                 // --- WebSocket Handler ---
@@ -589,38 +647,64 @@
                 // --- Executor Control (Replaced by Scheduled Tasks) ---
                 // const executorStatus = ref(false); // Deprecated
                 
-                // --- Scheduled Tasks Logic ---
-                const scheduledTasks = ref([]);
+                // --- Scheduled Tasks Logic (Generic) ---
+                const genericTasks = ref([]);
+                const selectedGenericTaskIds = ref([]);
+                const selectAllGeneric = ref(false);
                 const editingTask = ref(null);
                 const tempCron = ref('');
 
-                const fetchScheduledTasks = async () => {
+                const fetchGenericTasks = async () => {
                     try {
-                        const res = await api.get('/timed-task/scheduled/list');
+                        const res = await api.get('/generic-task');
                         if (res.data.success) {
-                            scheduledTasks.value = res.data.data;
+                            genericTasks.value = res.data.data;
+                            // Reset selection
+                            selectedGenericTaskIds.value = [];
+                            selectAllGeneric.value = false;
                         }
                     } catch (e) {
-                        console.error("Fetch scheduled tasks failed", e);
+                        console.error("Fetch generic tasks failed", e);
                     }
                 };
+                
+                // Alias for compatibility
+                const fetchScheduledTasks = fetchGenericTasks;
 
                 const toggleTaskActive = async (task) => {
                     if (!confirm(`确定要${task.is_active ? '禁用' : '启用'}任务 "${task.name}" 吗？`)) return;
                     
                     try {
-                        const res = await api.post('/timed-task/scheduled/update', {
-                            id: task.id,
+                        const res = await api.post('/generic-task/batch/toggle', {
+                            task_ids: [task.id],
                             is_active: !task.is_active
                         });
                         if (res.data.success) {
-                            fetchScheduledTasks();
+                            fetchGenericTasks();
                         } else {
                             alert(res.data.message);
                         }
                     } catch (e) {
                         alert('操作失败: ' + e.message);
                     }
+                };
+
+                const batchToggleGenericTasks = async (isActive) => {
+                     if (!confirm(`确定要批量${isActive ? '启动' : '暂停'}选中的 ${selectedGenericTaskIds.value.length} 个任务吗？`)) return;
+                     try {
+                        const res = await api.post('/generic-task/batch/toggle', {
+                            task_ids: selectedGenericTaskIds.value,
+                            is_active: isActive
+                        });
+                        if (res.data.success) {
+                            alert(res.data.message);
+                            fetchGenericTasks();
+                        } else {
+                            alert(res.data.message);
+                        }
+                     } catch (e) {
+                        alert('操作失败: ' + e.message);
+                     }
                 };
 
                 const startEditTask = (task) => {
@@ -637,13 +721,12 @@
                     if (!tempCron.value) return;
                     
                     try {
-                        const res = await api.post('/timed-task/scheduled/update', {
-                            id: task.id,
+                        const res = await api.put(`/generic-task/${task.id}`, {
                             cron_expression: tempCron.value
                         });
                         if (res.data.success) {
                             editingTask.value = null;
-                            fetchScheduledTasks();
+                            fetchGenericTasks();
                         } else {
                             alert(res.data.message);
                         }
@@ -652,14 +735,29 @@
                     }
                 };
 
+                const viewTaskHistory = (task) => {
+                    // Filter execution logs by this task's endpoint
+                    // Note: This might be approximate if endpoint has params
+                    executionFilter.value.taskUrl = task.api_endpoint;
+                    executionFilter.value.taskType = ''; 
+                    executionFilter.value.stockCode = '';
+                    fetchExecutionLogs(1);
+                    
+                    // Scroll to execution logs section (Task Execution List)
+                    // We can use the ID or a class selector if ID is not available. 
+                    // Let's assume the user will see it update.
+                    // Better: Add an ID to the execution list container
+                    const el = document.getElementById('execution-list-section');
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                };
+
                 const runTaskManually = async (task) => {
                     if (!confirm(`确定要立即运行任务 "${task.name}" 吗？`)) return;
                     
                     try {
-                        const res = await api.post(`/timed-task/scheduled/run/${task.id}`);
+                        const res = await api.post(`/generic-task/${task.id}/execute`);
                         if (res.data.success) {
                             alert(res.data.message);
-                            fetchScheduledTasks();
                         } else {
                             alert(res.data.message);
                         }
@@ -667,6 +765,22 @@
                         alert('运行失败: ' + e.message);
                     }
                 };
+
+                const toggleSelectAllGeneric = () => {
+                    if (selectAllGeneric.value) {
+                        selectedGenericTaskIds.value = genericTasks.value.map(t => t.id);
+                    } else {
+                        selectedGenericTaskIds.value = [];
+                    }
+                };
+                
+                watch(selectedGenericTaskIds, (newVal) => {
+                    if (genericTasks.value.length > 0 && newVal.length === genericTasks.value.length) {
+                        selectAllGeneric.value = true;
+                    } else {
+                        selectAllGeneric.value = false;
+                    }
+                });
 
                 // --- Task Control Methods ---
                 const batchCreateTask = async (taskType) => {
@@ -677,18 +791,106 @@
                     };
                     const typeName = typeNameMap[taskType] || taskType;
                     
-                    if (!confirm(`确定要批量创建 [${typeName}] 任务吗？\n这将为所有活跃股票创建任务。`)) return;
+                    // Special handling for 'calculate' - Create GLOBAL task
+                    if (taskType === 'calculate') {
+                        if (!confirm(`确定要创建 [${typeName}] 全局任务吗？\n这将创建一个每日运行的全局计算任务。`)) return;
+                        try {
+                            loading.value = true;
+                            const taskData = {
+                                name: "全局评分计算任务",
+                                task_category: "calculation",
+                                api_method: "POST",
+                                api_endpoint: "/api/v1/scores/calculate/today",
+                                request_params: {},
+                                cron_expression: "0 20 * * *", // 20:00 daily
+                                description: "每日全量股票评分计算"
+                            };
+                            // Check duplication (simple check by name)
+                            if (genericTasks.value.some(t => t.name === taskData.name)) {
+                                alert("任务已存在，请勿重复创建。");
+                                loading.value = false;
+                                return;
+                            }
+                            
+                            const res = await api.post('/generic-task', taskData);
+                            if (res.data.success) {
+                                alert("全局计算任务创建成功！");
+                                fetchGenericTasks();
+                            } else {
+                                alert("创建失败: " + res.data.message);
+                            }
+                        } catch(e) {
+                             alert("请求异常: " + e.message);
+                        } finally {
+                            loading.value = false;
+                        }
+                        return;
+                    }
+
+                    // For Sync tasks - Batch create per stock
+                    if (!confirm(`确定要批量创建 [${typeName}] 任务吗？\n这将为所有活跃股票创建独立的定时任务。\n注意：这可能需要一些时间。`)) return;
                     
                     loading.value = true;
                     try {
-                        const res = await api.post('/timed-task/batch-create', { task_type: taskType });
+                        // 1. Fetch all active stocks
+                        // Note: limit=2000 to get all (assuming <2000 active stocks for now, or loop)
+                        const stockRes = await api.get('/stocks/info', { params: { active_only: true, limit: 2000 } });
+                        if (!stockRes.data.success) throw new Error(stockRes.data.message);
                         
-                        if (res.data.success) {
-                            alert(res.data.message);
-                            fetchExecutionLogs();
-                        } else {
-                            alert('创建失败: ' + res.data.message);
+                        const stocks = stockRes.data.data.items;
+                        if (!stocks || stocks.length === 0) {
+                            alert("未找到活跃股票");
+                            return;
                         }
+
+                        const tasksToCreate = [];
+                        
+                        stocks.forEach(stock => {
+                            const code = stock.code;
+                            // Randomize minute to avoid thundering herd (0-59)
+                            const randomMinute = Math.floor(Math.random() * 60);
+                            
+                            if (taskType === 'csv_sync') {
+                                tasksToCreate.push({
+                                    name: `CSV同步-${code}`,
+                                    task_category: "data_sync",
+                                    api_method: "POST",
+                                    api_endpoint: "/api/v1/stock/sync/csv",
+                                    request_params: { "stock_codes": [code], "days": 250, "batch_id": 0 },
+                                    cron_expression: `${randomMinute} 2 * * *`, // 02:xx daily
+                                    description: `股票 ${code} CSV数据同步`,
+                                    is_active: true
+                                });
+                            } else if (taskType === 'tushare_sync') {
+                                tasksToCreate.push({
+                                    name: `Tushare同步-${code}`,
+                                    task_category: "data_sync",
+                                    api_method: "POST",
+                                    api_endpoint: "/api/v1/stock/sync/tushare",
+                                    request_params: { "stock_codes": [code], "batch_id": 0 },
+                                    cron_expression: `${randomMinute} 18 * * *`, // 18:xx daily
+                                    description: `股票 ${code} Tushare增量同步`,
+                                    is_active: true
+                                });
+                            }
+                        });
+
+                        // 2. Batch submit in chunks (e.g. 50 tasks per request)
+                        const chunkSize = 50;
+                        let successCount = 0;
+                        
+                        for (let i = 0; i < tasksToCreate.length; i += chunkSize) {
+                            const chunk = tasksToCreate.slice(i, i + chunkSize);
+                            const batchRes = await api.post('/generic-task/batch/create', { tasks: chunk });
+                            if (batchRes.data.success) {
+                                successCount += chunk.length;
+                            }
+                            // Optional: update loading status text if UI supported it
+                        }
+                        
+                        alert(`批量创建完成！成功提交 ${successCount} / ${tasksToCreate.length} 个任务。`);
+                        fetchGenericTasks();
+
                     } catch (e) {
                         alert('请求异常: ' + (e.response?.data?.detail || e.message));
                     } finally {
@@ -954,9 +1156,11 @@
                     selectedTaskIds, selectAll,
                     batchCreateTask, fetchExecutionLogs, changeExecutionPage, 
                     toggleSelectAll, executeSelectedTasks, executeSingleTask,
-                    // Scheduled Tasks
-                    scheduledTasks, editingTask, tempCron,
-                    fetchScheduledTasks, toggleTaskActive, startEditTask, cancelEditTask, saveTaskCron, runTaskManually,
+                    // Scheduled Tasks (Generic)
+                    genericTasks, selectedGenericTaskIds, selectAllGeneric,
+                    batchToggleGenericTasks, toggleSelectAllGeneric,
+                    fetchScheduledTasks, toggleTaskActive, startEditTask, cancelEditTask, saveTaskCron, runTaskManually, viewTaskHistory,
+                    editingTask, tempCron,
                     // Sync List
                     syncList, syncFilter, syncPagination, fetchSyncList, changeSyncPage, 
                     triggerWencaiSync, triggerSingleSync, stopSync,
@@ -967,7 +1171,8 @@
                     // Logs
                     logs, logsPagination, fetchLogs, changeLogPage,
                     // Utils
-                    formatTime, formatDate, openTestTool
+                    formatTime, formatDate, openTestTool, showTaskDetails,
+                    getStatusColor, getStatusIcon
                 };
             }
         }).mount('#app');

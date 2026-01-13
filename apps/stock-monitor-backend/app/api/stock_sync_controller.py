@@ -6,8 +6,8 @@
 """
 
 from typing import Dict, Any, Optional, List
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from datetime import datetime, date
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, Path
 from pydantic import BaseModel
 from loguru import logger
 
@@ -245,5 +245,115 @@ async def calculate_single(
              return BaseResponse(success=False, message=result.get("error", "计算失败"), data=None)
     except Exception as e:
         logger.error(f"Single calculation error for {stock_code}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 新增GET端点（按日期和批次） ====================
+
+@router.get("/csv/{sync_date}/{batch_id}", response_model=BaseResponse, summary="CSV数据同步（按日期）")
+async def sync_csv_by_date(
+    sync_date: str = Path(..., description="同步日期 (YYYY-MM-DD)"),
+    batch_id: int = Path(..., description="批次ID"),
+    service: StockSyncService = Depends(get_stock_sync_service)
+):
+    """
+    按日期同步CSV数据到数据库
+    - 检测缺失的日期
+    - 同步缺失日期的数据
+    """
+    try:
+        # 解析日期
+        target_date = datetime.strptime(sync_date, "%Y-%m-%d").date()
+        
+        # 执行同步
+        result = await service.sync_csv_to_db(
+            batch_id=batch_id,
+            days=250,
+            end_date_str=sync_date,
+            stock_codes=None
+        )
+        
+        if result["success"]:
+            return BaseResponse(
+                success=True,
+                message=f"CSV数据同步完成，日期: {sync_date}",
+                data=result["data"]
+            )
+        else:
+            return BaseResponse(
+                success=False,
+                message=result.get("message", "CSV数据同步失败"),
+                data=None
+            )
+    except Exception as e:
+        logger.error(f"CSV同步API异常: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/tushare/{sync_date}/{batch_id}", response_model=BaseResponse, summary="Tushare数据同步（按日期）")
+async def sync_tushare_by_date(
+    sync_date: str = Path(..., description="同步日期 (YYYY-MM-DD)"),
+    batch_id: int = Path(..., description="批次ID"),
+    service: StockSyncService = Depends(get_stock_sync_service)
+):
+    """
+    按日期从Tushare同步数据
+    - 从CSV最后一行或数据库读取最新日期
+    - 检测缺失的日期
+    - 从Tushare获取缺失日期的数据
+    - 追加到CSV文件
+    - 同步到数据库
+    """
+    try:
+        # 解析日期
+        target_date = datetime.strptime(sync_date, "%Y-%m-%d").date()
+        
+        # 执行同步
+        result = await service.sync_tushare_increment(
+            batch_id=batch_id,
+            start_date_str=sync_date,
+            stock_codes=None
+        )
+        
+        if result["success"]:
+            return BaseResponse(
+                success=True,
+                message=f"Tushare数据同步完成，日期: {sync_date}",
+                data=result["data"]
+            )
+        else:
+            return BaseResponse(
+                success=False,
+                message=result.get("message", "Tushare数据同步失败"),
+                data=None
+            )
+    except Exception as e:
+        logger.error(f"Tushare同步API异常: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/wencai/{sync_date}/{batch_id}", response_model=BaseResponse, summary="问财股票数据同步（按日期）")
+async def sync_wencai_by_date(
+    sync_date: str = Path(..., description="同步日期 (YYYY-MM-DD)"),
+    batch_id: int = Path(..., description="批次ID"),
+    service: StockSyncService = Depends(get_stock_sync_service)
+):
+    """
+    按日期同步问财股票数据
+    """
+    try:
+        # 解析日期
+        target_date = datetime.strptime(sync_date, "%Y-%m-%d").date()
+        
+        # 从wencai_stocks表获取股票代码并批量同步
+        result = await service.sync_wencai_stocks_to_db()
+        
+        return BaseResponse(
+            success=True,
+            message=f"问财股票数据同步完成，日期: {sync_date}",
+            data=result
+        )
+    except Exception as e:
+        logger.error(f"问财同步API异常: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 

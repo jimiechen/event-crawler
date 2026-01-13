@@ -92,3 +92,16 @@ class CrawlerResultRepository(BaseRepository[CrawlerResult]):
         except Exception as e:
             logger.error(f"根据目标ID查找结果失败: {e}")
             raise
+    
+    async def find_all(self, limit: int = 100) -> List[CrawlerResult]:
+        """获取所有结果"""
+        try:
+            query = select(CrawlerResult)\
+                .order_by(desc(CrawlerResult.crawled_at))\
+                .limit(limit)
+                
+            result = await self.session.execute(query)
+            return result.scalars().all()
+        except Exception as e:
+            logger.error(f"获取所有结果失败: {e}")
+            raise

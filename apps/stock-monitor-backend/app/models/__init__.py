@@ -17,6 +17,9 @@ from .volume_analysis import VolumeAnalysisResult, RuleCalculationLog, AlertReco
 from .scheduled_task import ScheduledTask
 from .automation import AutomationConfig, AutomationTask, AutomationLog
 from .crawler import CrawlerTarget, CrawlerResult, CrawlerLoginStatus
+from .platform import PlatformConfig, PlatformSession
+from .generic_task import GenericTask
+from .task_execution_detail import TaskExecutionDetail
 
 __all__ = [
     "Base",
@@ -47,5 +50,9 @@ __all__ = [
     "PatternStockPool",
     "CrawlerTarget",
     "CrawlerResult",
-    "CrawlerLoginStatus"
+    "CrawlerLoginStatus",
+    "PlatformConfig",
+    "PlatformSession",
+    "GenericTask",
+    "TaskExecutionDetail"
 ]

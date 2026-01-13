@@ -1,52 +1,52 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+应用启动脚本
+使用方法: python3 run.py [--reload] [--host 0.0.0.0] [--port 8000]
+"""
+
+import uvicorn
+import argparse
 import os
 import sys
-import uvicorn
 
-# 确保当前目录在 sys.path 中
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 添加项目根目录到Python路径
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-# 尝试导入 settings，如果失败则使用默认值
-try:
-    from app.config.settings import get_settings
+from app.config.settings import get_settings
+
+def main():
+    parser = argparse.ArgumentParser(description="Stock Monitor Backend Server")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    parser.add_argument("--host", help="Bind socket to this host")
+    parser.add_argument("--port", type=int, help="Bind socket to this port")
+    parser.add_argument("--env", help="Environment (development/production)")
+    
+    args = parser.parse_args()
+    
     settings = get_settings()
-    PORT = settings.port
-    WORKERS = settings.workers
-    LOG_LEVEL = settings.log_level.lower()
-    IS_PROD = settings.is_production()
-except ImportError:
-    print("Warning: Could not import settings, using defaults")
-    PORT = 8000
-    WORKERS = 1
-    LOG_LEVEL = "info"
-    IS_PROD = False
+    
+    # 优先使用命令行参数，其次使用配置文件
+    host = args.host or settings.host
+    port = args.port or settings.port
+    
+    # reload设置: 命令行参数 > 配置环境 > 默认False
+    reload = args.reload
+    
+    # 环境变量覆盖
+    if args.env:
+        os.environ["ENVIRONMENT"] = args.env
+
+    print(f"🚀 Starting server on http://{host}:{port} (reload={reload})...")
+    
+    uvicorn.run(
+        "app.main:app",
+        host=host,
+        port=port,
+        reload=reload,
+        log_level=settings.log_level.lower(),
+        access_log=True
+    )
 
 if __name__ == "__main__":
-    # 配置 Uvicorn 参数
-    uvicorn_config = {
-        "app": "app.main:app",
-        "host": "0.0.0.0",
-        "port": PORT,
-        "log_level": LOG_LEVEL,
-        "access_log": True,
-    }
-
-    if IS_PROD:
-        uvicorn_config.update({
-            "workers": WORKERS,
-            "reload": False,
-        })
-    else:
-        # 开发环境配置 reload
-        # 监控 app 目录的变化
-        reload_dirs = [os.path.join(os.path.dirname(os.path.abspath(__file__)), "app")]
-        uvicorn_config.update({
-            "reload": True,
-            "reload_dirs": reload_dirs,
-        })
-
-    print(f"🚀 Starting Stock Monitor Backend on port {PORT}...")
-    print(f"🔧 Config: {uvicorn_config}")
-    
-    # 使用 sys.executable 启动 uvicorn 以确保使用相同的 python 环境
-    # 但 uvicorn.run 在代码中直接调用通常更好，除非为了规避某些 import 问题
-    uvicorn.run(**uvicorn_config)
+    main()

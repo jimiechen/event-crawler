@@ -35,6 +35,136 @@ class StockSyncService:
         self.log_repository = SyncLogRepository(db_manager)
         self.pathway_engine = None
         self.pathway_enabled = get_settings().pathway_enabled
+    
+    def _get_csv_latest_date(self, code: str) -> Optional[date]:
+        """
+        获取CSV文件中的最新日期
+        
+        Args:
+            code: 股票代码
+        
+        Returns:
+            CSV文件中的最新日期，如果文件不存在或为空则返回None
+        """
+        csv_path = self._find_csv_path(code)
+        if not csv_path or not os.path.exists(csv_path):
+            return None
+        
+        try:
+            df = pd.read_csv(csv_path)
+            if df.empty or 'trade_date' not in df.columns:
+                return None
+            
+            # Normalize date column
+            df['trade_date'] = pd.to_datetime(df['trade_date'], format='%Y%m%d', errors='coerce').dt.date
+            
+            # 返回最新日期
+            return df['trade_date'].max()
+        except Exception as e:
+            logger.warning(f"读取CSV最新日期失败 {code}: {e}")
+            return None
+    
+    async def _get_db_latest_date(self, code: str) -> Optional[date]:
+        """
+        获取数据库中的最新日期
+        
+        Args:
+            code: 股票代码
+        
+        Returns:
+            数据库中的最新日期，如果没有数据则返回None
+        """
+        async with self.db_manager.get_session() as session:
+            try:
+                stmt = select(StockDaily.trade_date).where(
+                    StockDaily.code == code
+                ).order_by(StockDaily.trade_date.desc()).limit(1)
+                
+                result = await session.execute(stmt)
+                row = result.scalar_one_or_none()
+                
+                return row.trade_date if row else None
+            except Exception as e:
+                logger.warning(f"读取数据库最新日期失败 {code}: {e}")
+                return None
+    
+    def _detect_missing_dates(self, code: str, csv_latest: Optional[date], db_latest: Optional[date]) -> List[date]:
+        """
+        检测缺失的日期
+        
+        Args:
+            code: 股票代码
+            csv_latest: CSV文件中的最新日期
+            db_latest: 数据库中的最新日期
+        
+        Returns:
+            缺失的日期列表
+        """
+        # 确定起始日期（取较晚者）
+        start_date = None
+        if csv_latest and db_latest:
+            start_date = max(csv_latest, db_latest)
+        elif csv_latest:
+            start_date = csv_latest
+        elif db_latest:
+            start_date = db_latest
+        else:
+            return []
+        
+        if not start_date:
+            return []
+        
+        # 获取交易日历（简单实现：从start_date到今天的所有工作日）
+        end_date = date.today()
+        missing_dates = []
+        
+        current_date = start_date
+        while current_date <= end_date:
+            # 跳过周末
+            if current_date.weekday() < 5:  # 周一到周五
+                missing_dates.append(current_date)
+            
+            # 移动到下一天
+            current_date += timedelta(days=1)
+        
+        return missing_dates
+    
+    def _append_to_csv(self, csv_path: str, new_data: pd.DataFrame) -> int:
+        """
+        追加数据到CSV文件
+        
+        Args:
+            csv_path: CSV文件路径
+            new_data: 新数据DataFrame
+        
+        Returns:
+            追加的行数
+        """
+        try:
+            # 读取现有数据
+            if os.path.exists(csv_path):
+                existing_df = pd.read_csv(csv_path)
+            else:
+                existing_df = pd.DataFrame()
+            
+            # 合并数据
+            merged_df = pd.concat([existing_df, new_data], ignore_index=True)
+            
+            # 去重（按日期）
+            if 'trade_date' in merged_df.columns:
+                merged_df.drop_duplicates(subset=['trade_date'], keep='last', inplace=True)
+            
+            # 排序
+            if 'trade_date' in merged_df.columns:
+                merged_df.sort_values('trade_date', inplace=True)
+            
+            # 保存回CSV
+            merged_df.to_csv(csv_path, index=False)
+            
+            return len(new_data)
+        except Exception as e:
+            logger.error(f"追加数据到CSV失败: {e}")
+            return 0
 
     async def fetch_from_akshare(self, code: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
         """
@@ -782,6 +912,57 @@ class StockSyncService:
             "error_count": error_count,
             "errors": errors[:100] # Limit response size
         }
+    
+    async def sync_wencai_stocks_to_db(self) -> Dict[str, Any]:
+        """
+        批量同步问财股票到数据库
+        从wencai_stocks表获取所有股票代码并批量同步
+        
+        Returns:
+            同步结果
+        """
+        try:
+            from sqlalchemy import select, text
+            
+            # 获取所有问财股票代码
+            async with self.db_manager.get_session() as session:
+                query = text("SELECT DISTINCT stock_code FROM wencai_stocks")
+                result = await session.execute(query)
+                codes = [row[0] for row in result.fetchall()]
+            
+            logger.info(f"开始同步 {len(codes)} 只问财股票到数据库")
+            
+            success_count = 0
+            failed_count = 0
+            
+            for code in codes:
+                try:
+                    # 同步单只股票（使用sync_csv_single方法）
+                    result = await self.sync_csv_single(code, days=250, end_date_str=datetime.now().strftime("%Y-%m-%d"))
+                    
+                    if result["success"]:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+                        logger.warning(f"同步 {code} 失败: {result.get('message', 'Unknown error')}")
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"同步 {code} 异常: {e}")
+            
+            logger.info(f"问财股票同步完成: 成功 {success_count}, 失败 {failed_count}")
+            
+            return {
+                "success": True,
+                "total_count": len(codes),
+                "success_count": success_count,
+                "failed_count": failed_count
+            }
+        except Exception as e:
+            logger.error(f"批量同步问财股票失败: {e}")
+            return {
+                "success": False,
+                "message": str(e)
+            }
 
 
 

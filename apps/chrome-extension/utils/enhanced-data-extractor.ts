@@ -5,7 +5,7 @@
 
 import { ErrorHandler, ErrorType, ErrorSeverity } from './error-handler';
 import { TongHuaShunExtractor, StockInfo, StockData, StockDataResponse } from './tonghuashun-extractor';
-import { RetryMechanism, RetryConfig } from './retry-mechanism';
+import { RetryMechanism, RetryConfig, RetryAttempt } from './retry-mechanism';
 import { 
   DataDeduplicationOptimizer, 
   DeduplicationConfig, 
@@ -25,9 +25,16 @@ export interface ExtractionConfig {
   maxConcurrentRequests: number;
   enableProgressCallback: boolean;
   progressCallback?: (progress: number, message: string) => void;
+  // DOM等待时间
+  domStableWaitTime?: number;
   // 去重配置
   enableAdvancedDeduplication: boolean;
   deduplicationConfig?: Partial<DeduplicationConfig>;
+}
+
+// 增强的股票数据响应接口
+interface EnhancedStockDataResponse extends StockDataResponse {
+  retryHistory?: RetryAttempt[];
 }
 
 // 抓取结果接口
@@ -268,7 +275,10 @@ export class EnhancedDataExtractor {
           finalConfig.deduplicationConfig
         );
         
-        allStockData = deduplicationResult.deduplicated.map(({ timestamp, source, qualityScore, ...data }) => data);
+        allStockData = deduplicationResult.deduplicated.map(({ timestamp, source, qualityScore, ...data }) => ({
+          ...data,
+          timestamp: new Date(timestamp).toISOString()
+        }));
         
         console.log(`股票数据高级去重完成: ${deduplicationResult.duplicatesRemoved} 个重复项被移除, ${deduplicationResult.qualityImproved} 个项目质量提升`);
       }
@@ -311,7 +321,7 @@ export class EnhancedDataExtractor {
   /**
    * 等待DOM稳定
    */
-  private static async waitForDOMStable(timeout = 2000): Promise<void> {
+  public static async waitForDOMStable(timeout = 2000): Promise<void> {
     return new Promise((resolve) => {
       let timer: NodeJS.Timeout;
       
@@ -624,7 +634,7 @@ export class EnhancedDataExtractor {
   private static async fetchBatchWithRetry(
     codes: string[], 
     config: ExtractionConfig
-  ): Promise<StockDataResponse> {
+  ): Promise<EnhancedStockDataResponse> {
     // 创建API专用重试配置
     const retryConfig = RetryMechanism.createAPIRetryConfig({
       maxRetries: config.maxRetries,

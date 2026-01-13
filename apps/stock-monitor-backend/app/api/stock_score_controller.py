@@ -4,17 +4,56 @@
 股票评分结果查询接口
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Path
 from typing import Optional, List
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
+from loguru import logger
 
-from app.database import get_db_session
+from app.database import get_db_session, db_manager
 from app.models.stock_daily import StockScoreResult
 from app.api.stock_daily_schemas import StockScoreResultListResponse, StockScoreResultResponse
+from app.api.schemas import BaseResponse
+from app.services.rule_engine_service import RuleEngineService
+from app.services.pathway_engine import PathwayVolumePriceEngine
+from datetime import datetime
 
 router = APIRouter(prefix="/api/v1/scores", tags=["评分结果"])
+
+@router.post("/calculate/{date_str}", response_model=BaseResponse, summary="触发每日评分计算")
+async def calculate_daily_scores(
+    date_str: str = Path(..., description="日期 YYYY-MM-DD"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    触发指定日期的 Pathway 积分计算
+    """
+    try:
+        if date_str == "today":
+            target_date = datetime.now().date()
+        else:
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            except ValueError:
+                return BaseResponse(success=False, message="日期格式错误，应为 YYYY-MM-DD 或 today")
+
+        engine = PathwayVolumePriceEngine(db)
+        
+        # 1. 运行计算
+        logger.info(f"开始计算 {target_date} 的 Pathway 积分")
+        results = await engine.calculate_daily_scores(target_date)
+        
+        # 2. (可选) 触发告警检查
+        # alerts = await engine.check_anomalies(results)
+        
+        return BaseResponse(
+            data={"count": len(results)}, 
+            message=f"计算完成，共生成 {len(results)} 条评分记录"
+        )
+    except Exception as e:
+        logger.error(f"评分计算失败: {e}", exc_info=True)
+        return BaseResponse(success=False, message=f"计算失败: {str(e)}")
 
 @router.get("/latest", summary="查询评分结果", response_model=StockScoreResultListResponse)
 async def get_latest_scores(
@@ -101,3 +140,75 @@ async def get_stock_score_history(
         data=[StockScoreResultResponse.model_validate(item) for item in data],
         total=len(data)
     )
+
+
+# ==================== 新增GET端点（按日期） ====================
+
+def get_rule_engine_service() -> RuleEngineService:
+    return RuleEngineService(db_manager)
+
+
+@router.get("/calculate/{calculate_date}/{batch_id}", response_model=BaseResponse, summary="按日期计算评分")
+async def calculate_scores_by_date(
+    calculate_date: str = Path(..., description="计算日期 (YYYY-MM-DD)"),
+    batch_id: int = Path(..., description="批次ID"),
+    db: AsyncSession = Depends(get_db_session),
+    service: RuleEngineService = Depends(get_rule_engine_service)
+):
+    """
+    按日期计算所有股票的评分
+    """
+    try:
+        from datetime import datetime
+        target_date = datetime.strptime(calculate_date, "%Y-%m-%d").date()
+        
+        result = await service.calculate_daily_scores(target_date=target_date, force=True)
+        
+        if result["status"] == "success":
+            return BaseResponse(
+                success=True,
+                message=f"评分计算完成，日期: {calculate_date}",
+                data=result
+            )
+        else:
+            return BaseResponse(
+                success=False,
+                message=result.get("error", "计算失败"),
+                data=None
+            )
+    except Exception as e:
+        logger.error(f"按日期计算评分失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/calculate/{calculate_date}/{code}", response_model=BaseResponse, summary="按日期计算单只股票评分")
+async def calculate_single_stock_by_date(
+    calculate_date: str = Path(..., description="计算日期 (YYYY-MM-DD)"),
+    code: str = Path(..., description="股票代码"),
+    db: AsyncSession = Depends(get_db_session),
+    service: RuleEngineService = Depends(get_rule_engine_service)
+):
+    """
+    按日期计算单只股票的评分
+    """
+    try:
+        from datetime import datetime
+        target_date = datetime.strptime(calculate_date, "%Y-%m-%d").date()
+        
+        result = await service.calculate_daily_scores(target_date=target_date, force=True, stock_code=code)
+        
+        if result["status"] == "success":
+            return BaseResponse(
+                success=True,
+                message=f"股票 {code} 评分计算完成，日期: {calculate_date}",
+                data=result
+            )
+        else:
+            return BaseResponse(
+                success=False,
+                message=result.get("error", "计算失败"),
+                data=None
+            )
+    except Exception as e:
+        logger.error(f"按日期计算单只股票评分失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

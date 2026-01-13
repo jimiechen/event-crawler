@@ -73,9 +73,9 @@ class Settings(BaseSettings):
     log_compression: str = Field(default="gz", description="日志压缩格式")
     
     # CORS配置
-    cors_origins: List[str] = Field(default=["*"], description="允许的跨域源")
+    cors_origins: List[str] = Field(default=["http://localhost:8000", "http://127.0.0.1:8000", "http://0.0.0.0:8000"], description="允许的跨域源")
     cors_allow_credentials: bool = Field(default=True, description="允许携带凭证")
-    cors_allow_methods: List[str] = Field(default=["*"], description="允许的HTTP方法")
+    cors_allow_methods: List[str] = Field(default=["GET", "POST", "PUT", "DELETE", "OPTIONS"], description="允许的HTTP方法")
     cors_allow_headers: List[str] = Field(default=["*"], description="允许的HTTP头")
     
     # 信任主机配置

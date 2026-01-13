@@ -5,11 +5,13 @@
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as datetime_date
+from typing import Dict, Any, List, Optional
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
+import httpx
 
 from app.database import db_manager
 from app.services.pattern_analysis_service import PatternAnalysisService
@@ -21,6 +23,8 @@ class SchedulerService:
         self.scheduler = AsyncIOScheduler()
         self.db_manager = db_manager
         self.is_running = False
+        self.api_base_url = "http://localhost:8000"
+        self.http_client = None
         
     def start(self):
         """启动调度器"""
@@ -57,11 +61,79 @@ class SchedulerService:
             replace_existing=True
         )
         
+        # 4. 【新增】每日问财爬虫（17:00）
+        self.scheduler.add_job(
+            self.run_wencai_daily_crawler,
+            CronTrigger(hour=17, minute=0),
+            id="wencai_daily_crawler",
+            name="每日问财爬虫",
+            replace_existing=True
+        )
+        
         self.scheduler.start()
         self.is_running = True
         logger.info("Scheduler started successfully")
+        
+        # Load generic tasks
+        asyncio.create_task(self.refresh_all_tasks())
 
-        # logger.info("Starting scheduler...")
+    async def refresh_all_tasks(self):
+        """刷新所有通用任务"""
+        from app.services.generic_task_service import GenericTaskService
+        from app.services.task_executor import task_executor
+        
+        async with self.db_manager.get_session() as session:
+            service = GenericTaskService(session)
+            tasks = await service.get_active_tasks()
+            
+            logger.info(f"Loading {len(tasks)} generic tasks from DB...")
+            
+            for task in tasks:
+                self._schedule_generic_task(task)
+
+    def _schedule_generic_task(self, task):
+        from app.services.task_executor import task_executor
+        
+        job_id = f"generic_task_{task.id}"
+        
+        try:
+            trigger = CronTrigger.from_crontab(task.cron_expression)
+            self.scheduler.add_job(
+                task_executor.execute_generic_task,
+                trigger,
+                args=[task.id],
+                id=job_id,
+                name=task.name,
+                replace_existing=True
+            )
+            logger.info(f"Scheduled generic task {task.id}: {task.name} ({task.cron_expression})")
+        except Exception as e:
+            logger.error(f"Failed to schedule task {task.id}: {e}")
+
+    async def refresh_task(self, task_id: int):
+        from app.services.generic_task_service import GenericTaskService
+        
+        async with self.db_manager.get_session() as session:
+            service = GenericTaskService(session)
+            task = await service.get_generic_task_by_id(task_id)
+            
+            job_id = f"generic_task_{task_id}"
+            
+            if not task or not task.is_active:
+                if self.scheduler.get_job(job_id):
+                    self.scheduler.remove_job(job_id)
+                    logger.info(f"Removed generic task {task_id}")
+                return
+            
+            self._schedule_generic_task(task)
+
+    def remove_task(self, task_id: int):
+        job_id = f"generic_task_{task_id}"
+        if self.scheduler.get_job(job_id):
+            self.scheduler.remove_job(job_id)
+            logger.info(f"Removed generic task {task_id}")
+
+    # Legacy methods below
         
         # # 1. 每日全量爬虫任务 (17:00)
         # self.scheduler.add_job(
@@ -100,6 +172,28 @@ class SchedulerService:
             self.scheduler.shutdown()
             self.is_running = False
             logger.info("Scheduler shutdown")
+        
+        # 关闭HTTP客户端
+        if self.http_client:
+            asyncio.create_task(self.http_client.aclose())
+    
+    async def _get_http_client(self) -> httpx.AsyncClient:
+        """获取HTTP客户端"""
+        if self.http_client is None or self.http_client.is_closed:
+            self.http_client = httpx.AsyncClient(timeout=60.0)
+        return self.http_client
+    
+    async def _call_api(self, endpoint: str, params: dict = None) -> dict:
+        """调用API端点"""
+        client = await self._get_http_client()
+        url = f"{self.api_base_url}{endpoint}"
+        try:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            logger.error(f"API调用失败: {endpoint}, 错误: {e}")
+            raise
 
     async def run_crawler_all(self):
         """执行全量爬虫任务"""
@@ -229,15 +323,22 @@ class SchedulerService:
         """盘后积分更新任务"""
         logger.info("盘后任务: 开始积分更新")
         try:
-            # 1. 同步最新日线数据
-            await self._sync_latest_daily_data()
+            today_str = datetime_date.today().strftime("%Y-%m-%d")
             
-            # 2. 执行Pathway分析
-            from app.services.volume_analysis_service import VolumeAnalysisService
-            await VolumeAnalysisService.analyze_all_stocks(batch_size=10)
+            # 1. 同步最新日线数据（调用API）
+            endpoint = f"/api/v1/stock/sync/tushare/{today_str}/0"
+            sync_result = await self._call_api(endpoint)
+            logger.info(f"数据同步完成: {sync_result}")
             
-            # 3. 计算排名
-            await self._calculate_rankings()
+            # 2. 执行Pathway分析（调用API）
+            endpoint = f"/api/v1/scores/calculate/{today_str}/0"
+            score_result = await self._call_api(endpoint)
+            logger.info(f"评分计算完成: {score_result}")
+            
+            # 3. 计算排名（调用API）
+            endpoint = f"/api/v1/ranking/calculate/{today_str}"
+            ranking_result = await self._call_api(endpoint)
+            logger.info(f"排名计算完成: {ranking_result}")
             
             logger.info("盘后任务完成")
         except Exception as e:
@@ -296,6 +397,90 @@ class SchedulerService:
         
         await self.db_manager.session.commit()
         logger.info("排名计算完成")
+    
+    async def run_wencai_daily_crawler(self):
+        """每日问财爬虫任务（爬取前一天的数据）"""
+        logger.info("定时任务: 开始每日问财爬虫")
+        
+        try:
+            # 获取昨天的日期
+            yesterday = datetime_date.today() - timedelta(days=1)
+            yesterday_str = yesterday.strftime("%Y-%m-%d")
+            
+            # 调用API端点
+            endpoint = f"/api/v1/wencai/crawler/{yesterday_str}/1"
+            result = await self._call_api(endpoint)
+            
+            logger.info(f"每日问财爬虫完成: {result}")
+            
+        except Exception as e:
+            logger.error(f"每日问财爬虫失败: {e}")
+    
+    async def run_wencai_date_range_crawler(self, start_date: datetime_date, end_date: datetime_date) -> Dict[str, Any]:
+        """
+        执行日期范围爬虫任务
+        
+        Args:
+            start_date: 开始日期
+            end_date: 结束日期
+        
+        Returns:
+            爬取结果统计
+        """
+        logger.info(f"开始日期范围爬虫: {start_date} 到 {end_date}")
+        
+        # 生成日期列表
+        date_list = []
+        current_date = start_date
+        
+        while current_date <= end_date:
+            # 跳过周末
+            if current_date.weekday() < 5:  # 周一到周五
+                date_list.append(current_date)
+                current_date += timedelta(days=1)
+        
+        logger.info(f"共 {len(date_list)} 个交易日需要爬取")
+        
+        # 批量爬取
+        from app.crawler.wencai_crawler import WencaiCrawler
+        
+        success_count = 0
+        failed_count = 0
+        
+        for crawl_date in date_list:
+            try:
+                async with self.db_manager.get_session() as session:
+                    crawler = WencaiCrawler(session)
+                    
+                    # 使用新的日期参数方式执行爬取
+                    logger.info(f"执行爬虫查询，日期: {crawl_date}")
+                    
+                    # 执行爬取（使用target_date自动生成查询条件）
+                    result = await crawler.fetch_and_parse(
+                        query=None,
+                        batch_name=f"AutoCrawl_{crawl_date.strftime('%Y%m%d')}",
+                        target_stock_code=None,
+                        target_date=crawl_date
+                    )
+                    
+                    if result.get("status") == "completed":
+                        success_count += 1
+                        logger.info(f"✅ {crawl_date} 爬取成功: {result.get('success')} 条")
+                    else:
+                        failed_count += 1
+                        logger.error(f"❌ {crawl_date} 爬取失败: {result.get('error')}")
+            
+            except Exception as e:
+                failed_count += 1
+                logger.error(f"❌ {crawl_date} 爬取异常: {e}")
+        
+        logger.info(f"日期范围爬虫完成: 成功 {success_count}, 失败 {failed_count}")
+        
+        return {
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "total_count": len(date_list)
+        }
     
     async def run_realtime_monitor_check(self):
         """盘中实时监控检查（14:00-15:00）"""

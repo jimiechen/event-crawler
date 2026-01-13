@@ -106,6 +106,13 @@ try:
 except ImportError as e:
     logger.warning(f"未找到股票同步控制器，跳过注册: {e}")
 
+# 注册排名控制器
+try:
+    from . import ranking_controller
+    app.include_router(ranking_controller.router)
+except ImportError as e:
+    logger.warning(f"未找到排名控制器，跳过注册: {e}")
+
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

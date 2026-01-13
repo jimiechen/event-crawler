@@ -23,6 +23,9 @@ class CrawlerTarget(BaseModel):
     
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment="创建时间")
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
+    
+    class Config:
+        from_attributes = True
 
 class CrawlerResult(BaseModel):
     """爬虫结果表"""
@@ -44,6 +47,9 @@ class CrawlerResult(BaseModel):
     data_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, comment="原始数据ID")
     
     crawled_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now, comment="爬取时间")
+    
+    class Config:
+        from_attributes = True
 
 class CrawlerLoginStatus(BaseModel):
     """爬虫登录状态表"""

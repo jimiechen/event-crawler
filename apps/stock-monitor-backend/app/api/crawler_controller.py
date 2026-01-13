@@ -8,6 +8,8 @@ from ..services.sse_service import sse_service
 from ..database import get_db_session
 from ..repositories.crawler_repository import CrawlerTargetRepository, CrawlerResultRepository
 from ..models.crawler import CrawlerLoginStatus
+from ..services.cookie_service import CookieService
+from ..services.crawler_service import CrawlerService
 from loguru import logger
 import sys
 import os
@@ -101,6 +103,9 @@ class ResponseModel(BaseModel):
     message: str
     data: Optional[Any] = None
 
+class RealheadFetchRequest(BaseModel):
+    stock_codes: Optional[List[str]] = Field(None, description="股票代码列表，为空则抓取自选股")
+
 # --- In-Memory State ---
 
 # Store latest status in memory (or Redis if needed)
@@ -113,7 +118,32 @@ async def sse_endpoint(request: Request):
     """
     SSE endpoint for real-time updates
     """
+    # Trigger reload
     return await sse_service.subscribe(request)
+
+@router.post("/check-login", response_model=ResponseModel)
+async def check_login(
+    request: CheckLoginRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    检查登录状态
+    """
+    try:
+        service = CrawlerService(db)
+        result = await service.check_login_status(
+            platform=request.platform,
+            url=request.url,
+            nickname_xpath=request.nickname_xpath
+        )
+        return ResponseModel(
+            success=True,
+            message="Check login status completed",
+            data=result
+        )
+    except Exception as e:
+        logger.error(f"Check login status failed: {e}")
+        return ResponseModel(success=False, message=str(e))
 
 @router.post("/parse_html")
 async def parse_html(
@@ -266,3 +296,247 @@ async def get_debug_logs():
     Get recent debug logs
     """
     return {"success": True, "data": debug_logs}
+
+@router.post("/realhead/fetch", response_model=ResponseModel)
+async def fetch_realhead_data(
+    request: RealheadFetchRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    抓取 realhead 数据
+    """
+    try:
+        from app.crawler.realhead_crawler import RealheadCrawler
+        
+        crawler = RealheadCrawler(db)
+        result = await crawler.crawl(request.stock_codes)
+        
+        # 保存到数据库
+        if result.get('data'):
+            stock_service = StockService(db)
+            for stock_data in result['data']:
+                try:
+                    await stock_service.create_or_update_stock_info({
+                        'stock_code': stock_data.get('stock_code'),
+                        'stock_name': stock_data.get('stock_name'),
+                        'market': 'SZ' if stock_data.get('stock_code', '').startswith(('0', '2', '3')) else 'SH'
+                    })
+                    
+                    # 保存到 tonghuashun_stocks 表
+                    await stock_service.submit_stock_data([stock_data])
+                    
+                except Exception as e:
+                    logger.error(f"保存股票数据失败: {e}")
+                    continue
+        
+        return ResponseModel(
+            success=True,
+            message=f"抓取成功，共 {result.get('count', 0)} 条数据",
+            data=result
+        )
+        
+    except Exception as e:
+        logger.error(f"抓取失败: {e}")
+        return ResponseModel(
+            success=False,
+            message=f"抓取失败: {str(e)}"
+        )
+
+# --- Targets Endpoints ---
+@router.get("/targets", response_model=ResponseModel)
+async def get_targets(
+    platform: Optional[str] = Query(None, description="平台筛选"),
+    name: Optional[str] = Query(None, description="名称筛选"),
+    url: Optional[str] = Query(None, description="URL筛选"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    获取爬虫目标列表
+    """
+    try:
+        repo = CrawlerTargetRepository(db)
+        targets = await repo.find_by_filters(platform=platform, name=name, url=url)
+        return ResponseModel(
+            success=True,
+            message="Success",
+            data=[CrawlerTargetResponse.model_validate(t) for t in targets]
+        )
+    except Exception as e:
+        logger.error(f"获取目标列表失败: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+@router.post("/targets", response_model=ResponseModel)
+async def create_target(
+    request: CrawlerTargetCreate,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    创建爬虫目标
+    """
+    try:
+        repo = CrawlerTargetRepository(db)
+        new_target = CrawlerTarget(
+            platform=request.platform,
+            name=request.name,
+            url=request.url,
+            target_type=request.target_type,
+            is_active=request.is_active,
+            description=request.description,
+            xpath_config=request.xpath_config
+        )
+        await repo.create(new_target)
+        return ResponseModel(
+            success=True,
+            message="Target created successfully",
+            data=CrawlerTargetResponse.model_validate(new_target)
+        )
+    except Exception as e:
+        logger.error(f"创建目标失败: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+@router.put("/targets/{target_id}", response_model=ResponseModel)
+async def update_target(
+    target_id: int,
+    request: CrawlerTargetUpdate,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    更新爬虫目标
+    """
+    try:
+        repo = CrawlerTargetRepository(db)
+        target = await repo.get_by_id(target_id)
+        if not target:
+            return ResponseModel(success=False, message="Target not found")
+        
+        # Update fields
+        if request.platform is not None:
+            target.platform = request.platform
+        if request.name is not None:
+            target.name = request.name
+        if request.url is not None:
+            target.url = request.url
+        if request.target_type is not None:
+            target.target_type = request.target_type
+        if request.is_active is not None:
+            target.is_active = request.is_active
+        if request.description is not None:
+            target.description = request.description
+        if request.xpath_config is not None:
+            target.xpath_config = request.xpath_config
+        
+        await repo.update(target)
+        return ResponseModel(
+            success=True,
+            message="Target updated successfully",
+            data=CrawlerTargetResponse.model_validate(target)
+        )
+    except Exception as e:
+        logger.error(f"更新目标失败: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+@router.delete("/targets/{target_id}", response_model=ResponseModel)
+async def delete_target(
+    target_id: int,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    删除爬虫目标
+    """
+    try:
+        repo = CrawlerTargetRepository(db)
+        success = await repo.delete(target_id)
+        if success:
+            return ResponseModel(success=True, message="Target deleted successfully")
+        return ResponseModel(success=False, message="Target not found")
+    except Exception as e:
+        logger.error(f"删除目标失败: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+@router.post("/targets/{target_id}/toggle", response_model=ResponseModel)
+async def toggle_target_active(
+    target_id: int,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    切换目标激活状态
+    """
+    try:
+        repo = CrawlerTargetRepository(db)
+        target = await repo.get_by_id(target_id)
+        if not target:
+            return ResponseModel(success=False, message="Target not found")
+        
+        target.is_active = not target.is_active
+        await repo.update(target)
+        return ResponseModel(
+            success=True,
+            message=f"Target {'activated' if target.is_active else 'deactivated'} successfully",
+            data=CrawlerTargetResponse.model_validate(target)
+        )
+    except Exception as e:
+        logger.error(f"切换目标状态失败: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+# --- Cookies Endpoints ---
+@router.get("/cookies", response_model=ResponseModel)
+async def get_cookies(
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    获取Cookie列表（兼容旧接口）
+    """
+    try:
+        cookie_service = CookieService(db)
+        cookies = await cookie_service.get_all_cookies()
+        return ResponseModel(
+            success=True,
+            message="Success",
+            data=cookies
+        )
+    except Exception as e:
+        logger.error(f"获取Cookie列表失败: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+# --- Results Endpoints ---
+@router.get("/results", response_model=ResponseModel)
+async def get_results(
+    platform: Optional[str] = Query(None, description="平台筛选"),
+    limit: int = Query(100, description="返回数量限制"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    获取爬虫结果列表
+    """
+    try:
+        repo = CrawlerResultRepository(db)
+        if platform:
+            results = await repo.find_by_platform(platform, limit=limit)
+        else:
+            # Get all results if no platform filter
+            results = await repo.find_all()
+        
+        return ResponseModel(
+            success=True,
+            message="Success",
+            data=[CrawlerResultResponse.model_validate(r) for r in results]
+        )
+    except Exception as e:
+        logger.error(f"获取结果列表失败: {e}")
+        return ResponseModel(success=False, message=str(e))
+
+# --- States Endpoints ---
+@router.get("/states", response_model=ResponseModel)
+async def get_states():
+    """
+    获取爬虫状态列表
+    """
+    try:
+        return ResponseModel(
+            success=True,
+            message="Success",
+            data=crawler_states
+        )
+    except Exception as e:
+        logger.error(f"获取状态列表失败: {e}")
+        return ResponseModel(success=False, message=str(e))

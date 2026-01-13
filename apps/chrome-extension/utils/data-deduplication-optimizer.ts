@@ -261,7 +261,7 @@ export class DataDeduplicationOptimizer {
   /**
    * 选择最佳项目
    */
-  private static selectBestItem<T extends { timestamp: number; qualityScore?: number }>(
+  private static selectBestItem<T extends TimestampedStockInfo | TimestampedStockData>(
     items: T[], 
     config: DeduplicationConfig
   ): T | null {
@@ -280,7 +280,7 @@ export class DataDeduplicationOptimizer {
         );
         
       case 'merge':
-        return this.mergeItems(items as any) as unknown as T;
+        return this.mergeItems(items);
         
       default:
         return items[0];
@@ -304,20 +304,14 @@ export class DataDeduplicationOptimizer {
     // 选择最新的时间戳
     merged.timestamp = Math.max(...items.map(item => item.timestamp));
     
-    // 选择最好的名称（如果是StockInfo）
-    if ('name' in merged) {
-      const bestName = items
-        .filter(item => 'name' in item && item.name && item.name.trim())
-        .reduce((best, current) => {
-          const currentName = (current as any).name;
-          const bestName = (best as any).name;
-          return currentName.length > bestName.length ? current : best;
-        }, base);
-      
-      if ('name' in bestName) {
-        (merged as any).name = (bestName as any).name;
-      }
-    }
+    // 选择最好的名称（长度最长的名称）
+    const bestNameItem = items
+      .filter(item => item.name && item.name.trim())
+      .reduce((best, current) => {
+        return current.name.length > best.name.length ? current : best;
+      }, base);
+    
+    merged.name = bestNameItem.name;
     
     // 重新计算质量评分
     merged.qualityScore = Math.max(...items.map(item => item.qualityScore || 0));

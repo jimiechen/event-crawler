@@ -5,7 +5,7 @@ Ranking Controller
 Provides endpoints for stock score rankings (growth and total).
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, desc
 from typing import List, Optional
@@ -123,11 +123,38 @@ async def get_total_ranking(
             target_date = date.today()
             
         service = RankingService(db)
-        ranking_data = await service.get_total_score_ranking(target_date, limit)
+        ranking_data = await service.get_total_score_ranking(target_date, limit=limit)
         
         return BaseResponse(success=True, message="ok", data=ranking_data)
-
     except Exception as e:
         import logging
         logging.error(f"Error fetching total ranking: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 新增GET端点（按日期） ====================
+
+@router.get("/calculate/{calculate_date}", response_model=BaseResponse, summary="按日期计算排名")
+async def calculate_ranking_by_date(
+    calculate_date: str = Path(..., description="计算日期 (YYYY-MM-DD)"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    按日期计算股票排名
+    """
+    try:
+        from datetime import datetime
+        target_date = datetime.strptime(calculate_date, "%Y-%m-%d").date()
+        
+        service = RankingService(db)
+        ranking_data = await service.get_total_score_ranking(target_date, limit=1000)
+        
+        return BaseResponse(
+            success=True,
+            message=f"排名计算完成，日期: {calculate_date}",
+            data=ranking_data
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"Error calculating ranking: {e}")
         raise HTTPException(status_code=500, detail=str(e))

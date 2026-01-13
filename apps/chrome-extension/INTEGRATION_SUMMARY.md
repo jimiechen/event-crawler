@@ -19,7 +19,7 @@
 - ✅ 更新了前端API调用，使用正确的后端端点
 - ✅ 实现了自动数据推送功能
 - ✅ 添加了数据去重和过滤逻辑
-- ✅ 确保监控到的同花顺数据推送到 http://localhost:8001
+- ✅ 确保监控到的同花顺数据推送到 http://localhost:8000
 
 ### 4. 数据清理功能
 - ✅ 实现了清空测试数据的功能
@@ -37,13 +37,13 @@
 ### API端点测试
 1. **清空测试数据端点** - ✅ 正常工作
    ```bash
-   curl -X DELETE http://localhost:8001/api/v1/stocks/test-data/clear
+   curl -X DELETE http://localhost:8000/api/v1/stocks/test-data/clear
    # 返回: 成功删除了6条股票数据，4条去重日志，0条同花顺数据
    ```
 
 2. **同花顺数据接收端点** - ✅ 正常工作
    ```bash
-   curl -X POST http://localhost:8001/api/v1/stocks/tonghuashun/raw-data \
+   curl -X POST http://localhost:8000/api/v1/stocks/tonghuashun/raw-data \
      -H "Content-Type: application/json" \
      -d '{"url": "https://t.10jqka.com.cn/newcircle/user/userPersonal/?from=finance&tab=zx", "method": "GET", "response": "test data"}'
    # 返回: 同花顺数据接收成功
@@ -71,7 +71,7 @@
 ## 运行状态
 
 ### 后端服务
-- ✅ 运行在 http://localhost:8001
+- ✅ 运行在 http://localhost:8000
 - ✅ 所有API端点正常响应
 
 ### 前端服务

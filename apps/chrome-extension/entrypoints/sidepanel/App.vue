@@ -203,8 +203,19 @@
             <MonitoringStatusPanel />
           </div>
         </div>
-        
         <SystemStatus />
+      </div>
+
+      <!-- 会话管理Tab -->
+      <div v-if="activeTab === 'session'" class="tab-content">
+        <div class="section">
+          <div class="config-card">
+            <div class="section-header">
+              <h3>平台会话管理</h3>
+            </div>
+            <SessionManager />
+          </div>
+        </div>
       </div>
 
       <!-- MCP测试Tab -->
@@ -509,6 +520,7 @@ import {
 import MonitoringStatusPanel from '../../components/MonitoringStatusPanel.vue';
 import SystemStatus from './components/SystemStatus.vue';
 import WencaiDataCapture from './components/WencaiDataCapture.vue';
+import SessionManager from './components/SessionManager.vue';
 interface TemplateField {
   id: string;
   name: string;
@@ -539,6 +551,7 @@ const showRegexRules = ref<boolean>(false); // 默认隐藏正则表达式规则
 const tabs = ref([
   { id: 'monitor', name: '数据监控' },
   { id: 'status', name: '系统状态' },
+  { id: 'session', name: '会话管理' },
   { id: 'mcp', name: 'MCP测试' },
   { id: 'config', name: '配置管理' }
 ]);
@@ -1708,32 +1721,48 @@ const checkLoginStatus = async () => {
   try {
     console.log('Sidepanel: 开始检查登录状态...');
     
-    const tabs = await chrome.tabs.query({ 
-      url: '*://t.10jqka.com.cn/*'
-    });
+    // 优先获取当前活跃标签页
+    let tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     
-    console.log('Sidepanel: 查询到的同花顺标签页数量:', tabs.length);
+    // 如果当前标签页不是目标页面，尝试查找特定域名的标签页
+    if (tabs.length === 0 || (!tabs[0].url?.includes('10jqka.com.cn') && !tabs[0].url?.includes('okooo.com'))) {
+        const thsTabs = await chrome.tabs.query({ url: '*://t.10jqka.com.cn/*' });
+        const okoooTabs = await chrome.tabs.query({ url: '*://*.okooo.com/*' });
+        tabs = [...thsTabs, ...okoooTabs];
+    }
+    
+    console.log('Sidepanel: 查询到的相关标签页数量:', tabs.length);
     
     if (tabs.length > 0 && tabs[0]?.id) {
       currentTabId.value = tabs[0].id;
-      console.log('Sidepanel: 找到同花顺页面，Tab ID:', tabs[0].id);
+      console.log('Sidepanel: 找到目标页面，Tab ID:', tabs[0].id);
       console.log('Sidepanel: 页面URL:', tabs[0].url);
       
-      const response = await chrome.tabs.sendMessage(currentTabId.value, {
-        action: 'checkLogin'
-      });
-      
-      console.log('Sidepanel: 登录状态检查结果:', response);
-      isLoggedIn.value = response?.isLoggedIn || false;
-      
-      if (response?.isLoggedIn) {
-        console.log('Sidepanel: ✅ 用户已登录');
-      } else {
-        console.log('Sidepanel: ❌ 用户未登录');
+      try {
+          const response = await chrome.tabs.sendMessage(currentTabId.value, {
+            action: 'checkLogin'
+          });
+          
+          console.log('Sidepanel: 登录状态检查结果:', response);
+          isLoggedIn.value = response?.isLoggedIn || false;
+          
+          if (response?.isLoggedIn) {
+            console.log('Sidepanel: ✅ 用户已登录');
+          } else {
+            console.log('Sidepanel: ❌ 用户未登录');
+          }
+      } catch (msgErr: any) {
+          // 忽略连接错误，可能是页面正在加载或content script未注入
+          if (msgErr.message && msgErr.message.includes('Receiving end does not exist')) {
+             console.log('Sidepanel: 无法连接到页面 (可能未加载完成或不支持的页面)');
+             isLoggedIn.value = false;
+          } else {
+             throw msgErr;
+          }
       }
     } else {
-      console.log('Sidepanel: 未找到同花顺页面');
-      thsError.value = '请先打开同花顺页面';
+      console.log('Sidepanel: 未找到目标页面');
+      thsError.value = '请先打开同花顺或澳客网页面';
     }
   } catch (err) {
     console.error('Sidepanel: 检查登录状态失败:', err);

@@ -5,17 +5,18 @@
 提供问财数据解析和查询的API接口
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
 import os
 import json
 import aiofiles
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, Path, BackgroundTasks, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from ..database import get_db_session
 from ..services.wencai_service import WencaiService
+from ..services.stock_service import StockService
 from ..services.pattern_analysis_service import PatternAnalysisService
 from ..crawler.wencai_crawler import WencaiCrawler
 from .schemas import (
@@ -98,6 +99,8 @@ async def validate_wencai_stock(
     try:
         logger.info(f"Received validate request: {request}")
         # 1. 计算日期
+        pass
+
         target_date = datetime.now()
         if request.check_date:
             try:
@@ -549,6 +552,179 @@ async def get_batch_detail(
             success=False,
             data=None,
             message=error_message
+        )
+
+
+@router.get("/crawler/{crawl_date}/{crawler_type}", response_model=BaseResponse, summary="按日期执行问财爬虫")
+async def run_wencai_crawler_by_date(
+    crawl_date: str = Path(..., description="爬取日期 (YYYY-MM-DD)"),
+    crawler_type: int = Path(..., description="爬虫类型 (1=问财爬虫)"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    按日期执行问财爬虫
+    
+    Args:
+        crawl_date: 爬取日期，格式为 YYYY-MM-DD
+        crawler_type: 爬虫类型，当前只支持 1（问财爬虫）
+        db: 数据库会话
+    
+    Returns:
+        爬取结果，包含批次ID、成功数量等信息
+    """
+    try:
+        # 验证爬虫类型
+        if crawler_type != 1:
+            return BaseResponse(
+                success=False,
+                data=None,
+                message=f"不支持的爬虫类型: {crawler_type}，当前只支持类型 1（问财爬虫）"
+            )
+        
+        # 解析日期
+        try:
+            target_date = datetime.strptime(crawl_date, "%Y-%m-%d").date()
+        except ValueError:
+            return BaseResponse(
+                success=False,
+                data=None,
+                message=f"无效的日期格式: {crawl_date}，请使用 YYYY-MM-DD 格式"
+            )
+        
+        # 检查是否为周末
+        if target_date.weekday() >= 5:
+            return BaseResponse(
+                success=False,
+                data=None,
+                message=f"{crawl_date} 是周末，跳过爬取"
+            )
+        
+        logger.info(f"开始执行问财爬虫，日期: {crawl_date}，类型: {crawler_type}")
+        
+        # 生成查询条件
+        d1 = target_date.strftime("%Y年%m月%d日")
+        d2 = (target_date - timedelta(days=1)).strftime("%Y年%m月%d日")
+        query = f"{d1}成交量是{d2}成交量的2.5倍以上，非北交 非创业版，非科创版，非ST，概念 行业，{d2}和{d1}涨幅低于13% 收盘价低于25"
+        
+        logger.info(f"生成的查询条件: {query}")
+        
+        # 使用wencai_service执行爬取
+        from app.crawler.wencai_crawler import WencaiCrawler
+        crawler = WencaiCrawler(db)
+        
+        # 生成批次名称
+        batch_name = f"AutoCrawl_{target_date.strftime('%Y%m%d')}"
+        
+        # 执行爬取
+        result = await crawler.fetch_and_parse(
+            query=query,
+            batch_name=batch_name,
+            target_stock_code=None
+        )
+        
+        logger.info(f"问财爬虫完成: {result}")
+        
+        return BaseResponse(
+            success=result.get("status") == "completed",
+            data={
+                "batch_id": result.get("batch_id"),
+                "total": result.get("total"),
+                "success": result.get("success"),
+                "crawl_date": crawl_date,
+                "crawler_type": crawler_type
+            },
+            message=f"爬取完成：共 {result.get('total')} 条，成功 {result.get('success')} 条"
+        )
+        
+    except Exception as e:
+        logger.error(f"执行问财爬虫失败: {e}")
+        return BaseResponse(
+            success=False,
+            data=None,
+            message=f"执行问财爬虫失败: {str(e)}"
+        )
+
+
+@router.get("/crawler/{crawl_date}/{crawler_type}", response_model=BaseResponse, summary="按日期执行问财爬虫")
+async def run_wencai_crawler_by_date(
+    crawl_date: str = Path(..., description="爬取日期 (YYYY-MM-DD)"),
+    crawler_type: int = Path(..., description="爬虫类型 (1=问财爬虫)"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    按日期执行问财爬虫
+    
+    Args:
+        crawl_date: 爬取日期，格式为 YYYY-MM-DD
+        crawler_type: 爬虫类型，当前只支持 1（问财爬虫）
+        db: 数据库会话
+    
+    Returns:
+        爬取结果，包含批次ID、成功数量等信息
+    """
+    try:
+        # 验证爬虫类型
+        if crawler_type != 1:
+            return BaseResponse(
+                success=False,
+                data=None,
+                message=f"不支持的爬虫类型: {crawler_type}，当前只支持类型 1（问财爬虫）"
+            )
+        
+        # 解析日期
+        try:
+            target_date = datetime.strptime(crawl_date, "%Y-%m-%d").date()
+        except ValueError:
+            return BaseResponse(
+                success=False,
+                data=None,
+                message=f"无效的日期格式: {crawl_date}，请使用 YYYY-MM-DD 格式"
+            )
+        
+        # 检查是否为周末
+        if target_date.weekday() >= 5:
+            return BaseResponse(
+                success=False,
+                data=None,
+                message=f"{crawl_date} 是周末，跳过爬取"
+            )
+        
+        logger.info(f"开始执行问财爬虫，日期: {crawl_date}，类型: {crawler_type}")
+        
+        # 创建爬虫实例
+        crawler = WencaiCrawler(db)
+        
+        # 生成批次名称
+        batch_name = f"AutoCrawl_{target_date.strftime('%Y%m%d')}"
+        
+        # 执行爬取（使用target_date自动生成查询条件）
+        result = await crawler.fetch_and_parse(
+            query=None,
+            batch_name=batch_name,
+            target_stock_code=None,
+            target_date=target_date
+        )
+        
+        logger.info(f"问财爬虫完成: {result}")
+        
+        return BaseResponse(
+            success=result.get("status") == "completed",
+            data={
+                "batch_id": result.get("batch_id"),
+                "total": result.get("total"),
+                "success": result.get("success"),
+                "crawl_date": crawl_date,
+                "crawler_type": crawler_type
+            },
+            message=f"爬取完成：共 {result.get('total')} 条，成功 {result.get('success')} 条"
+        )
+        
+    except Exception as e:
+        logger.error(f"执行问财爬虫失败: {e}")
+        return BaseResponse(
+            success=False,
+            data=None,
+            message=f"执行问财爬虫失败: {str(e)}"
         )
 
 

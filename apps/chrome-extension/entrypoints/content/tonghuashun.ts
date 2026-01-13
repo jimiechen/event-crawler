@@ -4,7 +4,7 @@
  */
 
 import { ErrorHandler, ErrorType, ErrorSeverity } from '@/utils/error-handler';
-import { EnhancedDataExtractor, ExtractionConfig } from '@/utils/enhanced-data-extractor';
+import { EnhancedDataExtractor, ExtractionConfig, ExtractionResult } from '@/utils/enhanced-data-extractor';
 import { RetryMechanism } from '@/utils/retry-mechanism';
 import { monitoringStateManager, MonitoringStatus, DataFetchStatus, ErrorLevel } from '@/utils/monitoring-state-manager';
 import { SyncStateData, StateChangeNotification } from '@/utils/state-sync-service';
@@ -23,7 +23,7 @@ export default defineContentScript({
     // 数据抓取配置
     const CONFIG = {
       // 后端API地址
-      BACKEND_API: 'http://localhost:8001/api/v1',
+      BACKEND_API: 'http://localhost:8000/api/v1',
       // 抓取间隔（毫秒）
       FETCH_INTERVAL: 30000,
       // 重试次数
@@ -39,7 +39,11 @@ export default defineContentScript({
       timeout: 15000,
       batchSize: 15,
       enableCache: true,
-      cacheExpiry: 25000 // 25秒缓存，略小于抓取间隔
+      cacheExpiry: 25000, // 25秒缓存，略小于抓取间隔
+      enableParallelProcessing: true,
+      maxConcurrentRequests: 3,
+      enableProgressCallback: true,
+      enableAdvancedDeduplication: true
     };
 
     // 股票数据接口
@@ -191,46 +195,40 @@ export default defineContentScript({
         console.log(`开始使用增强版抓取器获取 ${stockCodes.length} 个股票的数据...`);
         
         // 使用增强版数据抓取器获取股票数据
-        const stockDataResults = await EnhancedDataExtractor.fetchStockData(stockCodes, EXTRACTION_CONFIG);
+        const extractionResult = await EnhancedDataExtractor.fetchStockDataEnhanced(stockCodes, EXTRACTION_CONFIG);
         
         // 过滤出成功的结果并转换为StockData格式
-        const successfulData: StockData[] = stockDataResults
-          .filter(result => result.success && result.data)
-          .map(result => {
-            const data = result.data;
+        const successfulData: StockData[] = extractionResult.data.map((item: any) => {
             return {
-              code: data.code || result.code,
-              name: data.name || '',
-              price: data.price || 0,
-              change_amount: data.change_amount || 0,
-              change_percent: data.change_percent || 0,
-              volume: data.volume || 0,
-              turnover: data.turnover || 0,
-              high: data.high || 0,
-              low: data.low || 0,
-              open_price: data.open_price || 0,
-              prev_close: data.prev_close || 0,
-              timestamp: data.timestamp || new Date().toISOString()
+              code: item.code,
+              name: item.name || '',
+              price: item.price || 0,
+              change_amount: item.change_amount || 0,
+              change_percent: item.change_percent || 0,
+              volume: item.volume || 0,
+              turnover: item.turnover || 0,
+              high: item.high || 0,
+              low: item.low || 0,
+              open_price: item.open_price || 0,
+              prev_close: item.prev_close || 0,
+              timestamp: item.timestamp || new Date().toISOString()
             } as StockData;
           });
         
-        const failedCount = stockDataResults.length - successfulData.length;
+        const failedCount = stockCodes.length - successfulData.length;
         
         console.log(`增强版API获取完成: 成功 ${successfulData.length} 个，失败 ${failedCount} 个`);
         
         if (failedCount > 0) {
-          const failedCodes = stockDataResults
-            .filter(result => !result.success)
-            .map(result => result.code);
-          
-          console.warn('获取失败的股票代码:', failedCodes);
+          console.warn('获取失败的股票代码数量:', failedCount);
+          console.warn('错误信息:', extractionResult.errors);
           
           // 记录失败信息但不阻断流程
-          ErrorHandler.handleError(new Error(`部分股票数据获取失败: ${failedCount}/${stockDataResults.length}`), {
+          ErrorHandler.handleError(new Error(`部分股票数据获取失败: ${failedCount}/${stockCodes.length}`), {
             context: 'fetchStockDataFromAPI_PartialFailure',
-            failedCodes,
+            errors: extractionResult.errors,
             failedCount,
-            totalCount: stockDataResults.length
+            totalCount: stockCodes.length
           });
         }
         
@@ -355,8 +353,8 @@ export default defineContentScript({
     async function sendDataToBackend(stockDataList: StockData[]): Promise<boolean> {
       if (stockDataList.length === 0) return true;
 
-      // 创建数据处理专用重试配置
-      const retryConfig = RetryMechanism.createDataProcessingRetryConfig({
+      // 创建网络请求专用重试配置
+      const retryConfig = RetryMechanism.createNetworkRetryConfig({
         maxRetries: 4,
         baseDelay: 800,
         maxDelay: 6000,
@@ -509,7 +507,7 @@ export default defineContentScript({
           
           if (stockCodes.length === 0) {
             const error = new Error('未找到股票代码');
-            (error as any).type = ErrorType.DATA;
+            (error as any).type = ErrorType.PARSING;
             (error as any).severity = ErrorSeverity.MEDIUM;
             throw error;
           }
@@ -568,17 +566,17 @@ export default defineContentScript({
 
         if (retryResult.success) {
           console.log(`=== 增强版数据抓取完成: 经过 ${retryResult.totalAttempts} 次尝试，耗时: ${retryResult.totalTime}ms ===`);
-          console.log('抓取结果:', retryResult.result);
+          console.log('抓取结果:', retryResult.data);
           
           // 获取并更新缓存统计
           const cacheStats = EnhancedDataExtractor.getCacheStats();
           monitoringStateManager.updateCacheStats(cacheStats);
-          if (cacheStats.totalItems > 0) {
+          if (cacheStats.size > 0) {
             console.log('缓存统计:', cacheStats);
           }
           
           // 完成运行 - 成功
-          monitoringStateManager.completeRun(true, retryResult.result);
+          monitoringStateManager.completeRun(true, retryResult.data);
           
           // 记录成功统计
           const stats = ErrorHandler.getErrorStats();
@@ -595,7 +593,7 @@ export default defineContentScript({
             console.log('抓取重试统计:', {
               totalAttempts: retryResult.totalAttempts,
               totalTime: retryResult.totalTime,
-              result: retryResult.result
+              result: retryResult.data
             });
           }
           
@@ -716,7 +714,7 @@ export default defineContentScript({
      */
     function syncStateToBackground(): void {
       try {
-        const currentState = monitoringStateManager.getCurrentRunState();
+        const currentState = monitoringStateManager.getCurrentRun();
         const statistics = monitoringStateManager.getStatistics();
         const monitoringStatus = monitoringStateManager.getMonitoringStatus();
         
@@ -743,7 +741,7 @@ export default defineContentScript({
     /**
      * 监听状态变更并同步
      */
-    monitoringStateManager.addStateChangeListener((event) => {
+    monitoringStateManager.addListener((event: StateChangeEvent) => {
       // 同步状态到background script
       syncStateToBackground();
     });
@@ -879,7 +877,7 @@ export default defineContentScript({
           // 状态同步相关消息
           case 'state_sync_request':
             try {
-              const currentState = monitoringStateManager.getCurrentRunState();
+              const currentState = monitoringStateManager.getCurrentRun();
               const statistics = monitoringStateManager.getStatistics();
               const monitoringStatus = monitoringStateManager.getMonitoringStatus();
               
