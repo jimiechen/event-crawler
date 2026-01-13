@@ -29,6 +29,8 @@ class MockDataManager:
         self._init_builder_data()
         self._init_trader_data()
         self._init_backtest_data()
+        self._init_signal_data()
+        self._init_analytics_data()
 
     def _init_config_data(self):
         """初始化配置数据"""
@@ -1082,6 +1084,589 @@ class MockDataManager:
                     "realized_pnl": -500.00
                 }
             ]
+        }
+
+    def _init_signal_data(self):
+        """初始化信号系统数据"""
+        self.signals = {
+            1: {
+                "id": 1,
+                "signal_name": "OI Surge Signal",
+                "description": "检测持仓量突然增加，可能预示大单入场",
+                "trigger_condition": {
+                    "metric": "oi_delta",
+                    "operator": "abs_greater_than",
+                    "threshold": 5.0,
+                    "time_window": "5m"
+                },
+                "enabled": True,
+                "created_at": "2026-01-10T10:00:00Z",
+                "updated_at": "2026-01-12T15:30:00Z"
+            },
+            2: {
+                "id": 2,
+                "signal_name": "Funding Rate Alert",
+                "description": "当资金费率过高时预警，提示可能的多头/空头挤压",
+                "trigger_condition": {
+                    "metric": "funding",
+                    "operator": "abs_greater_than",
+                    "threshold": 0.01,
+                    "time_window": "5m"
+                },
+                "enabled": True,
+                "created_at": "2026-01-11T08:00:00Z",
+                "updated_at": "2026-01-13T09:00:00Z"
+            },
+            3: {
+                "id": 3,
+                "signal_name": "CVD Breakthrough",
+                "description": "累积成交量差突破关键水平，显示买卖力量对比",
+                "trigger_condition": {
+                    "metric": "cvd",
+                    "operator": "greater_than",
+                    "threshold": 1000000,
+                    "time_window": "15m"
+                },
+                "enabled": False,
+                "created_at": "2026-01-12T14:00:00Z",
+                "updated_at": "2026-01-12T14:00:00Z"
+            },
+            4: {
+                "id": 4,
+                "signal_name": "Taker Volume Composite",
+                "description": "综合买卖方向、比率和成交量的复合信号",
+                "trigger_condition": {
+                    "metric": "taker_volume",
+                    "direction": "any",
+                    "ratio_threshold": 1.5,
+                    "volume_threshold": 50000,
+                    "time_window": "5m"
+                },
+                "enabled": True,
+                "created_at": "2026-01-13T10:00:00Z",
+                "updated_at": "2026-01-13T10:00:00Z"
+            },
+            5: {
+                "id": 5,
+                "signal_name": "Depth Ratio Signal",
+                "description": "买卖盘深度比率变化，检测流动性变化",
+                "trigger_condition": {
+                    "metric": "depth_ratio",
+                    "operator": "abs_greater_than",
+                    "threshold": 1.5,
+                    "time_window": "3m"
+                },
+                "enabled": True,
+                "created_at": "2026-01-13T11:00:00Z",
+                "updated_at": "2026-01-13T11:00:00Z"
+            }
+        }
+
+        self.pools = {
+            1: {
+                "id": 1,
+                "pool_name": "BTC Momentum Pool",
+                "signal_ids": [1, 4],
+                "symbols": ["BTC"],
+                "enabled": True,
+                "logic": "OR",
+                "created_at": "2026-01-12T10:00:00Z"
+            },
+            2: {
+                "id": 2,
+                "pool_name": "Multi-Signal Pool",
+                "signal_ids": [1, 2, 5],
+                "symbols": ["BTC", "ETH"],
+                "enabled": True,
+                "logic": "AND",
+                "created_at": "2026-01-13T08:00:00Z"
+            },
+            3: {
+                "id": 3,
+                "pool_name": "Funding Alert Pool",
+                "signal_ids": [2],
+                "symbols": ["BTC", "ETH", "SOL"],
+                "enabled": False,
+                "logic": "OR",
+                "created_at": "2026-01-13T12:00:00Z"
+            }
+        }
+
+        self.signal_logs = []
+        for i in range(20):
+            import random
+            from datetime import datetime, timedelta
+            timestamp = datetime.now() - timedelta(minutes=i * 5)
+            signal_id = random.choice([1, 2, 4, 5])
+            pool_id = random.choice([1, 2, None])
+            symbol = random.choice(["BTC", "ETH", "SOL"])
+            
+            log_entry = {
+                "id": i + 1,
+                "signal_id": signal_id,
+                "pool_id": pool_id,
+                "symbol": symbol,
+                "trigger_value": {
+                    "metric": "oi_delta",
+                    "value": random.uniform(5.0, 10.0),
+                    "operator": "abs_greater_than",
+                    "threshold": 5.0,
+                    "time_window": "5m"
+                },
+                "triggered_at": timestamp.isoformat(),
+                "market_regime": {
+                    "regime": random.choice(["breakout", "continuation", "absorption", "stop_hunt"]),
+                    "direction": random.choice(["bullish", "bearish"]),
+                    "confidence": random.uniform(0.6, 0.95),
+                    "reason": "Market analysis based on price action and volume"
+                } if pool_id else None
+            }
+            self.signal_logs.append(log_entry)
+
+        self.metric_analysis = {
+            "status": "ok",
+            "symbol": "BTC",
+            "metric": "oi_delta",
+            "period": "5m",
+            "sample_count": 288,
+            "time_range_hours": 24.0,
+            "statistics": {
+                "mean": 2.34,
+                "std": 4.56,
+                "min": -8.5,
+                "max": 12.3,
+                "abs_percentiles": {
+                    "p75": 4.2,
+                    "p90": 6.8,
+                    "p95": 8.5,
+                    "p99": 10.2
+                }
+            },
+            "suggestions": {
+                "aggressive": {
+                    "threshold": 3.5,
+                    "description": "激进阈值，触发频率较高"
+                },
+                "moderate": {
+                    "threshold": 5.0,
+                    "description": "适中阈值，平衡触发频率和准确性",
+                    "recommended": True
+                },
+                "conservative": {
+                    "threshold": 7.0,
+                    "description": "保守阈值，仅触发强信号"
+                }
+            }
+        }
+
+        self.market_regime_data = {
+            "symbol": "BTC",
+            "regime": "breakout",
+            "direction": "bullish",
+            "confidence": 0.85,
+            "reason": "Price broke above resistance with high volume"
+        }
+
+        self.signal_backtest_data = {
+            "symbol": "BTC",
+            "time_window": "5m",
+            "condition": {
+                "metric": "oi_delta",
+                "operator": "abs_greater_than",
+                "threshold": 5.0
+            },
+            "kline_count": 500,
+            "trigger_count": 15,
+            "triggers": [],
+            "signal_names": {
+                "1": "OI Surge Signal"
+            }
+        }
+
+        for i in range(15):
+            from datetime import datetime, timedelta
+            import random
+            trigger_time = datetime.now() - timedelta(hours=i)
+            self.signal_backtest_data["triggers"].append({
+                "timestamp": int(trigger_time.timestamp() * 1000),
+                "value": random.uniform(5.5, 12.0),
+                "threshold": 5.0,
+                "signal_id": 1
+            })
+
+    def _init_analytics_data(self):
+        """初始化Analytics分析数据"""
+        # Summary数据
+        self.analytics_summary = {
+            "period": {
+                "start": "2026-01-06T00:00:00Z",
+                "end": "2026-01-13T00:00:00Z"
+            },
+            "overview": {
+                "total_pnl": 2500.0,
+                "total_fee": 150.0,
+                "net_pnl": 2350.0,
+                "trade_count": 156,
+                "win_count": 102,
+                "loss_count": 54,
+                "win_rate": 0.6538,
+                "avg_win": 45.5,
+                "avg_loss": -28.7,
+                "profit_factor": 2.3
+            },
+            "data_completeness": {
+                "total_decisions": 180,
+                "with_strategy": 165,
+                "with_signal": 95,
+                "with_pnl": 156
+            },
+            "by_trigger_type": {
+                "signal": {
+                    "count": 65,
+                    "net_pnl": 1250.0
+                },
+                "scheduled": {
+                    "count": 85,
+                    "net_pnl": 1050.0
+                },
+                "unknown": {
+                    "count": 6,
+                    "net_pnl": 50.0
+                }
+            }
+        }
+
+        # 按交易对分析
+        self.analytics_by_symbol = {
+            "items": [
+                {
+                    "symbol": "BTC",
+                    "metrics": {
+                        "total_pnl": 1500.0,
+                        "total_fee": 90.0,
+                        "net_pnl": 1410.0,
+                        "trade_count": 85,
+                        "win_count": 58,
+                        "loss_count": 27,
+                        "win_rate": 0.6824,
+                        "avg_win": 42.5,
+                        "avg_loss": -32.1,
+                        "profit_factor": 2.8
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 35, "net_pnl": 720.0},
+                        "scheduled": {"count": 48, "net_pnl": 670.0}
+                    }
+                },
+                {
+                    "symbol": "ETH",
+                    "metrics": {
+                        "total_pnl": 800.0,
+                        "total_fee": 45.0,
+                        "net_pnl": 755.0,
+                        "trade_count": 52,
+                        "win_count": 32,
+                        "loss_count": 20,
+                        "win_rate": 0.6154,
+                        "avg_win": 38.2,
+                        "avg_loss": -25.5,
+                        "profit_factor": 1.9
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 22, "net_pnl": 380.0},
+                        "scheduled": {"count": 28, "net_pnl": 355.0}
+                    }
+                },
+                {
+                    "symbol": "SOL",
+                    "metrics": {
+                        "total_pnl": 200.0,
+                        "total_fee": 15.0,
+                        "net_pnl": 185.0,
+                        "trade_count": 19,
+                        "win_count": 12,
+                        "loss_count": 7,
+                        "win_rate": 0.6316,
+                        "avg_win": 25.0,
+                        "avg_loss": -18.5,
+                        "profit_factor": 2.1
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 8, "net_pnl": 150.0},
+                        "scheduled": {"count": 9, "net_pnl": 25.0}
+                    }
+                }
+            ],
+            "unattributed": {
+                "count": 0,
+                "metrics": None
+            }
+        }
+
+        # 按策略分析
+        self.analytics_by_strategy = {
+            "items": [
+                {
+                    "strategy_id": 1,
+                    "strategy_name": "默认交易提示词",
+                    "metrics": {
+                        "total_pnl": 1800.0,
+                        "total_fee": 100.0,
+                        "net_pnl": 1700.0,
+                        "trade_count": 95,
+                        "win_count": 65,
+                        "loss_count": 30,
+                        "win_rate": 0.6842,
+                        "avg_win": 40.0,
+                        "avg_loss": -26.7,
+                        "profit_factor": 2.5
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 40, "net_pnl": 850.0},
+                        "scheduled": {"count": 53, "net_pnl": 830.0}
+                    }
+                },
+                {
+                    "strategy_id": 2,
+                    "strategy_name": "激进交易提示词",
+                    "metrics": {
+                        "total_pnl": 700.0,
+                        "total_fee": 50.0,
+                        "net_pnl": 650.0,
+                        "trade_count": 61,
+                        "win_count": 37,
+                        "loss_count": 24,
+                        "win_rate": 0.6066,
+                        "avg_win": 35.0,
+                        "avg_loss": -30.0,
+                        "profit_factor": 1.8
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 25, "net_pnl": 400.0},
+                        "scheduled": {"count": 32, "net_pnl": 220.0}
+                    }
+                }
+            ],
+            "unattributed": {
+                "count": 15,
+                "metrics": {
+                    "total_pnl": 0.0,
+                    "total_fee": 0.0,
+                    "net_pnl": 0.0,
+                    "trade_count": 0,
+                    "win_count": 0,
+                    "loss_count": 0,
+                    "win_rate": 0.0,
+                    "avg_win": None,
+                    "avg_loss": None,
+                    "profit_factor": None
+                }
+            }
+        }
+
+        # 按触发类型分析
+        self.analytics_by_trigger_type = {
+            "items": [
+                {
+                    "trigger_type": "signal",
+                    "metrics": {
+                        "total_pnl": 1250.0,
+                        "total_fee": 75.0,
+                        "net_pnl": 1175.0,
+                        "trade_count": 65,
+                        "win_count": 45,
+                        "loss_count": 20,
+                        "win_rate": 0.6923,
+                        "avg_win": 38.5,
+                        "avg_loss": -27.5,
+                        "profit_factor": 2.6
+                    }
+                },
+                {
+                    "trigger_type": "scheduled",
+                    "metrics": {
+                        "total_pnl": 1250.0,
+                        "total_fee": 75.0,
+                        "net_pnl": 1175.0,
+                        "trade_count": 85,
+                        "win_count": 55,
+                        "loss_count": 30,
+                        "win_rate": 0.6471,
+                        "avg_win": 32.0,
+                        "avg_loss": -29.0,
+                        "profit_factor": 2.0
+                    }
+                },
+                {
+                    "trigger_type": "unknown",
+                    "metrics": {
+                        "total_pnl": 0.0,
+                        "total_fee": 0.0,
+                        "net_pnl": 0.0,
+                        "trade_count": 6,
+                        "win_count": 2,
+                        "loss_count": 4,
+                        "win_rate": 0.3333,
+                        "avg_win": 25.0,
+                        "avg_loss": -12.5,
+                        "profit_factor": 1.0
+                    }
+                }
+            ]
+        }
+
+        # 按操作类型分析
+        self.analytics_by_operation = {
+            "items": [
+                {
+                    "operation": "buy",
+                    "metrics": {
+                        "total_pnl": 1200.0,
+                        "total_fee": 70.0,
+                        "net_pnl": 1130.0,
+                        "trade_count": 78,
+                        "win_count": 52,
+                        "loss_count": 26,
+                        "win_rate": 0.6667,
+                        "avg_win": 41.0,
+                        "avg_loss": -28.0,
+                        "profit_factor": 2.5
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 32, "net_pnl": 600.0},
+                        "scheduled": {"count": 44, "net_pnl": 510.0}
+                    }
+                },
+                {
+                    "operation": "sell",
+                    "metrics": {
+                        "total_pnl": 1100.0,
+                        "total_fee": 65.0,
+                        "net_pnl": 1035.0,
+                        "trade_count": 68,
+                        "win_count": 45,
+                        "loss_count": 23,
+                        "win_rate": 0.6618,
+                        "avg_win": 39.0,
+                        "avg_loss": -26.5,
+                        "profit_factor": 2.4
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 28, "net_pnl": 550.0},
+                        "scheduled": {"count": 38, "net_pnl": 475.0}
+                    }
+                },
+                {
+                    "operation": "close",
+                    "metrics": {
+                        "total_pnl": 200.0,
+                        "total_fee": 15.0,
+                        "net_pnl": 185.0,
+                        "trade_count": 10,
+                        "win_count": 5,
+                        "loss_count": 5,
+                        "win_rate": 0.5,
+                        "avg_win": 50.0,
+                        "avg_loss": -35.0,
+                        "profit_factor": 1.4
+                    },
+                    "by_trigger_type": {
+                        "signal": {"count": 5, "net_pnl": 100.0},
+                        "scheduled": {"count": 3, "net_pnl": 65.0}
+                    }
+                }
+            ]
+        }
+
+        # 交易详情数据
+        self.analytics_trades = {
+            "trades": [
+                {
+                    "id": 1,
+                    "symbol": "BTC",
+                    "decision_time": "2026-01-13T10:15:00Z",
+                    "entry_time": "2026-01-13T10:15:00Z",
+                    "exit_time": "2026-01-13T11:30:00Z",
+                    "entry_type": "BUY",
+                    "exit_type": "TP",
+                    "gross_pnl": 750.0,
+                    "fees": 33.75,
+                    "net_pnl": 716.25,
+                    "tags": [],
+                    "hyperliquid_order_id": "ORD-20260113-001",
+                    "tp_order_id": "TP-20260113-001",
+                    "sl_order_id": None
+                },
+                {
+                    "id": 2,
+                    "symbol": "ETH",
+                    "decision_time": "2026-01-13T09:45:00Z",
+                    "entry_time": "2026-01-13T09:45:00Z",
+                    "exit_time": "2026-01-13T10:00:00Z",
+                    "entry_type": "SELL",
+                    "exit_type": "SL",
+                    "gross_pnl": -500.0,
+                    "fees": 34.50,
+                    "net_pnl": -534.50,
+                    "tags": ["sl_triggered", "large_loss"],
+                    "hyperliquid_order_id": "ORD-20260113-002",
+                    "tp_order_id": None,
+                    "sl_order_id": "SL-20260113-002"
+                },
+                {
+                    "id": 3,
+                    "symbol": "SOL",
+                    "decision_time": "2026-01-13T08:30:00Z",
+                    "entry_time": "2026-01-13T08:30:00Z",
+                    "exit_time": "2026-01-13T09:15:00Z",
+                    "entry_type": "BUY",
+                    "exit_type": "TP",
+                    "gross_pnl": 320.0,
+                    "fees": 15.0,
+                    "net_pnl": 305.0,
+                    "tags": [],
+                    "hyperliquid_order_id": "ORD-20260113-003",
+                    "tp_order_id": "TP-20260113-003",
+                    "sl_order_id": None
+                },
+                {
+                    "id": 4,
+                    "symbol": "BTC",
+                    "decision_time": "2026-01-13T07:20:00Z",
+                    "entry_time": "2026-01-13T07:20:00Z",
+                    "exit_time": "2026-01-13T08:00:00Z",
+                    "entry_type": "SELL",
+                    "exit_type": "TP",
+                    "gross_pnl": 450.0,
+                    "fees": 22.5,
+                    "net_pnl": 427.5,
+                    "tags": [],
+                    "hyperliquid_order_id": "ORD-20260113-004",
+                    "tp_order_id": "TP-20260113-004",
+                    "sl_order_id": None
+                },
+                {
+                    "id": 5,
+                    "symbol": "ETH",
+                    "decision_time": "2026-01-13T06:10:00Z",
+                    "entry_time": "2026-01-13T06:10:00Z",
+                    "exit_time": "2026-01-13T06:45:00Z",
+                    "entry_type": "BUY",
+                    "exit_type": "SL",
+                    "gross_pnl": -280.0,
+                    "fees": 18.0,
+                    "net_pnl": -298.0,
+                    "tags": ["sl_triggered"],
+                    "hyperliquid_order_id": "ORD-20260113-005",
+                    "tp_order_id": None,
+                    "sl_order_id": "SL-20260113-005"
+                }
+            ],
+            "total": 5,
+            "limit": 50,
+            "offset": 0,
+            "account_equity": 125000.0,
+            "loss_threshold": 6250.0
         }
 
 
