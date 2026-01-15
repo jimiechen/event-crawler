@@ -44,12 +44,20 @@ async def calculate_daily_scores(
         logger.info(f"开始计算 {target_date} 的 Pathway 积分")
         results = await engine.calculate_daily_scores(target_date)
         
-        # 2. (可选) 触发告警检查
-        # alerts = await engine.check_anomalies(results)
+        # 2. 触发告警检查
+        alerts = await engine.check_anomalies(results)
+        if alerts:
+            from app.services.notification_service import notification_service
+            for alert_msg in alerts:
+                await notification_service.send_alert(
+                    title="Pathway评分告警",
+                    message=alert_msg,
+                    level="info"
+                )
         
         return BaseResponse(
-            data={"count": len(results)}, 
-            message=f"计算完成，共生成 {len(results)} 条评分记录"
+            data={"count": len(results), "alerts": len(alerts)}, 
+            message=f"计算完成，共生成 {len(results)} 条评分记录，触发 {len(alerts)} 条告警"
         )
     except Exception as e:
         logger.error(f"评分计算失败: {e}", exc_info=True)

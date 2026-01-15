@@ -25,10 +25,19 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="服务器端口")
     workers: int = Field(default=5, description="工作进程数")
     
-    # 数据库配置
-    database_url: Optional[str] = Field(default=None, description="数据库连接URL")
-    db_host: str = Field(default="localhost", description="数据库主机")
+    # Database Configuration
+    database_url: str = Field(
+        default="mysql+aiomysql://root:12345678@192.168.1.6:3306/stock_monitor_new",
+        description="数据库连接URL"
+    )
+    db_host: str = Field(default="192.168.1.6", description="数据库主机")
     db_port: int = Field(default=3306, description="数据库端口")
+    
+    # Arena Database Configuration (for shared infrastructure)
+    arena_database_url: str = Field(
+        default="postgresql+asyncpg://chroma_user:chroma_password@192.168.1.6:5432/chroma_db",
+        description="Hyper-Alpha-Arena 数据库连接URL"
+    )
 
     # Tushare配置
     tushare_token: Optional[str] = Field(default=None, description="Tushare API Token")
@@ -58,9 +67,12 @@ class Settings(BaseSettings):
     db_max_retries: int = Field(default=3, description="最大重试次数")
     db_retry_delay: int = Field(default=1, description="重试延迟(秒)")
     
-    # Redis配置（可选）
-    redis_url: Optional[str] = Field(default=None, description="Redis连接URL")
-    redis_host: str = Field(default="localhost", description="Redis主机")
+    # Redis Configuration
+    redis_url: str = Field(
+        default="redis://192.168.1.6:6379/0",
+        description="Redis连接URL"
+    )
+    redis_host: str = Field(default="192.168.1.6", description="Redis主机")
     redis_port: int = Field(default=6379, description="Redis端口")
     redis_db: int = Field(default=0, description="Redis数据库编号")
     redis_password: Optional[str] = Field(default=None, description="Redis密码")
@@ -98,7 +110,13 @@ class Settings(BaseSettings):
     # 监控配置
     alert_threshold_percentage: float = Field(default=5.0, description="告警阈值百分比")
     alert_check_interval_minutes: int = Field(default=5, description="告警检查间隔(分钟)")
-    
+
+    # DeepSeek 配置
+    deepseek_api_key: Optional[str] = Field(default=None, description="DeepSeek API Key")
+    deepseek_base_url: str = Field(default="https://api.deepseek.com", description="DeepSeek Base URL")
+    deepseek_model: str = Field(default="deepseek-chat", description="DeepSeek Model Name")
+
+
     # 去重配置
     dedup_enabled: bool = Field(default=True, description="是否启用数据去重")
     dedup_window_minutes: int = Field(default=1, description="去重时间窗口(分钟)")
@@ -147,3 +165,5 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """获取应用配置（单例模式）"""
     return Settings()
+
+settings = get_settings()

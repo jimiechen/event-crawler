@@ -69,6 +69,15 @@ class SchedulerService:
             name="每日问财爬虫",
             replace_existing=True
         )
+
+        # 5. 【新增】每日AI复盘 (15:40) - 在盘后数据更新后
+        self.scheduler.add_job(
+            self.run_daily_ai_review,
+            CronTrigger(hour=15, minute=40),
+            id="daily_ai_review",
+            name="每日AI复盘",
+            replace_existing=True
+        )
         
         self.scheduler.start()
         self.is_running = True
@@ -498,6 +507,112 @@ class SchedulerService:
                 logger.info("每日验收测试完成")
         except Exception as e:
             logger.error(f"每日验收测试失败: {e}")
+
+    async def _init_default_tasks(self):
+        """初始化默认定时任务"""
+        default_tasks = [
+            {
+                "name": "每日AI复盘",
+                "task_type": "daily_ai_review",
+                "cron_expression": "40 15 * * *",
+                "description": "每日收盘后自动分析核心池股票",
+                "is_active": True
+            },
+            {
+                "name": "盘后积分更新",
+                "task_type": "post_market_update",
+                "cron_expression": "30 15 * * *",
+                "description": "更新股票评分和排名",
+                "is_active": True
+            }
+        ]
+        
+        async with self.db_manager.get_session() as session:
+            for task_data in default_tasks:
+                stmt = select(ScheduledTask).where(ScheduledTask.task_type == task_data["task_type"])
+                result = await session.execute(stmt)
+                existing = result.scalar_one_or_none()
+                
+                if not existing:
+                    new_task = ScheduledTask(**task_data)
+                    session.add(new_task)
+                    logger.info(f"Initialized default task: {task_data['name']}")
+            await session.commit()
+
+    async def run_daily_ai_review(self):
+        """每日AI复盘任务"""
+        logger.info("定时任务: 开始每日AI复盘")
+        
+        # 1. Update Task Status (Running)
+        task_id = None
+        try:
+            async with self.db_manager.get_session() as session:
+                 stmt = select(ScheduledTask).where(ScheduledTask.task_type == 'daily_ai_review')
+                 result = await session.execute(stmt)
+                 task = result.scalar_one_or_none()
+                 if task:
+                     task.last_run_at = datetime.now()
+                     task.last_run_status = "running"
+                     await session.commit()
+                     task_id = task.id
+        except Exception as e:
+            logger.warning(f"Failed to update task status (start): {e}")
+
+        try:
+            from app.services.ai_decision_service import AIDecisionService, AIDecisionConfig
+            from app.config.settings import get_settings
+            from app.models.pattern_config import PatternStockPool
+            from sqlalchemy import select
+            
+            settings = get_settings()
+            if not settings.deepseek_api_key:
+                logger.warning("DeepSeek API Key未配置，跳过AI复盘")
+                return
+
+            async with self.db_manager.get_session() as session:
+                # 1. Get target stocks (Core Pool)
+                stmt = select(PatternStockPool).where(PatternStockPool.status == 'core')
+                result = await session.execute(stmt)
+                core_stocks = result.scalars().all()
+                
+                logger.info(f"AI复盘: 找到 {len(core_stocks)} 只核心池股票")
+                
+                # 2. Init Service
+                config = AIDecisionConfig(
+                    api_key=settings.deepseek_api_key,
+                    base_url=settings.deepseek_base_url,
+                    model=settings.deepseek_model
+                )
+                ai_service = AIDecisionService(config)
+                
+                # 3. Analyze
+                for stock in core_stocks:
+                    try:
+                        logger.info(f"AI复盘: 正在分析 {stock.stock_name}({stock.stock_code})")
+                        await ai_service.generate_decision(session, stock.stock_code)
+                        await asyncio.sleep(2)
+                    except Exception as e:
+                        logger.error(f"AI复盘失败 {stock.stock_code}: {e}")
+                        
+            logger.info("定时任务: 每日AI复盘完成")
+            
+            # 2. Update Task Status (Success)
+            if task_id:
+                async with self.db_manager.get_session() as session:
+                    task = await session.get(ScheduledTask, task_id)
+                    if task:
+                        task.last_run_status = "success"
+                        await session.commit()
+
+        except Exception as e:
+            logger.error(f"Daily AI review failed: {e}")
+            # 3. Update Task Status (Failed)
+            if task_id:
+                async with self.db_manager.get_session() as session:
+                    task = await session.get(ScheduledTask, task_id)
+                    if task:
+                        task.last_run_status = "failed"
+                        await session.commit()
 
 # 全局单例
 scheduler_service = SchedulerService()

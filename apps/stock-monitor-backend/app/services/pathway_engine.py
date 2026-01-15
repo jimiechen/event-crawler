@@ -569,3 +569,52 @@ class PathwayVolumePriceEngine:
             logger.error(f"批量计算失败 {symbol}: {e}")
 
         return results
+
+    async def calculate_daily_scores(self, target_date: date) -> List[Dict[str, Any]]:
+        """
+        计算指定日期所有活跃股票的评分
+        """
+        results = []
+        try:
+            # 1. Get all active stocks
+            stmt = select(StockInfo).where(StockInfo.is_active == True)
+            res = await self.db_session.execute(stmt)
+            stocks = res.scalars().all()
+            
+            logger.info(f"开始计算 {target_date} 评分，共 {len(stocks)} 只股票")
+            
+            # 2. Process each stock
+            for stock in stocks:
+                score_res = await self.calculate_score_for_date(stock.code, target_date)
+                if score_res:
+                    results.append(score_res)
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"每日批量计算失败: {e}")
+            return []
+
+    async def check_anomalies(self, results: List[Any]) -> List[str]:
+        """
+        检查异常并返回告警列表
+        """
+        alerts = []
+        for res in results:
+            # res might be dict or object
+            code = res.get('code') if isinstance(res, dict) else getattr(res, 'code', 'Unknown')
+            total_score = res.get('total_score') if isinstance(res, dict) else getattr(res, 'total_score', 0)
+            tags = res.get('tags') if isinstance(res, dict) else getattr(res, 'rule_scores', [])
+            
+            # 1. High Score Alert
+            if total_score and total_score >= 5.0:
+                alerts.append(f"高分预警: {code} 得分 {total_score}")
+            
+            # 2. Specific Tags
+            if tags:
+                for tag in tags:
+                    tag_name = tag.get('name')
+                    if tag_name in ['3倍量', '60日地量', '涨停', '阳包阴', '底分型', '冲高回落']:
+                         alerts.append(f"特殊标签: {code} - {tag_name}")
+        
+        return alerts

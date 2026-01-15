@@ -9,6 +9,7 @@ import asyncio
 import logging
 import json
 import random
+import re
 import time
 from typing import List, Dict, Any, Optional
 from datetime import date as datetime_date
@@ -242,6 +243,111 @@ class WencaiCrawler(CrawlerBase):
                 await context.close()
             if browser:
                 await browser.close()
-
-
+    
+    async def check_login_status(self, url: str = None, nickname_xpath: str = None) -> Dict[str, Any]:
+        """
+        检查问财登录状态
+        """
+        context = None
+        session = None
+        browser = None
+        
+        try:
+            platform_config = await self.get_platform_config()
+            if not platform_config:
+                return {"logged_in": False, "message": "平台配置不存在"}
+            
+            verify_api = platform_config.get('verify_api')
+            verify_type = platform_config.get('verify_type', 'dom')
+            verify_xpath = platform_config.get('verify_xpath')
+            verify_parser = platform_config.get('verify_parser')
+            
+            if not verify_api:
+                return {"logged_in": False, "message": "未配置验证接口"}
+            
+            # 创建浏览器上下文
+            context, session, browser = await self.create_browser_context()
+            page = await context.new_page()
+            
+            try:
+                # 访问验证接口
+                await page.goto(verify_api, wait_until='networkidle', timeout=30000)
+                
+                # 根据验证类型提取账号信息
+                account_name = None
+                
+                if verify_type == 'json':
+                    # JSON方式验证
+                    content = await page.content()
+                    json_match = re.search(r'<script[^>]*>(.*?)</script>', content, re.DOTALL)
+                    if json_match:
+                        try:
+                            data = json.loads(json_match.group(1))
+                            if verify_parser:
+                                parser_config = json.loads(verify_parser)
+                                path = parser_config.get('path', '')
+                                keys = path.replace('$', '').split('.')
+                                for key in keys:
+                                    if isinstance(data, dict):
+                                        data = data.get(key)
+                                    elif isinstance(data, list) and key.isdigit():
+                                        data = data[int(key)]
+                                    else:
+                                        data = None
+                                        break
+                                if data:
+                                    account_name = str(data)
+                        except Exception as e:
+                            logger.warning(f"JSON解析失败: {e}")
+                
+                elif verify_type == 'dom' and verify_xpath:
+                    # XPath方式验证
+                    element = await page.query_selector(verify_xpath)
+                    if element:
+                        account_name = await element.inner_text()
+                
+                # 如果提供了昵称 XPath，使用它来检查
+                if nickname_xpath and not account_name:
+                    element = await page.query_selector(nickname_xpath)
+                    if element:
+                        account_name = await element.inner_text()
+                
+                # 判断登录状态
+                if account_name:
+                    # 更新会话验证状态
+                    if session and session.get('id'):
+                        await self.session_service.verify_session(session['id'], True)
+                    
+                    return {
+                        "logged_in": True,
+                        "message": "登录成功",
+                        "nickname": account_name
+                    }
+                else:
+                    # 更新会话验证状态
+                    if session and session.get('id'):
+                        await self.session_service.verify_session(session['id'], False)
+                    
+                    return {
+                        "logged_in": False,
+                        "message": "未检测到登录状态",
+                        "need_xpath": True
+                    }
+            
+            except Exception as e:
+                logger.error(f"登录状态检查失败: {e}")
+                return {
+                    "logged_in": False,
+                    "message": f"检查失败: {str(e)}"
+                }
+            finally:
+                if browser:
+                    await browser.close()
+        
+        except Exception as e:
+            logger.error(f"登录状态检查异常: {e}")
+            return {
+                "logged_in": False,
+                "message": f"检查异常: {str(e)}"
+            }
 

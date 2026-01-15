@@ -18,6 +18,8 @@ try:
     from playwright_crawler.xiaohongshu_crawler import XiaohongshuCrawler
     from playwright_crawler.bilibili_crawler import BilibiliCrawler
     from playwright_crawler.okooo_crawler import OkoooCrawler
+    from app.crawler.realhead_crawler import RealheadCrawler
+    from app.crawler.wencai_crawler import WencaiCrawler
 except ImportError as e:
     logger.error(f"Failed to import crawler modules: {e}")
     # Define dummy classes to avoid crashing if module is missing during development
@@ -27,6 +29,8 @@ except ImportError as e:
     class XiaohongshuCrawler: pass
     class BilibiliCrawler: pass
     class OkoooCrawler: pass
+    class RealheadCrawler: pass
+    class WencaiCrawler: pass
 
 from app.repositories.crawler_repository import CrawlerTargetRepository, CrawlerResultRepository
 from app.models.crawler import CrawlerResult, CrawlerTarget
@@ -42,7 +46,9 @@ class CrawlerService:
             "douyin": DouyinCrawler,
             "xiaohongshu": XiaohongshuCrawler,
             "bilibili": BilibiliCrawler,
-            "okooo": OkoooCrawler
+            "okooo": OkoooCrawler,
+            "tonghuashun": RealheadCrawler,
+            "wencai": WencaiCrawler
         }
 
     async def execute_all_crawlers(self):
@@ -245,7 +251,7 @@ class CrawlerService:
                     logger.warning(f"Failed to fetch xpath config from DB: {e}")
 
             # Instantiate crawler (loads config automatically)
-            crawler = crawler_cls()
+            crawler = crawler_cls(self.session)
             
             if not url:
                 default_urls = {
@@ -253,7 +259,9 @@ class CrawlerService:
                     "douyin": "https://www.douyin.com",
                     "xiaohongshu": "https://www.xiaohongshu.com",
                     "bilibili": "https://www.bilibili.com",
-                    "okooo": "https://www.okooo.com"
+                    "okooo": "https://www.okooo.com",
+                    "tonghuashun": "https://t.10jqka.com.cn",
+                    "wencai": "http://www.iwencai.com/stockpick/search"
                 }
                 url = default_urls.get(platform)
             

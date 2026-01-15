@@ -114,108 +114,6 @@ class PlatformService:
                 "icon": "https://weibo.com/favicon.ico"
             },
             {
-                "platform_id": "xueqiu",
-                "name": "雪球",
-                "domain": "xueqiu.com",
-                "login_url": "https://xueqiu.com/",
-                "home_url": "https://xueqiu.com/",
-                "verify_api": "https://xueqiu.com/statuses/original/show.json",
-                "verify_type": "api",
-                "icon": "https://assets.xueqiu.com/favicon.ico"
-            },
-            {
-                "platform_id": "ths",
-                "name": "同花顺",
-                "domain": "10jqka.com.cn",
-                "login_url": "http://upass.10jqka.com.cn/login",
-                "home_url": "http://www.10jqka.com.cn/",
-                "verify_api": "http://t.10jqka.com.cn/api.php?method=user.get_user_info",
-                "verify_type": "api",
-                "icon": "http://www.10jqka.com.cn/favicon.ico"
-            },
-            {
-                "platform_id": "eastmoney",
-                "name": "东方财富",
-                "domain": "eastmoney.com",
-                "login_url": "https://passport.eastmoney.com/passport/login",
-                "home_url": "https://www.eastmoney.com/",
-                "verify_api": "https://guba.eastmoney.com/check_login.aspx",
-                "verify_type": "api",
-                "icon": "https://www.eastmoney.com/favicon.ico"
-            },
-            {
-                "platform_id": "bilibili",
-                "name": "哔哩哔哩",
-                "domain": "bilibili.com",
-                "login_url": "https://passport.bilibili.com/login",
-                "home_url": "https://www.bilibili.com/",
-                "verify_api": "https://api.bilibili.com/x/web-interface/nav",
-                "verify_type": "api",
-                "icon": "https://www.bilibili.com/favicon.ico"
-            },
-            {
-                "platform_id": "wencai",
-                "name": "问财",
-                "domain": "iwencai.com",
-                "login_url": "http://www.iwencai.com/stockpick/search",
-                "home_url": "http://www.iwencai.com/",
-                "verify_api": "http://www.iwencai.com/stockpick/search",
-                "verify_type": "html",
-                "icon": "http://www.iwencai.com/favicon.ico"
-            }
-        ]
-        
-        for p_data in default_platforms:
-            exists = await self.get_platform_by_id(p_data["platform_id"])
-            if not exists:
-                logger.info(f"初始化平台配置: {p_data['name']}")
-                await self.create_platform(p_data)
-            raise e
-
-    async def update_platform(self, platform_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        更新平台配置
-        """
-        try:
-            stmt = select(PlatformConfig).where(PlatformConfig.platform_id == platform_id)
-            result = await self.db.execute(stmt)
-            platform = result.scalar_one_or_none()
-            
-            if not platform:
-                raise ValueError(f"平台 {platform_id} 不存在")
-            
-            for key, value in data.items():
-                if hasattr(platform, key):
-                    setattr(platform, key, value)
-            
-            await self.db.commit()
-            await self.db.refresh(platform)
-            
-            logger.info(f"更新平台配置成功: {platform_id}")
-            return {
-                "id": platform.id,
-                "platform_id": platform.platform_id,
-                "name": platform.name
-            }
-        except Exception as e:
-            logger.error(f"更新平台配置失败: {e}")
-            await self.db.rollback()
-            raise e
-
-    async def init_default_platforms(self):
-        """初始化默认平台配置"""
-        default_platforms = [
-            {
-                "platform_id": "weibo",
-                "name": "微博",
-                "domain": "weibo.com",
-                "login_url": "https://weibo.com/login.php",
-                "home_url": "https://weibo.com",
-                "verify_api": "https://weibo.com/ajax/statuses/config",
-                "verify_type": "api",
-                "icon": "https://weibo.com/favicon.ico"
-            },
-            {
                 "platform_id": "bilibili",
                 "name": "B站",
                 "domain": "bilibili.com",
@@ -264,7 +162,20 @@ class PlatformService:
                 "home_url": "http://www.iwencai.com/stockpick/search",
                 "verify_api": None,
                 "verify_type": "dom",
+                "verify_xpath": "//div[contains(@class, 'user-name') or //span[contains(@class, 'nickname') or //a[contains(@class, 'user-link')]",
                 "icon": "http://s.thsi.cn/js/iwencai/img/favicon.ico"
+            },
+            {
+                "platform_id": "tonghuashun",
+                "name": "同花顺",
+                "domain": "10jqka.com.cn",
+                "login_url": "https://t.10jqka.com.cn/login",
+                "home_url": "https://t.10jqka.com.cn",
+                "verify_api": "https://t.10jqka.com.cn/newcircle/user/userPersonal",
+                "verify_type": "json",
+                "verify_xpath": None,
+                "verify_parser": '{"path": "$.data.user.name"}',
+                "icon": "📈"
             }
         ]
         
@@ -273,6 +184,36 @@ class PlatformService:
             if not exists:
                 logger.info(f"初始化平台配置: {p_data['name']}")
                 await self.create_platform(p_data)
+
+    async def update_platform(self, platform_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        更新平台配置
+        """
+        try:
+            stmt = select(PlatformConfig).where(PlatformConfig.platform_id == platform_id)
+            result = await self.db.execute(stmt)
+            platform = result.scalar_one_or_none()
+            
+            if not platform:
+                raise ValueError(f"平台 {platform_id} 不存在")
+            
+            for key, value in data.items():
+                if hasattr(platform, key):
+                    setattr(platform, key, value)
+            
+            await self.db.commit()
+            await self.db.refresh(platform)
+            
+            logger.info(f"更新平台配置成功: {platform_id}")
+            return {
+                "id": platform.id,
+                "platform_id": platform.platform_id,
+                "name": platform.name
+            }
+        except Exception as e:
+            logger.error(f"更新平台配置失败: {e}")
+            await self.db.rollback()
+            raise e
 
     async def delete_platform(self, platform_id: str) -> bool:
         """

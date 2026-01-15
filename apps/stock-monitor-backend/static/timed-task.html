@@ -125,27 +125,27 @@
             </div>
 
             <div class="bg-white p-6 rounded-lg shadow">
-                <h2 class="text-xl font-bold mb-4">批量创建任务</h2>
+                <h2 class="text-xl font-bold mb-4">手动执行任务 (Manual Execution)</h2>
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div class="border rounded p-4 hover:shadow-md transition">
-                        <h3 class="font-bold text-lg mb-2">股票池同步任务</h3>
-                        <p class="text-sm text-gray-600 mb-4">批量创建CSV同步任务 (2025-12-22前数据)</p>
-                        <button @click="batchCreateTask('csv_sync')" :disabled="loading" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded disabled:opacity-50">
-                            批量创建CSV同步
+                        <h3 class="font-bold text-lg mb-2">全量CSV同步</h3>
+                        <p class="text-sm text-gray-600 mb-4">手动触发所有活跃股票的CSV同步 (最近250天)</p>
+                        <button @click="manualTriggerTask('csv_sync')" :disabled="loading" class="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold py-2 px-4 rounded disabled:opacity-50">
+                            执行CSV同步
                         </button>
                     </div>
                     <div class="border rounded p-4 hover:shadow-md transition">
-                        <h3 class="font-bold text-lg mb-2">增量数据同步任务</h3>
-                        <p class="text-sm text-gray-600 mb-4">批量创建Tushare增量同步任务 (2025-12-22后)</p>
-                        <button @click="batchCreateTask('tushare_sync')" :disabled="loading" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded disabled:opacity-50">
-                            批量创建Tushare同步
+                        <h3 class="font-bold text-lg mb-2">增量Tushare同步</h3>
+                        <p class="text-sm text-gray-600 mb-4">手动触发所有活跃股票的Tushare增量同步</p>
+                        <button @click="manualTriggerTask('tushare_sync')" :disabled="loading" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded disabled:opacity-50">
+                            执行Tushare同步
                         </button>
                     </div>
                     <div class="border rounded p-4 hover:shadow-md transition">
-                        <h3 class="font-bold text-lg mb-2">评分计算任务</h3>
-                        <p class="text-sm text-gray-600 mb-4">批量创建评分计算任务</p>
-                        <button @click="batchCreateTask('calculate')" :disabled="loading" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded disabled:opacity-50">
-                            批量创建计算任务
+                        <h3 class="font-bold text-lg mb-2">全局评分计算</h3>
+                        <p class="text-sm text-gray-600 mb-4">手动触发今日全量评分计算与告警</p>
+                        <button @click="manualTriggerTask('calculate')" :disabled="loading" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded disabled:opacity-50">
+                            执行评分计算
                         </button>
                     </div>
                 </div>
@@ -783,57 +783,41 @@
                 });
 
                 // --- Task Control Methods ---
-                const batchCreateTask = async (taskType) => {
+                // --- Manual Task Execution (Batch) ---
+                const manualTriggerTask = async (taskType) => {
                     const typeNameMap = {
-                        'csv_sync': 'CSV同步',
-                        'tushare_sync': 'Tushare同步',
-                        'calculate': '评分计算'
+                        'csv_sync': '全量CSV同步',
+                        'tushare_sync': '增量Tushare同步',
+                        'calculate': '全局评分计算'
                     };
                     const typeName = typeNameMap[taskType] || taskType;
                     
-                    // Special handling for 'calculate' - Create GLOBAL task
+                    // 1. Calculate
                     if (taskType === 'calculate') {
-                        if (!confirm(`确定要创建 [${typeName}] 全局任务吗？\n这将创建一个每日运行的全局计算任务。`)) return;
+                        if (!confirm(`确定要立即执行 [${typeName}] 吗？\n这将触发今日全量评分计算。`)) return;
                         try {
                             loading.value = true;
-                            const taskData = {
-                                name: "全局评分计算任务",
-                                task_category: "calculation",
-                                api_method: "POST",
-                                api_endpoint: "/api/v1/scores/calculate/today",
-                                request_params: {},
-                                cron_expression: "0 20 * * *", // 20:00 daily
-                                description: "每日全量股票评分计算"
-                            };
-                            // Check duplication (simple check by name)
-                            if (genericTasks.value.some(t => t.name === taskData.name)) {
-                                alert("任务已存在，请勿重复创建。");
-                                loading.value = false;
-                                return;
-                            }
-                            
-                            const res = await api.post('/generic-task', taskData);
+                            const res = await api.post('/scores/calculate/today');
                             if (res.data.success) {
-                                alert("全局计算任务创建成功！");
-                                fetchGenericTasks();
+                                alert(`计算完成！\n${res.data.message}`);
+                                fetchExecutionLogs(1);
                             } else {
-                                alert("创建失败: " + res.data.message);
+                                alert("执行失败: " + res.data.message);
                             }
                         } catch(e) {
-                             alert("请求异常: " + e.message);
+                             alert("请求异常: " + (e.response?.data?.detail || e.message));
                         } finally {
                             loading.value = false;
                         }
                         return;
                     }
 
-                    // For Sync tasks - Batch create per stock
-                    if (!confirm(`确定要批量创建 [${typeName}] 任务吗？\n这将为所有活跃股票创建独立的定时任务。\n注意：这可能需要一些时间。`)) return;
+                    // 2. Sync Tasks
+                    if (!confirm(`确定要手动执行 [${typeName}] 吗？\n这将为所有活跃股票执行同步操作。\n注意：这将花费较长时间。`)) return;
                     
                     loading.value = true;
                     try {
-                        // 1. Fetch all active stocks
-                        // Note: limit=2000 to get all (assuming <2000 active stocks for now, or loop)
+                        // Fetch active stocks
                         const stockRes = await api.get('/stocks/info', { params: { active_only: true, limit: 2000 } });
                         if (!stockRes.data.success) throw new Error(stockRes.data.message);
                         
@@ -843,56 +827,49 @@
                             return;
                         }
 
-                        const tasksToCreate = [];
-                        
-                        stocks.forEach(stock => {
-                            const code = stock.code;
-                            // Randomize minute to avoid thundering herd (0-59)
-                            const randomMinute = Math.floor(Math.random() * 60);
-                            
-                            if (taskType === 'csv_sync') {
-                                tasksToCreate.push({
-                                    name: `CSV同步-${code}`,
-                                    task_category: "data_sync",
-                                    api_method: "POST",
-                                    api_endpoint: "/api/v1/stock/sync/csv",
-                                    request_params: { "stock_codes": [code], "days": 250, "batch_id": 0 },
-                                    cron_expression: `${randomMinute} 2 * * *`, // 02:xx daily
-                                    description: `股票 ${code} CSV数据同步`,
-                                    is_active: true
-                                });
-                            } else if (taskType === 'tushare_sync') {
-                                tasksToCreate.push({
-                                    name: `Tushare同步-${code}`,
-                                    task_category: "data_sync",
-                                    api_method: "POST",
-                                    api_endpoint: "/api/v1/stock/sync/tushare",
-                                    request_params: { "stock_codes": [code], "batch_id": 0 },
-                                    cron_expression: `${randomMinute} 18 * * *`, // 18:xx daily
-                                    description: `股票 ${code} Tushare增量同步`,
-                                    is_active: true
-                                });
-                            }
-                        });
-
-                        // 2. Batch submit in chunks (e.g. 50 tasks per request)
+                        const stockCodes = stocks.map(s => s.code);
+                        const total = stockCodes.length;
                         const chunkSize = 50;
+                        let processed = 0;
                         let successCount = 0;
-                        
-                        for (let i = 0; i < tasksToCreate.length; i += chunkSize) {
-                            const chunk = tasksToCreate.slice(i, i + chunkSize);
-                            const batchRes = await api.post('/generic-task/batch/create', { tasks: chunk });
-                            if (batchRes.data.success) {
-                                successCount += chunk.length;
+                        let errorCount = 0;
+
+                        // Chunk execution
+                        for (let i = 0; i < total; i += chunkSize) {
+                            const chunk = stockCodes.slice(i, i + chunkSize);
+                            try {
+                                let res;
+                                if (taskType === 'csv_sync') {
+                                    res = await api.post('/stock/sync/csv', { 
+                                        stock_codes: chunk, 
+                                        days: 250, 
+                                        batch_id: 0 
+                                    });
+                                } else if (taskType === 'tushare_sync') {
+                                    res = await api.post('/stock/sync/tushare', { 
+                                        stock_codes: chunk, 
+                                        batch_id: 0 
+                                    });
+                                }
+
+                                if (res && res.data.success) {
+                                    successCount += chunk.length;
+                                } else {
+                                    errorCount += chunk.length;
+                                    console.error("Batch error:", res?.data?.message);
+                                }
+                            } catch (err) {
+                                errorCount += chunk.length;
+                                console.error(err);
                             }
-                            // Optional: update loading status text if UI supported it
+                            processed += chunk.length;
                         }
                         
-                        alert(`批量创建完成！成功提交 ${successCount} / ${tasksToCreate.length} 个任务。`);
-                        fetchGenericTasks();
+                        alert(`执行完成！\n共处理: ${total}\n成功: ${successCount}\n失败: ${errorCount}`);
+                        fetchExecutionLogs(1);
 
                     } catch (e) {
-                        alert('请求异常: ' + (e.response?.data?.detail || e.message));
+                        alert('执行异常: ' + (e.response?.data?.detail || e.message));
                     } finally {
                         loading.value = false;
                     }

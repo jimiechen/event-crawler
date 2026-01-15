@@ -6,6 +6,7 @@ import httpx
 from datetime import datetime
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from app.repositories.task_log_repository import TaskExecutionLogRepository
 from app.database import db_manager
@@ -52,6 +53,17 @@ class TaskExecutor:
             coalesce=True,  # Skip if previous execution hasn't finished
             max_instances=1
         )
+        
+        # Add daily AI analysis job (runs at 15:30 every day)
+        self.scheduler.add_job(
+            self.schedule_daily_analysis,
+            trigger=CronTrigger(hour=15, minute=30),
+            id="daily_ai_analysis",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1
+        )
+        
         logger.info("TaskExecutor initialized with APScheduler")
 
     @property
@@ -103,6 +115,13 @@ class TaskExecutor:
 
         except Exception as e:
             logger.error(f"TaskExecutor scan error: {e}")
+
+    async def schedule_daily_analysis(self):
+        """Scheduled job to trigger daily AI analysis for active stocks"""
+        logger.info("Starting daily AI analysis task...")
+        # TODO: Implement batch job creation logic here
+        # For example, fetch all active stocks and create 'analyze_stock' tasks in DB
+        pass
 
     async def execute_task(self, log_id: int, repo: TaskExecutionLogRepository):
         # Check processing lock

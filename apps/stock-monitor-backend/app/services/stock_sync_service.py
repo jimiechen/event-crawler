@@ -206,12 +206,16 @@ class StockSyncService:
             return None
 
     async def get_batch_stocks(self, batch_id: int) -> List[str]:
-        """获取批次下的股票代码列表"""
+        """获取批次下的股票代码列表. batch_id=-1 表示获取所有股票"""
         async with self.db_manager.get_session() as session:
             try:
                 # 直接查询 wencai_stocks 表
-                query = text("SELECT stock_code FROM wencai_stocks WHERE crawl_batch_id = :batch_id")
-                result = await session.execute(query, {'batch_id': batch_id})
+                if batch_id == -1:
+                    query = text("SELECT stock_code FROM wencai_stocks")
+                    result = await session.execute(query)
+                else:
+                    query = text("SELECT stock_code FROM wencai_stocks WHERE crawl_batch_id = :batch_id")
+                    result = await session.execute(query, {'batch_id': batch_id})
                 return [row[0] for row in result.fetchall()]
             except Exception as e:
                 logger.error(f"获取批次股票失败: {e}")

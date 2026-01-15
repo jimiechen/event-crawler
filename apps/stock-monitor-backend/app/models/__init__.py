@@ -20,6 +20,8 @@ from .crawler import CrawlerTarget, CrawlerResult, CrawlerLoginStatus
 from .platform import PlatformConfig, PlatformSession
 from .generic_task import GenericTask
 from .task_execution_detail import TaskExecutionDetail
+from .ai_decision import AIDecisionResult
+from .arena_models import PromptTemplate, SignalDefinition, SignalPool
 
 __all__ = [
     "Base",
@@ -54,5 +56,9 @@ __all__ = [
     "PlatformConfig",
     "PlatformSession",
     "GenericTask",
-    "TaskExecutionDetail"
+    "TaskExecutionDetail",
+    "AIDecisionResult",
+    "PromptTemplate",
+    "SignalDefinition",
+    "SignalPool"
 ]

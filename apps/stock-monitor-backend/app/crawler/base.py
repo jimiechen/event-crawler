@@ -161,8 +161,25 @@ class CrawlerBase(ABC):
                     except Exception as e:
                         logger.warning(f"JSON解析失败: {e}")
             
-            elif verify_type == 'text' and verify_xpath:
+            elif verify_type == 'dom' and verify_xpath:
                 # XPath方式验证
+                element = await page.query_selector(verify_xpath)
+                if element:
+                    content = await element.inner_text()
+                    if verify_parser:
+                        parser_config = json.loads(verify_parser)
+                        extract_field = parser_config.get('extract', '')
+                        if extract_field:
+                            # 简单的字段提取
+                            import re
+                            match = re.search(extract_field, content)
+                            if match:
+                                account_name = match.group(1) if match.groups() else match.group(0)
+                    else:
+                        account_name = content
+            
+            elif verify_type == 'text' and verify_xpath:
+                # XPath方式验证（兼容旧配置）
                 element = await page.query_selector(verify_xpath)
                 if element:
                     content = await element.inner_text()

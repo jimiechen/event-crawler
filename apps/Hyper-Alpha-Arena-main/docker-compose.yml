@@ -1,3 +1,5 @@
+version: '3.3'
+
 services:
   postgres:
     image: postgres:14
@@ -24,11 +26,11 @@ services:
       dockerfile: Dockerfile
       args:
         # Pass through host proxy settings (empty if host has none)
-        http_proxy: ${http_proxy-}
-        https_proxy: ${https_proxy-}
-        HTTP_PROXY: ${HTTP_PROXY-}
-        HTTPS_PROXY: ${HTTPS_PROXY-}
-        ALL_PROXY: ${ALL_PROXY-}
+        # http_proxy: ${http_proxy:-}
+        # https_proxy: ${https_proxy:-}
+        # HTTP_PROXY: ${HTTP_PROXY:-}
+        # HTTPS_PROXY: ${HTTPS_PROXY:-}
+        # ALL_PROXY: ${ALL_PROXY:-}
     container_name: hyper-arena-app
     environment:
       # Database connection

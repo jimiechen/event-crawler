@@ -1,0 +1,28 @@
+{
+  "name": "deepseek-mcp",
+  "version": "1.0.0",
+  "description": "DeepSeek MCP工具 - 用于GLM4.7/Gemini与DeepSeek协作",
+  "main": "server/mcp-server.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/mcp-server.js",
+    "dev": "ts-node server/mcp-server.ts"
+  },
+  "keywords": [
+    "mcp",
+    "deepseek",
+    "ai",
+    "collaboration"
+  ],
+  "author": "Trae AI",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0"
+  }
+}

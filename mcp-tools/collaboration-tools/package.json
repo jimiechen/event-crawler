@@ -1,0 +1,28 @@
+{
+  "name": "collaboration-tools",
+  "version": "1.0.0",
+  "description": "协作文档MCP工具 - 用于GLM4.7/Gemini管理协作文档",
+  "main": "server/mcp-server.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/mcp-server.js",
+    "dev": "ts-node server/mcp-server.ts"
+  },
+  "keywords": [
+    "mcp",
+    "collaboration",
+    "document",
+    "markdown"
+  ],
+  "author": "Trae AI",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.0"
+  }
+}
