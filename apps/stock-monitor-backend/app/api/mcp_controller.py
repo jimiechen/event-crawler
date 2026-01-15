@@ -2,12 +2,11 @@
 MCP API控制器
 提供HTTP API接口，供Trae AI通过MCP工具调用
 """
-from fastapi import APIRouter, HTTPException, Depends
-from typing import Dict, Any, Optional
+from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import Dict, Any, Optional, List
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.services.deepseek_mcp_service import DeepSeekMCPService, DeepSeekMessage, DeepSeekLogin, DeepSeekResponse
-from app.services.collaboration_service import CollaborationService
-from config.mcp_config import MCPConfig
+from app.services.deepseek_mcp_service import DeepSeekMCPService
+from mcp.server.fastmcp import FastMCP
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,348 +15,100 @@ router = APIRouter(prefix="/mcp", tags=["MCP"])
 
 # 全局服务实例
 deepseek_service: Optional[DeepSeekMCPService] = None
-collab_service: Optional[CollaborationService] = None
-
 
 async def get_db() -> AsyncSession:
     """获取数据库会话"""
-    from app.database import get_async_session
-    async for session in get_async_session():
+    from app.database import get_db_session
+    async for session in get_db_session():
         yield session
-
 
 async def get_deepseek_service(db: AsyncSession = Depends(get_db)) -> DeepSeekMCPService:
     """获取DeepSeek服务实例"""
     global deepseek_service
-    if deepseek_service is None:
-        deepseek_service = DeepSeekMCPService(db)
-        await deepseek_service.initialize()
-    return deepseek_service
-
-
-def get_collab_service() -> CollaborationService:
-    """获取协作服务实例"""
-    global collab_service
-    if collab_service is None:
-        collab_service = CollaborationService(MCPConfig.COLLABORATION_BASE_DIR)
-    return collab_service
-
-
-@router.get("/")
-async def root():
-    """根路径"""
-    return {
-        "message": "Trae AI MCP 协作系统运行中",
-        "version": "1.0.0",
-        "endpoints": {
-            "deepseek": "/mcp/deepseek/*",
-            "collaboration": "/mcp/collaboration/*",
-            "health": "/mcp/health"
-        },
-        "config": {
-            "deepseek_enabled": MCPConfig.MCP_TOOLS_ENABLED["deepseek"],
-            "collaboration_enabled": MCPConfig.MCP_TOOLS_ENABLED["collaboration"],
-            "allowed_models": MCPConfig.ALLOWED_MODELS
-        }
-    }
-
-
-@router.get("/health")
-async def health_check():
-    """健康检查"""
-    import time
-    return {
-        "status": "healthy",
-        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "services": {
-            "deepseek": deepseek_service is not None and deepseek_service.initialized,
-            "collaboration": collab_service is not None
-        }
-    }
-
+    # 每次请求都重新实例化可能比较安全，或者需要确保 db session 的生命周期
+    # 这里的简单实现：
+    return DeepSeekMCPService(db)
 
 # ============================================================================
-# DeepSeek相关API
+# DeepSeek相关API (REST)
 # ============================================================================
 
-@router.post("/deepseek/login")
-async def deepseek_login(
-    login_data: DeepSeekLogin,
-    service: DeepSeekMCPService = Depends(get_deepseek_service)
-):
-    """DeepSeek登录"""
+@router.get("/deepseek/chats")
+async def list_chats(service: DeepSeekMCPService = Depends(get_deepseek_service)):
+    """获取会话列表"""
     try:
-        result = await service.login(
-            email=login_data.email,
-            password=login_data.password
-        )
-        return result
+        return await service.list_chats()
     except Exception as e:
-        logger.error(f"登录API异常: {str(e)}")
+        logger.error(f"获取会话列表失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/deepseek/chats/{chat_id}")
+async def read_chat(chat_id: str, service: DeepSeekMCPService = Depends(get_deepseek_service)):
+    """读取会话内容"""
+    try:
+        content = await service.read_chat(chat_id)
+        return {"content": content}
+    except Exception as e:
+        logger.error(f"读取会话失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/deepseek/send")
-async def send_to_deepseek(
-    message_data: DeepSeekMessage,
-    from_model: Optional[str] = "GLM4.7",
+async def send_message(
+    payload: Dict[str, Any], 
     service: DeepSeekMCPService = Depends(get_deepseek_service)
 ):
-    """发送消息给DeepSeek"""
+    """发送消息"""
     try:
-        # 验证模型是否被允许
-        if from_model and not MCPConfig.is_model_allowed(from_model):
-            raise HTTPException(
-                status_code=403,
-                detail=f"模型 {from_model} 不在允许列表中"
-            )
-        
-        result = await service.send_message(message_data, from_model=from_model)
-        if not result.success:
-            raise HTTPException(status_code=400, detail=result.error)
-        return result.dict()
-    except HTTPException:
-        raise
+        text = payload.get("text")
+        chat_id = payload.get("chat_id")
+        if not text:
+            raise HTTPException(status_code=400, detail="text is required")
+            
+        reply = await service.send_message(text, chat_id)
+        return {"reply": reply}
     except Exception as e:
-        logger.error(f"发送消息API异常: {str(e)}")
+        logger.error(f"发送消息失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/deepseek/session/new")
-async def start_new_session(
-    from_model: Optional[str] = "GLM4.7",
-    service: DeepSeekMCPService = Depends(get_deepseek_service)
-):
-    """开始新的DeepSeek会话"""
-    try:
-        # 验证模型是否被允许
-        if from_model and not MCPConfig.is_model_allowed(from_model):
-            raise HTTPException(
-                status_code=403,
-                detail=f"模型 {from_model} 不在允许列表中"
-            )
-        
-        result = await service.start_new_session(from_model=from_model)
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"开始新会话API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/deepseek/conversations")
-async def get_conversations(
-    conversation_id: Optional[str] = None,
-    service: DeepSeekMCPService = Depends(get_deepseek_service)
-):
-    """获取对话历史"""
-    try:
-        result = await service.get_conversation_history(conversation_id)
-        return result
-    except Exception as e:
-        logger.error(f"获取对话历史API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 
 # ============================================================================
-# 协作文档API
+# MCP SSE Endpoint (Experimental)
 # ============================================================================
+# 注意：这里我们尝试集成 FastMCP 到 FastAPI
+# FastMCP 本身管理着生命周期，这里我们只定义工具，通过 SSE 暴露
 
-@router.post("/collaboration/doc/create")
-async def create_collaboration_doc(
-    doc_data: dict,
-    service: CollaborationService = Depends(get_collab_service),
-    db: AsyncSession = Depends(get_db)
-):
-    """创建协作文档"""
-    try:
-        # 验证模型是否被允许
-        author = doc_data.get("author", "GLM4.7")
-        if not MCPConfig.is_model_allowed(author):
-            raise HTTPException(
-                status_code=403,
-                detail=f"模型 {author} 不在允许列表中"
-            )
-        
-        result = await service.create_document(
-            doc_type=doc_data.get("doc_type"),
-            title=doc_data.get("title"),
-            content=doc_data.get("content"),
-            author=author,
-            db=db
-        )
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"创建文档API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+mcp = FastMCP("stock-monitor-backend")
 
+@mcp.tool()
+async def deepseek_list_chats_tool() -> str:
+    """List historical chats from DeepSeek."""
+    # 注意：FastMCP 的工具函数通常是静态的或自包含的
+    # 在这里我们需要一种方式获取 DB session
+    # 这是一个简化实现，实际上可能需要更复杂的依赖注入
+    # 临时方案：直接连接数据库或通过 HTTP 调用自身的 API (Loopback)
+    # 或者，我们在此处不实现 FastMCP，而是让 Trae 直接调用上述 REST API
+    # 但为了满足 MCP 协议，我们需要暴露 SSE
+    return "Use REST API for now or implement DB context manager here"
 
-@router.post("/collaboration/doc/update")
-async def update_collaboration_doc(
-    update_data: dict,
-    service: CollaborationService = Depends(get_collab_service),
-    db: AsyncSession = Depends(get_db)
-):
-    """更新协作文档"""
-    try:
-        # 验证模型是否被允许
-        author = update_data.get("author", "GLM4.7")
-        if not MCPConfig.is_model_allowed(author):
-            raise HTTPException(
-                status_code=403,
-                detail=f"模型 {author} 不在允许列表中"
-            )
-        
-        result = await service.update_document(
-            doc_path=update_data.get("doc_path"),
-            content=update_data.get("content"),
-            signature=update_data.get("signature"),
-            author=author,
-            db=db
-        )
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"更新文档API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# 由于 FastMCP 接管了路由，直接集成到现有的 FastAPI 比较复杂
+# 我们推荐使用 SSE 路由手动实现 MCP 协议，或者运行独立的 MCP 服务器
+# 这里我们保留 REST API，Trae 可以通过 Generic REST MCP Client 调用，
+# 或者我们可以实现一个简单的 SSE 端点来包装这些调用。
 
+from sse_starlette.sse import EventSourceResponse
 
-@router.get("/collaboration/doc/{doc_path:path}")
-async def get_collaboration_doc(
-    doc_path: str,
-    service: CollaborationService = Depends(get_collab_service)
-):
-    """获取协作文档"""
-    try:
-        result = await service.get_document(doc_path)
-        if not result["success"]:
-            raise HTTPException(status_code=404, detail=result.get("error"))
-        return result
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取文档API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+@router.get("/sse")
+async def mcp_sse(request: Request):
+    """MCP SSE Endpoint"""
+    async def event_generator():
+        # 这里应该实现 MCP 协议的握手和消息处理
+        # 鉴于复杂性，建议目前阶段主要使用 REST API
+        # 如果必须支持 MCP 协议，建议使用 mcp python sdk 的 sse transport
+        yield {"event": "endpoint", "data": "/mcp/messages"}
 
+    return EventSourceResponse(event_generator())
 
-@router.get("/collaboration/docs")
-async def list_collaboration_docs(
-    doc_type: Optional[str] = None,
-    service: CollaborationService = Depends(get_collab_service)
-):
-    """列出协作文档"""
-    try:
-        result = await service.list_documents(doc_type)
-        return result
-    except Exception as e:
-        logger.error(f"列出文档API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================================
-# 协作会话API
-# ============================================================================
-
-@router.get("/collaboration/sessions")
-async def list_sessions(db: AsyncSession = Depends(get_db)):
-    """列出所有协作会话"""
-    try:
-        from app.models.collaboration_log import CollaborationSession
-        from sqlalchemy import select
-        
-        query = select(CollaborationSession).order_by(
-            CollaborationSession.updated_at.desc()
-        )
-        result = await db.execute(query)
-        sessions = result.scalars().all()
-        
-        return {
-            "success": True,
-            "sessions": [
-                {
-                    "id": session.id,
-                    "session_id": session.session_id,
-                    "title": session.title,
-                    "doc_type": session.doc_type,
-                    "status": session.status,
-                    "participants": session.participants,
-                    "message_count": session.message_count,
-                    "version_count": session.version_count,
-                    "created_at": session.created_at.isoformat() if session.created_at else None,
-                    "updated_at": session.updated_at.isoformat() if session.updated_at else None
-                }
-                for session in sessions
-            ],
-            "count": len(sessions)
-        }
-    except Exception as e:
-        logger.error(f"列出会话API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/collaboration/sessions/{session_id}")
-async def get_session(
-    session_id: str,
-    db: AsyncSession = Depends(get_db)
-):
-    """获取特定会话"""
-    try:
-        from app.models.collaboration_log import CollaborationSession, CollaborationLog
-        from sqlalchemy import select
-        
-        # 获取会话信息
-        query = select(CollaborationSession).where(
-            CollaborationSession.session_id == session_id
-        )
-        result = await db.execute(query)
-        session = result.scalar_one_or_none()
-        
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        
-        # 获取会话日志
-        log_query = select(CollaborationLog).where(
-            CollaborationLog.session_id == session_id
-        ).order_by(CollaborationLog.created_at.asc())
-        
-        log_result = await db.execute(log_query)
-        logs = log_result.scalars().all()
-        
-        return {
-            "success": True,
-            "session": {
-                "id": session.id,
-                "session_id": session.session_id,
-                "title": session.title,
-                "doc_type": session.doc_type,
-                "doc_path": session.doc_path,
-                "status": session.status,
-                "participants": session.participants,
-                "message_count": session.message_count,
-                "version_count": session.version_count,
-                "created_at": session.created_at.isoformat() if session.created_at else None,
-                "updated_at": session.updated_at.isoformat() if session.updated_at else None,
-                "completed_at": session.completed_at.isoformat() if session.completed_at else None
-            },
-            "logs": [
-                {
-                    "id": log.id,
-                    "from_model": log.from_model,
-                    "to_model": log.to_model,
-                    "message_type": log.message_type,
-                    "message_content": log.message_content,
-                    "status": log.status,
-                    "created_at": log.created_at.isoformat() if log.created_at else None
-                }
-                for log in logs
-            ]
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取会话API异常: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+@router.post("/messages")
+async def mcp_messages(request: Request):
+    """MCP Messages Endpoint"""
+    # 处理 JSON-RPC 请求
+    return {"jsonrpc": "2.0", "result": "ok"}

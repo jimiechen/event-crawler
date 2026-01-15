@@ -45,7 +45,8 @@ def main():
         port=port,
         reload=reload,
         log_level=settings.log_level.lower(),
-        access_log=True
+        access_log=True,
+        loop="asyncio"  # Force asyncio loop for nest_asyncio compatibility
     )
 
 if __name__ == "__main__":

@@ -39,7 +39,7 @@ class CollaborationLog(Base):
                     onupdate=func.current_timestamp(), comment="更新时间")
     
     # 元数据
-    metadata = Column(Text, comment="元数据（JSON格式）")
+    meta_data = Column(Text, comment="元数据（JSON格式）")
     
     def __repr__(self):
         return f"<CollaborationLog(id={self.id}, from={self.from_model}, to={self.to_model}, status={self.status})>"
@@ -106,7 +106,7 @@ class CollaborationSession(Base):
     completed_at = Column(DateTime, comment="完成时间")
     
     # 元数据
-    metadata = Column(Text, comment="元数据（JSON格式）")
+    meta_data = Column(Text, comment="元数据（JSON格式）")
     
     def __repr__(self):
         return f"<CollaborationSession(id={self.id}, session_id={self.session_id}, status={self.status})>"

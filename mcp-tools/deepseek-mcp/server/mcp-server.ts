@@ -2,7 +2,6 @@
  * DeepSeek MCP服务器
  * 实现MCP协议，提供DeepSeek工具
  */
-
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -52,29 +51,27 @@ async function createServer() {
   );
 
   // 注册工具列表处理器
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return {
-      tools: deepseekTools
-    };
+  server.setRequestHandler('tools/list', {
+    tools: deepseekTools
   });
 
   // 注册工具调用处理器
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments } = request.params;
+  server.setRequestHandler('tools/call', async (request: any) => {
+    const { name, arguments: args } = request.params;
 
     try {
       switch (name) {
         case 'deepseek_login':
-          return await handleDeepseekLogin(arguments);
+          return await handleDeepseekLogin(args);
         
         case 'send_message_to_deepseek':
-          return await handleSendMessageToDeepseek(arguments);
+          return await handleSendMessageToDeepseek(args);
         
         case 'start_deepseek_session':
-          return await handleStartDeepseekSession(arguments);
+          return await handleStartDeepseekSession(args);
         
         case 'get_deepseek_conversations':
-          return await handleGetDeepseekConversations(arguments);
+          return await handleGetDeepseekConversations(args);
         
         default:
           throw new Error(`未知工具: ${name}`);
@@ -98,7 +95,7 @@ async function createServer() {
 /**
  * 处理DeepSeek登录
  */
-async function handleDeepseekLogin(args: any) {
+async function handleDeepSeekLogin(args: any) {
   const { email, password } = args;
   
   const result = await callMCPAPI('/deepseek/login', {

@@ -113,6 +113,13 @@ try:
 except ImportError as e:
     logger.warning(f"未找到排名控制器，跳过注册: {e}")
 
+# 注册MCP控制器
+try:
+    from . import mcp_controller
+    app.include_router(mcp_controller.router)
+except ImportError as e:
+    logger.warning(f"未找到MCP控制器，跳过注册: {e}")
+
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

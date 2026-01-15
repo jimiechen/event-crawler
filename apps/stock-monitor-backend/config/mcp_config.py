@@ -16,7 +16,7 @@ class MCPConfig:
     
     # API配置
     API_HOST = os.getenv("MCP_API_HOST", "0.0.0.0")
-    API_PORT = int(os.getenv("MCP_API_PORT", "8000"))
+    API_PORT = int(os.getenv("MCP_API_PORT", "56666"))
     
     # 文档配置
     COLLABORATION_BASE_DIR = os.getenv("COLLABORATION_DIR", "collaboration_docs")

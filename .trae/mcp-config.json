@@ -1,0 +1,9 @@
+{
+  "command": "node",
+  "args": [
+    "/Users/mac/StudioProjects/open-citycloud/projects/event-crawler/mcp-tools/deepseek-mcp/server/mcp-server.ts"
+  ],
+  "env": {
+    "MCP_API_URL": "http://localhost:8000"
+  }
+}
