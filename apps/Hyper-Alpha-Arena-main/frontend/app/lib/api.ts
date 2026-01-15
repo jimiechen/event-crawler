@@ -1,7 +1,7 @@
 import Cookies from 'js-cookie'
 
 // API configuration - 使用Mock接口
-const API_BASE_URL = 'http://localhost:8803/api/mock'
+const API_BASE_URL = '/api/mock'
 
 // Hardcoded user for paper trading (matches backend initialization)
 const HARDCODED_USERNAME = 'default'

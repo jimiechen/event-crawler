@@ -15,11 +15,11 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
-    port: 8802,
+    port: 8900,
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:8803',
+        target: 'http://localhost:8800',
         changeOrigin: true,
         secure: false,
       }
