@@ -7,9 +7,8 @@ import {
   createPool,
   updatePool,
   deletePool,
-  SignalDefinition,
-  SignalPool
 } from '@/lib/api'
+import type { SignalDefinition, SignalPool } from '@/types/arena'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'

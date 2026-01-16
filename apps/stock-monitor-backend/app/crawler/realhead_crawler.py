@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crawler.base import CrawlerBase
 from app.services.stock_service import StockService
+from app.models.stock import TonghuashunRawLog
 
 logger = logging.getLogger(__name__)
 
@@ -84,49 +85,96 @@ class RealheadCrawler(CrawlerBase):
     
     async def intercept_realhead_requests(self, page: Page, stock_codes: List[str] = None) -> List[Dict[str, Any]]:
         """
-        拦截 realhead API 请求
+        拦截 realhead API 请求 (支持多标签页并发)
         """
         realhead_data = []
-        captured_requests = set()
+        context = page.context
         
         async def handle_route(route, request):
             url = request.url
             if 'v2/realhead/hs_' in url:
-                # 获取响应
-                response = await route.fetch()
-                text = await response.text()
-                
-                # 解析 JSONP
-                parsed_data = self.parse_realhead_jsonp(text)
-                if parsed_data:
-                    # 转换字段（在爬虫中完成）
-                    converted_data = self.convert_fields(parsed_data)
-                    realhead_data.append(converted_data)
-                    captured_requests.add(url)
-                    logger.info(f"成功解析股票数据: {converted_data.get('stock_code')}")
-                
-                # 继续路由
-                await route.fulfill(response=response)
+                try:
+                    # 获取响应
+                    response = await route.fetch()
+                    text = await response.text()
+                    
+                    # 解析 JSONP
+                    parsed_data = self.parse_realhead_jsonp(text)
+                    if parsed_data:
+                        # 1. 存入同花顺 raw 表
+                        try:
+                            # 从URL或数据中提取市场和股票数量信息
+                            market = "hs"
+                            stock_count = 1
+                            if 'items' in parsed_data:
+                                stock_count = len(parsed_data['items'])
+                            
+                            raw_log = TonghuashunRawLog(
+                                source="realhead_crawler",
+                                url=url,
+                                request_id=request.headers.get('x-request-id', ''),
+                                request_timestamp=datetime.now().isoformat(),
+                                payload_type="json",
+                                market=market,
+                                stock_count=stock_count,
+                                payload=parsed_data,
+                                parse_status="ok"
+                            )
+                            self.db.add(raw_log)
+                            # 定期提交或等待最后统一提交? 
+                            # 为了数据安全，这里立即提交（注意并发性能影响）
+                            # 由于是异步，await commit应该还好
+                            await self.db.commit()
+                            logger.info(f"已保存 Raw Log: {url[-20:]}")
+                        except Exception as e:
+                            logger.error(f"保存 Raw Log 失败: {e}")
+                            await self.db.rollback()
+
+                        # 2. 转换字段（在爬虫中完成）
+                        converted_data = self.convert_fields(parsed_data)
+                        realhead_data.append(converted_data)
+                        logger.info(f"成功解析股票数据: {converted_data.get('stock_code')}")
+                    
+                    # 继续路由
+                    await route.fulfill(response=response)
+                except Exception as e:
+                    logger.error(f"处理路由失败 {url}: {e}")
+                    await route.continue_()
             else:
                 await route.continue_()
         
-        # 注册路由
-        await page.route('**/*', handle_route)
+        # 注册路由 (使用上下文级别路由以覆盖所有页面)
+        await context.route('**/*', handle_route)
         
         # 访问同花顺页面
-        if stock_codes:
-            # 访问指定股票页面
-            for code in stock_codes:
-                url = f"http://stockpage.10jqka.com.cn/{code}"
-                logger.info(f"访问股票页面: {url}")
-                await page.goto(url, wait_until='networkidle', timeout=30000)
-                await asyncio.sleep(2)  # 等待 realhead 请求
-        else:
+        if not stock_codes:
             # 访问自选股页面
             logger.info("访问自选股页面")
             await page.goto("https://t.10jqka.com.cn/newcircle/user/userPersonal/?from=finance&tab=zx", 
                           wait_until='networkidle', timeout=30000)
             await asyncio.sleep(5)  # 等待所有 realhead 请求
+        else:
+            # 多标签页并发访问指定股票页面
+            logger.info(f"开始并发抓取 {len(stock_codes)} 只股票数据...")
+            
+            concurrency_limit = 5 # 限制并发标签页数量
+            semaphore = asyncio.Semaphore(concurrency_limit)
+            
+            async def process_stock(code):
+                async with semaphore:
+                    new_page = await context.new_page()
+                    try:
+                        url = f"http://stockpage.10jqka.com.cn/{code}/"
+                        logger.info(f"访问股票页面: {url}")
+                        await new_page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                        await asyncio.sleep(3)  # 等待 realhead 请求
+                    except Exception as e:
+                        logger.error(f"访问股票页面失败 {code}: {e}")
+                    finally:
+                        await new_page.close()
+            
+            tasks = [process_stock(code) for code in stock_codes]
+            await asyncio.gather(*tasks)
         
         logger.info(f"共捕获 {len(realhead_data)} 条 realhead 数据")
         return realhead_data
@@ -137,17 +185,18 @@ class RealheadCrawler(CrawlerBase):
         """
         try:
             # 提取 JSONP 中的 JSON 数据
-            pattern = r'quotebridge_v2_realhead_hs_(\d+)_last\s*\(\s*(\{.*\})\s*\)'
-            match = re.search(pattern, jsonp_text)
+            # 兼容不同格式: quotebridge_v2_realhead_hs_000001_last({...})
+            pattern = r'quotebridge_v2_realhead_hs_\d+_last\s*\(\s*(\{.*?\})\s*\)'
+            match = re.search(pattern, jsonp_text, re.DOTALL)
             
-            if match and match.group(2):
-                return json.loads(match.group(2))
+            if match and match.group(1):
+                return json.loads(match.group(1))
             
-            logger.warning(f"JSONP 解析失败: {jsonp_text[:100]}")
+            logger.warning(f"JSONP 解析失败，未匹配到JSON结构: {jsonp_text[:100]}...")
             return None
             
         except Exception as e:
-            logger.error(f"JSONP 解析异常: {e}")
+            logger.error(f"JSONP 解析异常: {e}, text: {jsonp_text[:50]}...")
             return None
     
     def convert_fields(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:

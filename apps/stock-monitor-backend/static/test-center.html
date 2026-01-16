@@ -72,7 +72,7 @@
                                     </span>
                                 </td>
                                 <td class="px-5 py-5 border-b border-gray-200 text-sm">
-                                    <button @click="runSessionTest(page)" class="text-blue-600 hover:text-blue-900 mr-3 text-xs">测试会话</button>
+                                    <button @click="runSessionTest(page)" class="text-blue-600 hover:text-blue-900 mr-3 text-xs">启动会话</button>
                                     <button @click="runCrawlerTest(page)" class="text-green-600 hover:text-green-900 mr-3 text-xs">测试爬虫</button>
                                     <button @click="viewTestResults(page)" class="text-purple-600 hover:text-purple-900 text-xs">查看结果</button>
                                     <button @click="editTestPage(page)" class="text-gray-600 hover:text-gray-900 text-xs">编辑</button>
@@ -343,16 +343,17 @@
                 const runSessionTest = async (page) => {
                     selectedTestPage.value = page;
                     isRunningTest.value = true;
-                    runningTestMessage.value = `正在测试 ${page.name} 的会话状态...`;
+                    runningTestMessage.value = `正在启动 ${page.name} 的有头浏览器会话...`;
 
                     try {
                         const response = await axios.post('/api/v1/test-pages/run', {
                             test_page_id: page.id,
-                            test_type: 'session'
+                            test_type: 'session',
+                            headed: true
                         });
 
                         if (response.data.success) {
-                            alert('会话测试完成: ' + response.data.data.message);
+                            alert('会话结束: ' + response.data.data.message);
                             fetchTestResults();
                         } else {
                             alert('会话测试失败: ' + response.data.message);

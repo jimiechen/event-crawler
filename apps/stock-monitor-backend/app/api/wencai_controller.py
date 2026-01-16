@@ -1008,6 +1008,63 @@ async def delete_wencai_stock(
         )
 
 
+@router.post("/crawl/realtime", response_model=BaseResponse, summary="实时执行问财爬虫")
+async def crawl_realtime(
+    query: Optional[str] = Body(None, embed=True, description="自定义查询语句"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    实时执行问财爬虫
+    如果不提供 query，将使用默认的日期逻辑生成查询语句
+    """
+    try:
+        from datetime import datetime, timedelta
+        
+        # 如果未提供 query，自动生成
+        if not query:
+            date_obj = datetime.now()
+            # 如果是周末，调整到最近的周五
+            while date_obj.weekday() >= 5:
+                date_obj -= timedelta(days=1)
+            
+            # 计算 T-1
+            prev_date_obj = date_obj - timedelta(days=1)
+            while prev_date_obj.weekday() >= 5:
+                prev_date_obj -= timedelta(days=1)
+                
+            query_date = date_obj.strftime("%Y年%m月%d日")
+            prev_date_str = prev_date_obj.strftime("%Y年%m月%d日")
+            
+            # 默认查询逻辑
+            query = f"{query_date}成交量是{prev_date_str}成交量的2.9倍以上，非北交，非创业板，非科创版，非ST，概念，行业，{prev_date_str}和{query_date}涨幅低于13%，收盘价低于25"
+            
+        logger.info(f"开始执行实时问财爬虫，Query: {query}")
+        
+        crawler = WencaiCrawler(db)
+        batch_name = f"Realtime_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        result = await crawler.fetch_and_parse(query, batch_name=batch_name)
+        
+        return BaseResponse(
+            success=result.get("status") == "completed",
+            data={
+                "batch_id": result.get("batch_id"),
+                "total": result.get("total"),
+                "success": result.get("success"),
+                "query": query
+            },
+            message=f"爬取完成：共 {result.get('total')} 条，成功 {result.get('success')} 条"
+        )
+        
+    except Exception as e:
+        logger.error(f"执行实时问财爬虫失败: {e}")
+        return BaseResponse(
+            success=False,
+            data=None,
+            message=f"执行实时问财爬虫失败: {str(e)}"
+        )
+
+
 @router.delete("/batches/{batch_id}", response_model=BaseResponse, summary="删除抓取批次")
 async def delete_crawl_batch(
     batch_id: int,

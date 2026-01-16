@@ -13,7 +13,7 @@ from mcp.server.fastmcp import FastMCP
 mcp = FastMCP("DeepSeek Bridge")
 
 # Backend Configuration
-BACKEND_URL = "http://127.0.0.1:56666/mcp/deepseek"
+BACKEND_URL = "http://127.0.0.1:8000/mcp/deepseek"
 
 @mcp.tool()
 async def list_chats() -> str:

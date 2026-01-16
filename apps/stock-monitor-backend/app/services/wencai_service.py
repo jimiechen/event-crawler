@@ -1267,72 +1267,88 @@ class WencaiService:
                         logger.error(f"建立批次标签关联失败 (batch_id={batch_id}, tag_id={t_id}): {e}")
             
             # 4. 获取该批次的股票列表
-            stocks_sql = """
-            SELECT stock_code, stock_name 
-            FROM wencai_stocks 
-            WHERE crawl_batch_id = :batch_id
-            """
-            result = await self.db.execute(text(stocks_sql), {'batch_id': batch_id})
-            stocks = result.fetchall()
-            
-            logger.info(f"批次包含 {len(stocks)} 只股票，开始处理 stock_info 和 标签关联...")
-            
-            processed_count = 0
-            
-            # 5. 处理每只股票
-            for stock_row in stocks:
-                stock_code = stock_row.stock_code
-                stock_name = stock_row.stock_name
+                stocks_sql = """
+                SELECT stock_code, stock_name 
+                FROM wencai_stocks 
+                WHERE crawl_batch_id = :batch_id
+                ORDER BY stock_code ASC
+                """
+                result = await self.db.execute(text(stocks_sql), {'batch_id': batch_id})
+                stocks = result.fetchall()
                 
-                # 5.1 更新 stock_info 表
-                try:
-                    # 检查是否存在
-                    existing_stock = await self.stock_service.get_stock_info(stock_code)
+                logger.info(f"批次包含 {len(stocks)} 只股票，开始处理 stock_info 和 标签关联...")
+                
+                processed_count = 0
+                
+                # 5. 处理每只股票
+                # 为了防止死锁，按股票代码排序处理 (SQL已经排序)
+                
+                # 使用嵌套事务或分批提交来减少锁持有时间? 
+                # 这里我们尽量在一个大事务中完成，但是如果太慢，可以考虑分批。
+                # 鉴于 "任一环节失败时应回滚整个操作"，我们必须保持在一个事务中。
+                
+                for stock_row in stocks:
+                    stock_code = stock_row.stock_code
+                    stock_name = stock_row.stock_name
                     
-                    if existing_stock:
-                        # 更新现有记录 (如果需要)
-                        # 目前需求是 "已存在的股票记录不重复插入，仅更新必要字段"
-                        # 我们可以更新名称，防止名称变更
-                        if existing_stock.name != stock_name:
-                            await self.stock_service.stock_repo.update(existing_stock.id, {'name': stock_name})
-                    else:
-                        # 插入新记录，active=0 (False)
-                        # 简单的市场判断逻辑
-                        market = "unknown"
-                        if stock_code.startswith('6') or stock_code.startswith('90'): market = "SH"
-                        elif stock_code.startswith('0') or stock_code.startswith('3'): market = "SZ"
-                        elif stock_code.startswith('4') or stock_code.startswith('8') or stock_code.startswith('920'): market = "BJ"
+                    # 5.1 更新 stock_info 表
+                    try:
+                        # 检查是否存在
+                        existing_stock = await self.stock_service.get_stock_info(stock_code)
                         
-                        create_data = {
-                            'stock_code': stock_code,
-                            'stock_name': stock_name,
-                            'market': market,
-                            'is_active': False,  # 新存入的股票记录需设置active状态为0
-                            'source': 'wencai' # 明确来源为问财
-                        }
-                        await self.stock_service.create_or_update_stock_info(create_data)
-                    
-                    # 5.2 关联标签
-                    if tag_ids:
-                        # 批量关联
-                        # 上面的 associate_stocks 接口设计是 单个 tag_id 对应 多个 stock_codes
-                        # 我们这里有多个 tag_id 对应 单个 stock_code
-                        # 所以需要循环调用
-                        for t_id in tag_ids:
-                            # 这里的 associate_stocks 实现内部会检查重复
-                            await self.tag_mgmt_service.associate_stocks(tag_id=t_id, stock_codes=[stock_code], operator="system")
+                        if existing_stock:
+                            # 更新现有记录 (如果需要)
+                            # 目前需求是 "已存在的股票记录不重复插入，仅更新必要字段"
+                            # 我们可以更新名称，防止名称变更
+                            if existing_stock.name != stock_name:
+                                await self.stock_service.stock_repo.update(existing_stock.id, {'name': stock_name})
+                        else:
+                            # 插入新记录，active=0 (False)
+                            # 简单的市场判断逻辑
+                            market = "unknown"
+                            if stock_code.startswith('6') or stock_code.startswith('90'): market = "SH"
+                            elif stock_code.startswith('0') or stock_code.startswith('3'): market = "SZ"
+                            elif stock_code.startswith('4') or stock_code.startswith('8') or stock_code.startswith('920'): market = "BJ"
                             
-                    processed_count += 1
-                    
-                except Exception as e:
-                    logger.error(f"处理股票 {stock_code} 失败: {e}")
-                    # 继续处理下一个，不中断整个流程? 
-                    # 需求说 "任一环节失败时应回滚整个操作"，这意味着我们需要在一个大事务中
-                    # 但是我们已经在循环中了，如果我们要回滚，必须抛出异常
-                    raise e
-
-            # 提交事务
-            await self.db.commit()
+                            create_data = {
+                                'stock_code': stock_code,
+                                'stock_name': stock_name,
+                                'market': market,
+                                'is_active': False,  # 新存入的股票记录需设置active状态为0
+                                'source': 'wencai' # 明确来源为问财
+                            }
+                            # 使用 create_or_update 但这里我们知道它不存在，所以其实是 create
+                            # 为了防止并发插入导致的唯一键冲突，这里最好捕获异常
+                            try:
+                                await self.stock_service.create_or_update_stock_info(create_data)
+                            except Exception as e:
+                                logger.warning(f"并发插入股票 {stock_code} 可能已存在，尝试更新: {e}")
+                                # 再次尝试获取并更新
+                                existing_stock = await self.stock_service.get_stock_info(stock_code)
+                                if existing_stock and existing_stock.name != stock_name:
+                                    await self.stock_service.stock_repo.update(existing_stock.id, {'name': stock_name})
+                        
+                        # 5.2 关联标签
+                        if tag_ids:
+                            # 批量关联
+                            # 上面的 associate_stocks 接口设计是 单个 tag_id 对应 多个 stock_codes
+                            # 我们这里有多个 tag_id 对应 单个 stock_code
+                            # 所以需要循环调用
+                            for t_id in tag_ids:
+                                # 这里的 associate_stocks 实现内部会检查重复
+                                await self.tag_mgmt_service.associate_stocks(tag_id=t_id, stock_codes=[stock_code], operator="system")
+                                
+                        processed_count += 1
+                        
+                    except Exception as e:
+                        logger.error(f"处理股票 {stock_code} 失败: {e}")
+                        # 继续处理下一个，不中断整个流程? 
+                        # 需求说 "任一环节失败时应回滚整个操作"，这意味着我们需要在一个大事务中
+                        # 但是我们已经在循环中了，如果我们要回滚，必须抛出异常
+                        raise e
+                
+                # 提交事务
+                await self.db.commit()
             logger.info(f"批次 {batch_id} 数据处理完成，共处理 {processed_count} 只股票")
 
             # 6. 触发评分计算 (Trigger Scoring)

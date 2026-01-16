@@ -208,7 +208,7 @@ class CrawlerService:
 
         logger.info("Batch crawler execution completed.")
 
-    async def check_login_status(self, platform: str, url: str = None, nickname_xpath: str = None) -> Dict[str, Any]:
+    async def check_login_status(self, platform: str, url: str = None, nickname_xpath: str = None, headed: bool = False) -> Dict[str, Any]:
         """
         Check login status for a platform.
         """
@@ -267,6 +267,13 @@ class CrawlerService:
             
             if not url:
                 return {"logged_in": False, "message": "URL is required"}
+
+            if headed:
+                # Use headed mode for interactive login
+                if hasattr(crawler, 'launch_interactive_session'):
+                    return await crawler.launch_interactive_session(url)
+                else:
+                    return {"logged_in": False, "message": "Crawler does not support interactive session"}
 
             # Call the check_login_status method we added to CrawlerBase
             # Note: The import path hack might make IDE complain but runtime should be fine

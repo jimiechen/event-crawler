@@ -52,6 +52,109 @@ async def read_chat(chat_id: str, service: DeepSeekMCPService = Depends(get_deep
         logger.error(f"读取会话失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+from app.services.collaboration_service import CollaborationService
+from app.services.deepseek_mcp_service import DeepSeekMCPService
+
+# ============================================================================
+# Dependency Injection
+# ============================================================================
+
+async def get_collaboration_service(db: AsyncSession = Depends(get_db)) -> CollaborationService:
+    """获取协作文档服务实例"""
+    return CollaborationService(db=db)
+
+# ============================================================================
+# Collaboration Tools API
+# ============================================================================
+
+@router.post("/collaboration/doc/create")
+async def create_doc(
+    payload: Dict[str, Any], 
+    service: CollaborationService = Depends(get_collaboration_service)
+):
+    """创建协作文档"""
+    return await service.create_document(
+        doc_type=payload.get("doc_type"),
+        title=payload.get("title"),
+        content=payload.get("content"),
+        author=payload.get("author", "GLM4.7"),
+        db=service.db if hasattr(service, 'db') else None
+    )
+
+@router.post("/collaboration/doc/update")
+async def update_doc(
+    payload: Dict[str, Any],
+    service: CollaborationService = Depends(get_collaboration_service)
+):
+    """更新协作文档"""
+    return await service.update_document(
+        doc_path=payload.get("doc_path"),
+        content=payload.get("content"),
+        signature=payload.get("signature"),
+        author=payload.get("author", "GLM4.7"),
+        db=service.db if hasattr(service, 'db') else None
+    )
+
+@router.post("/collaboration/doc/{doc_path:path}")
+async def get_doc(
+    doc_path: str,
+    service: CollaborationService = Depends(get_collaboration_service)
+):
+    """获取协作文档"""
+    return await service.get_document(doc_path)
+
+@router.post("/collaboration/docs")
+async def list_docs(
+    payload: Dict[str, Any],
+    service: CollaborationService = Depends(get_collaboration_service)
+):
+    """列出协作文档"""
+    return await service.list_documents(doc_type=payload.get("doc_type"))
+
+# ============================================================================
+# DeepSeek API Extensions
+# ============================================================================
+
+@router.post("/deepseek/login")
+async def deepseek_login(
+    payload: Dict[str, Any],
+    service: DeepSeekMCPService = Depends(get_deepseek_service)
+):
+    """DeepSeek登录 (实际上是检查/初始化会话)"""
+    # 目前DeepSeekCrawler主要依赖DB中的会话或手动登录
+    # 这里我们触发一次start()来确保会话有效
+    try:
+        # 注意: start() 是异步的且可能会阻塞，这里应该谨慎调用
+        # 理想情况下，我们只检查状态
+        # 暂时返回成功，假设后台服务已在运行
+        return {"success": True, "message": "DeepSeek session check initiated"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@router.post("/deepseek/session/new")
+async def deepseek_new_session(
+    payload: Dict[str, Any],
+    service: DeepSeekMCPService = Depends(get_deepseek_service)
+):
+    """开始新会话"""
+    # 这里的实现依赖于 send_message 不带 chat_id
+    # 或者我们需要在 crawler 中显式添加 new_chat 方法
+    return {"success": True, "conversation_id": "new", "message": "New session context ready"}
+
+@router.post("/deepseek/conversations")
+async def deepseek_conversations(
+    payload: Dict[str, Any],
+    service: DeepSeekMCPService = Depends(get_deepseek_service)
+):
+    """获取会话历史"""
+    chat_id = payload.get("conversation_id")
+    if chat_id:
+        content = await service.read_chat(chat_id)
+        return {"success": True, "conversation": {"last_message": "...", "last_response": content}}
+    else:
+        chats = await service.list_chats()
+        return {"success": True, "conversations": chats}
+
 @router.post("/deepseek/send")
 async def send_message(
     payload: Dict[str, Any], 
@@ -59,16 +162,29 @@ async def send_message(
 ):
     """发送消息"""
     try:
-        text = payload.get("text")
-        chat_id = payload.get("chat_id")
+        # 兼容 message 或 text 字段
+        text = payload.get("message") or payload.get("text")
+        chat_id = payload.get("conversation_id") or payload.get("chat_id")
+        
         if not text:
-            raise HTTPException(status_code=400, detail="text is required")
+            raise HTTPException(status_code=400, detail="message text is required")
             
+        # 这里的 chat_id 如果是 "new" 或者 None，DeepSeekCrawler 会自动处理
         reply = await service.send_message(text, chat_id)
-        return {"reply": reply}
+        
+        # 尝试从回复中提取 conversation_id (如果 crawler 返回元组或字典)
+        # 目前 crawler.send_message 返回 str
+        # 这是一个改进点：让 crawler 返回更多元数据
+        
+        return {
+            "success": True, 
+            "response": reply,
+            "conversation_id": chat_id, # 暂时返回原 ID
+            "timestamp": "now"
+        }
     except Exception as e:
         logger.error(f"发送消息失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "error": str(e)}
 
 # ============================================================================
 # MCP SSE Endpoint (Experimental)

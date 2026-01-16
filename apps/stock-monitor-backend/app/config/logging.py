@@ -26,6 +26,13 @@ def setup_logging():
         "<level>{message}</level>"
     )
     
+    # 定义控制台过滤器
+    def console_filter(record):
+        # 过滤掉 apscheduler 和 task_executor 的非错误日志
+        if record["name"].startswith("apscheduler") or record["name"].startswith("app.services.task_executor"):
+            return record["level"].no >= logger.level("ERROR").no
+        return True
+    
     # 控制台日志
     logger.add(
         sys.stdout,
@@ -33,7 +40,8 @@ def setup_logging():
         level=settings.log_level,
         colorize=True,
         backtrace=True,
-        diagnose=True
+        diagnose=True,
+        filter=console_filter
     )
     
     # 文件日志（如果配置了日志文件）
@@ -51,6 +59,18 @@ def setup_logging():
             compression="zip",
             backtrace=True,
             diagnose=True
+        )
+        
+        # 任务调度专用日志文件
+        scheduler_log_file = str(log_path.parent / "scheduler.log")
+        logger.add(
+            scheduler_log_file,
+            format=log_format,
+            level="DEBUG",
+            rotation=settings.log_rotation,
+            retention=settings.log_retention,
+            compression="zip",
+            filter=lambda r: r["name"].startswith("apscheduler") or r["name"].startswith("app.services.task_executor")
         )
     
     # 错误日志文件
@@ -110,6 +130,9 @@ def setup_logging():
     
     # 设置FastAPI日志级别
     logging.getLogger("fastapi").setLevel(logging.INFO)
+    
+    # 设置APScheduler日志级别 (屏蔽 INFO 级别的调度日志)
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
     
     logger.info(f"日志系统已配置 - 级别: {settings.log_level}")
     if settings.log_file:

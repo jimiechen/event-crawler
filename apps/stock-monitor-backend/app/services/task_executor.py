@@ -98,6 +98,7 @@ class TaskExecutor:
             if not tasks:
                 return
             
+            # 降低日志频率，只有发现任务时才打印 INFO
             logger.info(f"Executor found {len(tasks)} pending tasks. Scheduling...")
 
             # 2. Schedule them
@@ -241,7 +242,7 @@ class TaskExecutor:
         from app.services.generic_task_service import GenericTaskService
         from app.services.task_execution_detail_service import TaskExecutionDetailService
         
-        async with db_manager.session() as session:
+        async with db_manager.get_session() as session:
             task_service = GenericTaskService(session)
             detail_service = TaskExecutionDetailService(session)
             

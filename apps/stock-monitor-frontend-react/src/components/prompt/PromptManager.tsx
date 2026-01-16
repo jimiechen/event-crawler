@@ -9,10 +9,8 @@ import {
   copyPromptTemplate,
   deletePromptTemplate,
   updatePromptTemplateName,
-  PromptTemplate,
-  PromptBinding,
-  TradingAccount,
 } from '@/lib/api'
+import type { PromptTemplate, PromptBinding, TradingAccount } from '@/types/arena'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'

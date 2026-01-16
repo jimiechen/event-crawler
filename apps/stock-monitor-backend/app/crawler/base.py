@@ -8,6 +8,8 @@
 import json
 import logging
 import random
+import asyncio
+import time
 from typing import List, Dict, Any, Optional
 from abc import ABC, abstractmethod
 from playwright.async_api import async_playwright, Page, BrowserContext
@@ -210,7 +212,9 @@ class CrawlerBase(ABC):
             return False
             
         except Exception as e:
-            logger.error(f"会话验证异常: {e}")
+            # 降低日志级别为 DEBUG，避免正常调度时的刷屏
+            # logger.error(f"会话验证异常: {e}")
+            logger.debug(f"会话验证异常: {e}")
             if session and session.get('id'):
                 await self.session_service.verify_session(session['id'], False)
             return False
@@ -252,6 +256,114 @@ class CrawlerBase(ABC):
         except Exception as e:
             logger.error(f"同步会话失败: {e}")
             return session
+
+    async def launch_interactive_session(self, url: str) -> Dict[str, Any]:
+        """
+        启动交互式会话（有头模式），等待用户登录并关闭浏览器
+        """
+        context = None
+        browser = None
+        session = None
+        
+        try:
+            # 启动有头浏览器
+            p = await async_playwright().start()
+            args = [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-blink-features=AutomationControlled',
+                '--disable-infobars',
+                '--window-size=1920,1080'
+            ]
+            # Use headless=False for interactive mode
+            browser = await p.chromium.launch(headless=False, args=args)
+            
+            # 创建上下文
+            context = await browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                locale='zh-CN',
+                timezone_id='Asia/Shanghai'
+            )
+            
+            # 添加反爬脚本
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            """)
+            
+            # 注入现有会话
+            session = await self.get_best_session()
+            if session and session.get('cookies_json'):
+                platform_config = await self.get_platform_config()
+                cookies = session['cookies_json']
+                formatted_cookies = []
+                for c in cookies:
+                    if 'name' in c and 'value' in c:
+                        fc = {
+                            'name': c['name'],
+                            'value': c['value'],
+                            'domain': c.get('domain', platform_config.get('domain', '')),
+                            'path': c.get('path', '/')
+                        }
+                        formatted_cookies.append(fc)
+                
+                if formatted_cookies:
+                    await context.add_cookies(formatted_cookies)
+                    logger.info(f"注入 {len(formatted_cookies)} 个Cookie")
+            else:
+                # 如果没有会话，创建一个临时会话对象以便同步
+                session = {
+                    'user_id': f'manual_{int(time.time())}',
+                    'account_name': 'Manual Login User'
+                }
+
+            # 打开页面
+            page = await context.new_page()
+            await page.goto(url)
+            
+            logger.info("浏览器已启动，等待用户操作...")
+            
+            # 循环检测浏览器是否关闭，并定期保存Cookie
+            while True:
+                try:
+                    # 检查浏览器是否还活着
+                    if not browser.is_connected():
+                        logger.info("浏览器已断开连接")
+                        break
+                    
+                    # 尝试获取Cookie作为存活检查，同时也可以验证页面是否被关闭
+                    # 如果页面都被关闭了，context可能还在，但通常用户会关闭整个窗口
+                    if not context.pages:
+                         logger.info("所有页面已关闭")
+                         break
+
+                    # 保存Cookie (每3秒保存一次)
+                    await self.sync_session(context, session)
+                    
+                    await asyncio.sleep(3)
+                except Exception as e:
+                    logger.info(f"浏览器检测异常 (可能已关闭): {e}")
+                    break
+            
+            return {"logged_in": True, "message": "会话结束，Cookie已更新"}
+            
+        except Exception as e:
+            logger.error(f"交互式会话异常: {e}")
+            return {"logged_in": False, "message": str(e)}
+        finally:
+            # 确保资源释放，虽然通常浏览器关闭时已经释放了
+            if context:
+                try:
+                    await context.close()
+                except:
+                    pass
+            if browser:
+                try:
+                    await browser.close()
+                except:
+                    pass
 
     @abstractmethod
     async def crawl(self, *args, **kwargs) -> Dict[str, Any]:

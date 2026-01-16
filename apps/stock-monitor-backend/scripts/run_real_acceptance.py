@@ -77,7 +77,7 @@ async def run_daily_process(date_str: str, stock_sync_service: StockSyncService)
         prev_date_str = prev_date_obj.strftime("%Y年%m月%d日")
         
         # Query: {T}成交量是{T-1}成交量的2.5倍以上...
-        query = f"{query_date}成交量是{prev_date_str}成交量的2.5倍以上，非北交，非创业板，非科创版，非ST，概念，行业，{prev_date_str}和{query_date}涨幅低于13%，收盘价低于25"
+        query = f"{query_date}成交量是{prev_date_str}成交量的2.9倍以上，非北交，非创业板，非科创版，非ST，概念，行业，{prev_date_str}和{query_date}涨幅低于13%，收盘价低于25"
         
         batch_name = f"Real_{date_str.replace('-', '')}"
         logger.info(f"[{date_str}] Crawling Wencai with query: {query}")

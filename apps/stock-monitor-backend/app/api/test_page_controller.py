@@ -37,6 +37,7 @@ class TestRunModel(BaseModel):
     """运行测试请求"""
     test_page_id: int = Field(..., description="测试页面ID")
     test_type: str = Field(..., description="测试类型：session/crawler")
+    headed: Optional[bool] = Field(False, description="是否使用有头模式")
 
 
 @router.get("", response_model=BaseResponse)
@@ -192,7 +193,7 @@ async def run_test(data: TestRunModel, db: AsyncSession = Depends(get_db_session
         
         # 根据测试类型执行不同的测试
         if data.test_type == "session":
-            test_result = await run_session_test(test_page, db)
+            test_result = await run_session_test(test_page, db, data.headed)
         elif data.test_type == "crawler":
             test_result = await run_crawler_test(test_page, db)
         else:
@@ -305,14 +306,14 @@ async def get_test_results(page_id: int, db: AsyncSession = Depends(get_db_sessi
         return BaseResponse(success=False, message=str(e))
 
 
-async def run_session_test(test_page: TestPage, db: AsyncSession) -> Dict[str, Any]:
+async def run_session_test(test_page: TestPage, db: AsyncSession, headed: bool = False) -> Dict[str, Any]:
     """
     运行会话测试
     """
     try:
         from app.services.crawler_service import CrawlerService
         service = CrawlerService(db)
-        result = await service.check_login_status(test_page.platform, test_page.url, None)
+        result = await service.check_login_status(test_page.platform, test_page.url, None, headed=headed)
         
         return {
             "status": "success" if result.get("logged_in") else "failed",
@@ -355,7 +356,27 @@ async def run_crawler_test(test_page: TestPage, db: AsyncSession) -> Dict[str, A
         if test_page.platform == "tonghuashun":
             result = await crawler.crawl()
         elif test_page.platform == "wencai":
-            result = await crawler.fetch_and_parse("测试查询")
+            # 仿真 run_real_acceptance.py 的日期逻辑
+            from datetime import datetime, timedelta
+            
+            date_obj = datetime.now()
+            # 如果是周末，调整到最近的周五
+            while date_obj.weekday() >= 5:
+                date_obj -= timedelta(days=1)
+            
+            # 计算 T-1
+            prev_date_obj = date_obj - timedelta(days=1)
+            while prev_date_obj.weekday() >= 5:
+                prev_date_obj -= timedelta(days=1)
+                
+            query_date = date_obj.strftime("%Y年%m月%d日")
+            prev_date_str = prev_date_obj.strftime("%Y年%m月%d日")
+            
+            # Query: {T}成交量是{T-1}成交量的2.5倍以上...
+            # 注意：run_real_acceptance.py 中是 2.9倍，这里保持一致
+            query = f"{query_date}成交量是{prev_date_str}成交量的2.9倍以上，非北交，非创业板，非科创版，非ST，概念，行业，{prev_date_str}和{query_date}涨幅低于13%，收盘价低于25"
+            
+            result = await crawler.fetch_and_parse(query)
         else:
             return {
                 "status": "failed",

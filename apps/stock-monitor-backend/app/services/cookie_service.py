@@ -161,15 +161,16 @@ class CookieService:
         try:
             stmt = select(ChromeCookie).where(ChromeCookie.domain.like(f"%{domain}%"))
             result = await self.db.execute(stmt)
-            record = result.scalar_one_or_none()
+            records = result.scalars().all()
             
-            if not record:
+            if not records:
                 return False
-                
-            record.status = status
-            if is_valid is not None:
-                record.is_valid = is_valid
-            record.last_checked_at = datetime.now()
+            
+            for record in records:
+                record.status = status
+                if is_valid is not None:
+                    record.is_valid = is_valid
+                record.last_checked_at = datetime.now()
             
             await self.db.commit()
             return True

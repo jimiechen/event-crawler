@@ -11,6 +11,8 @@ import json
 import random
 import re
 import time
+import os
+import urllib.parse
 from typing import List, Dict, Any, Optional
 from datetime import date as datetime_date
 from playwright.async_api import async_playwright, Page, BrowserContext
@@ -157,7 +159,8 @@ class WencaiCrawler(CrawlerBase):
                 return content
             
             # 优先尝试WAP版
-            wap_url = f"https://www.iwencai.com/unifiedwap/result?w={query}"
+            encoded_query = urllib.parse.quote(query)
+            wap_url = f"https://www.iwencai.com/unifiedwap/result?w={encoded_query}"
             logger.info(f"Navigating to WAP URL: {wap_url}")
             
             try:
@@ -173,7 +176,8 @@ class WencaiCrawler(CrawlerBase):
                     logger.info("WAP version loaded successfully")
                     
                     # 生成截图
-                    screenshot_path = f"debug_wencai_wap_{int(time.time())}.png"
+                    screenshot_name = f"debug_wencai_wap_{int(time.time())}.png"
+                    screenshot_path = os.path.abspath(screenshot_name)
                     await page.screenshot(path=screenshot_path, full_page=True)
                     logger.info(f"WAP版截图已保存到: {screenshot_path}")
                     
@@ -185,7 +189,7 @@ class WencaiCrawler(CrawlerBase):
                 logger.warning(f"WAP版访问失败: {e}，尝试切换PC版...")
             
             # 失败后尝试PC版
-            pc_url = f"http://www.iwencai.com/stockpick/search?w={query}"
+            pc_url = f"http://www.iwencai.com/stockpick/search?w={encoded_query}"
             logger.info(f"Navigating to PC URL: {pc_url}")
             
             await page.goto(pc_url, wait_until='networkidle', timeout=30000)
@@ -219,7 +223,8 @@ class WencaiCrawler(CrawlerBase):
             content = await page.content()
             
             # 生成截图
-            screenshot_path = f"debug_wencai_pc_{int(time.time())}.png"
+            screenshot_name = f"debug_wencai_pc_{int(time.time())}.png"
+            screenshot_path = os.path.abspath(screenshot_name)
             await page.screenshot(path=screenshot_path, full_page=True)
             logger.info(f"PC版截图已保存到: {screenshot_path}")
             

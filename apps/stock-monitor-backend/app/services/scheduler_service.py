@@ -105,12 +105,20 @@ class SchedulerService:
         
         job_id = f"generic_task_{task.id}"
         
+        # 定义异步包装函数，确保在主循环中执行
+        async def job_wrapper(t_id=task.id):
+            try:
+                logger.info(f"Starting generic task {t_id}")
+                await task_executor.execute_generic_task(t_id)
+            except Exception as e:
+                logger.error(f"Error executing generic task {t_id}: {e}")
+
         try:
             trigger = CronTrigger.from_crontab(task.cron_expression)
+            # 直接传入异步函数，AsyncIOScheduler 会正确处理
             self.scheduler.add_job(
-                task_executor.execute_generic_task,
+                job_wrapper,
                 trigger,
-                args=[task.id],
                 id=job_id,
                 name=task.name,
                 replace_existing=True
