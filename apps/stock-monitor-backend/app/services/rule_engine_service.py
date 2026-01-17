@@ -292,6 +292,44 @@ class RuleEngineService:
                     
                     if prev_score:
                         total_score += prev_score
+                    else:
+                        # Fallback: Calculate baseline from history (Self-Healing)
+                        # If no previous score found (e.g. first run, or gap), we try two methods:
+                        # 1. Sum up existing StockScoreResult records (fast, if data exists)
+                        # 2. If no ScoreResult records (First Day scenario), calculate from StockDaily (slow but accurate)
+                        
+                        logger.info(f"No previous score for {code} before {target_date}, calculating baseline...")
+                        
+                        window_days = VolumeAnalysisService.SCORE_WINDOW_DAYS # 250
+                        start_date = target_date - timedelta(days=window_days)
+                        
+                        # Method 1: Fetch all rule_scores in the window from StockScoreResult
+                        hist_stmt = select(StockScoreResult.rule_scores)\
+                            .where(
+                                StockScoreResult.code == code, 
+                                StockScoreResult.trade_date >= start_date,
+                                StockScoreResult.trade_date < target_date
+                            )
+                        hist_res = await session.execute(hist_stmt)
+                        hist_records = hist_res.scalars().all()
+                        
+                        baseline_score = Decimal(0)
+                        has_history_scores = False
+                        
+                        for r_scores in hist_records:
+                            if r_scores:
+                                has_history_scores = True
+                                for s_val in r_scores.values():
+                                    baseline_score += Decimal(str(s_val))
+                        
+                        # Method 2: If no history scores found (First Day Logic), calculate from StockDaily
+                        # This ensures "First Day Basic Score" is calculated even if no previous ScoreResults exist
+                        if not has_history_scores:
+                            logger.info(f"No history scores found for {code} (First Day?), calculating from StockDaily...")
+                            baseline_score = await VolumeAnalysisService.calculate_historical_baseline(code, target_date, session)
+                        
+                        logger.info(f"Calculated baseline for {code}: {baseline_score}")
+                        total_score += baseline_score
 
                 # 保存结果
                 results.append({

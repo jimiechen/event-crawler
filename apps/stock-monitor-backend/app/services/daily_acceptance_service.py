@@ -306,14 +306,18 @@ class DailyAcceptanceService:
         }
         
         try:
-            # 计算排名（使用MySQL的ROW_NUMBER()语法）
+            # 计算排名（使用Python排序以兼容不同数据库版本）
             today_str = date.today().strftime('%Y-%m-%d')
-            stmt = text(f"SELECT code, trade_date, total_score, ROW_NUMBER() OVER (ORDER BY total_score DESC) AS ranking FROM stock_score_result WHERE trade_date = '{today_str}'")
+            # 查询当日所有分数
+            stmt = text(f"SELECT code, trade_date, total_score FROM stock_score_result WHERE trade_date = '{today_str}'")
             
             db_result = await session.execute(stmt)
             rows = db_result.fetchall()
             
             if rows:
+                # Python端排序
+                sorted_rows = sorted(rows, key=lambda x: x.total_score if x.total_score is not None else -1, reverse=True)
+                
                 result['details'].append('✅ 排名计算功能正常')
                 result['details'].append(f"   计算了 {len(rows)} 只股票的排名")
                 logger.info("排名计算测试通过")

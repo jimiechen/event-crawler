@@ -553,7 +553,57 @@ class VolumeAnalysisService:
         }
     
     @staticmethod
-    async def _save_vectorized_results(code: str, result_df, session: AsyncSession):
+    async def calculate_historical_baseline(code: str, end_date: date, session: AsyncSession) -> Decimal:
+        """
+        计算历史基础分（基于StockDaily数据实时计算过去250天的得分总和）
+        用于首次上榜或数据缺失时的自愈
+        """
+        from app.services.pathway_vectorized_engine import PathwayVectorizedEngine
+        import pandas as pd
+        
+        # 1. 获取过去250天的数据
+        start_date = end_date - timedelta(days=VolumeAnalysisService.SCORE_WINDOW_DAYS)
+        stmt = select(StockDaily).where(
+            StockDaily.code == code,
+            StockDaily.trade_date >= start_date,
+            StockDaily.trade_date < end_date
+        ).order_by(StockDaily.trade_date.asc())
+        
+        result = await session.execute(stmt)
+        daily_data = result.scalars().all()
+        
+        if not daily_data:
+            return Decimal(0)
+            
+        # 2. 转换为DataFrame
+        df = pd.DataFrame([{
+            'trade_date': d.trade_date,
+            'open': float(d.open) if d.open else 0,
+            'close': float(d.close) if d.close else 0,
+            'high': float(d.high) if d.high else 0,
+            'low': float(d.low) if d.low else 0,
+            'vol': float(d.vol) if d.vol else 0
+        } for d in daily_data])
+        
+        if df.empty:
+            return Decimal(0)
+            
+        # 3. 使用向量化引擎计算
+        vectorized_engine = PathwayVectorizedEngine(session)
+        # 确保标签分数已加载
+        await vectorized_engine._ensure_tag_scores()
+        
+        result_df = vectorized_engine.calculate_batch(df)
+        
+        # 4. 汇总得分
+        total_baseline = Decimal(0)
+        if 'daily_score' in result_df.columns:
+            total_baseline = Decimal(str(result_df['daily_score'].sum()))
+            
+        return total_baseline
+
+    @staticmethod
+    async def _save_vectorized_results(code: str, result_df, session: AsyncSession, pool_type: str = 'all'):
         """
         保存向量化计算结果到数据库
         
@@ -561,6 +611,7 @@ class VolumeAnalysisService:
             code: 股票代码
             result_df: 向量化计算结果DataFrame
             session: 数据库会话
+            pool_type: 股票池类型
         """
         from app.models.stock_daily import StockScoreResult
         
@@ -588,6 +639,9 @@ class VolumeAnalysisService:
                 existing.total_score = row.get('daily_score', 0)
                 existing.rule_scores = rule_scores
                 existing.updated_at = datetime.now()
+                # 如果是明确的pool_type，也更新它
+                if pool_type != 'all' and existing.pool_type == 'all':
+                     existing.pool_type = pool_type
             else:
                 # 插入
                 score_result = StockScoreResult(
@@ -595,7 +649,7 @@ class VolumeAnalysisService:
                     trade_date=row['trade_date'],
                     rule_scores=rule_scores,
                     total_score=row.get('daily_score', 0),
-                    pool_type='all'
+                    pool_type=pool_type
                 )
                 session.add(score_result)
         

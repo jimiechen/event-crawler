@@ -61,16 +61,25 @@ class SchedulerService:
             replace_existing=True
         )
         
-        # 4. 【新增】每日问财爬虫（17:00）
+        # 4. 【新增】每日问财爬虫（16:30）
         self.scheduler.add_job(
             self.run_wencai_daily_crawler,
-            CronTrigger(hour=17, minute=0),
+            CronTrigger(hour=16, minute=30),
             id="wencai_daily_crawler",
             name="每日问财爬虫",
             replace_existing=True
         )
 
-        # 5. 【新增】每日AI复盘 (15:40) - 在盘后数据更新后
+        # 5. 【新增】问财数据同步与评分（17:00）
+        self.scheduler.add_job(
+            self.run_wencai_data_sync,
+            CronTrigger(hour=17, minute=0),
+            id="wencai_data_sync",
+            name="问财数据同步与评分",
+            replace_existing=True
+        )
+
+        # 6. 【新增】每日AI复盘 (15:40) - 在盘后数据更新后
         self.scheduler.add_job(
             self.run_daily_ai_review,
             CronTrigger(hour=15, minute=40),
@@ -353,7 +362,7 @@ class SchedulerService:
             logger.info(f"评分计算完成: {score_result}")
             
             # 3. 计算排名（调用API）
-            endpoint = f"/api/v1/ranking/calculate/{today_str}"
+            endpoint = f"/api/v1/rankings/calculate/{today_str}"
             ranking_result = await self._call_api(endpoint)
             logger.info(f"排名计算完成: {ranking_result}")
             
@@ -388,32 +397,34 @@ class SchedulerService:
     async def _calculate_rankings(self):
         """计算排名"""
         from app.models.stock_daily import StockScoreResult
-        from sqlalchemy import select, update, func
+        from sqlalchemy import select, update
         from datetime import date
         
-        # 1. 计算当日积分排名
+        # 1. 获取当日所有积分
         stmt = select(
             StockScoreResult.code,
             StockScoreResult.trade_date,
-            StockScoreResult.total_score,
-            func.row_number().over(
-                order_by=StockScoreResult.total_score.desc()
-            ).label('ranking')
+            StockScoreResult.total_score
         ).where(
             StockScoreResult.trade_date == date.today()
         )
         result = await self.db_manager.session.execute(stmt)
+        rows = result.all()
         
-        # 2. 更新排名
-        for row in result:
+        # 2. Python排序计算排名
+        # Sort by total_score desc
+        sorted_rows = sorted(rows, key=lambda x: x.total_score if x.total_score is not None else -1, reverse=True)
+        
+        # 3. 更新排名
+        for rank, row in enumerate(sorted_rows, 1):
             update_stmt = update(StockScoreResult).where(
                 StockScoreResult.code == row.code,
                 StockScoreResult.trade_date == row.trade_date
-            ).values(ranking=row.ranking)
+            ).values(ranking=rank)
             await self.db_manager.session.execute(update_stmt)
         
         await self.db_manager.session.commit()
-        logger.info("排名计算完成")
+        logger.info(f"排名计算完成，共更新 {len(sorted_rows)} 条记录")
     
     async def run_wencai_daily_crawler(self):
         """每日问财爬虫任务（爬取前一天的数据）"""
@@ -424,14 +435,101 @@ class SchedulerService:
             yesterday = datetime_date.today() - timedelta(days=1)
             yesterday_str = yesterday.strftime("%Y-%m-%d")
             
-            # 调用API端点
-            endpoint = f"/api/v1/wencai/crawler/{yesterday_str}/1"
-            result = await self._call_api(endpoint)
+            # 1. 获取启用的问财爬虫目标
+            from app.models.crawler import CrawlerTarget
+            from sqlalchemy import select
+            from app.crawler.wencai_crawler import WencaiCrawler
             
-            logger.info(f"每日问财爬虫完成: {result}")
+            targets = []
+            async with self.db_manager.get_session() as session:
+                # 假设平台标识为 'wencai'
+                stmt = select(CrawlerTarget).where(
+                    CrawlerTarget.is_active == True,
+                    CrawlerTarget.platform == 'wencai'
+                )
+                result = await session.execute(stmt)
+                targets = result.scalars().all()
+            
+            if not targets:
+                logger.warning("未找到启用的问财爬虫目标，使用默认逻辑")
+                # 默认逻辑: 硬编码调用
+                endpoint = f"/api/v1/wencai/crawler/{yesterday_str}/1"
+                result = await self._call_api(endpoint)
+                logger.info(f"默认问财爬虫完成: {result}")
+            else:
+                logger.info(f"找到 {len(targets)} 个问财爬虫目标，开始执行")
+                for target in targets:
+                    try:
+                        logger.info(f"执行爬虫目标: {target.name} (ID: {target.id})")
+                        async with self.db_manager.get_session() as session:
+                            crawler = WencaiCrawler(session)
+                            
+                            # 使用 Target 配置的 query (url字段)
+                            query = target.url
+                            
+                            # 如果 query 包含日期占位符，可以替换（可选，视 Target 配置规范而定）
+                            # 这里假设 url 字段就是 query 模板或固定 query
+                            # 如果是固定 query，直接用。
+                            # 如果需要日期替换，这里简单处理一下常见情况
+                            d1 = yesterday.strftime("%Y年%m月%d日")
+                            d2 = (yesterday - timedelta(days=1)).strftime("%Y年%m月%d日")
+                            
+                            # 尝试格式化，如果失败则使用原串
+                            try:
+                                # 支持 user requested keys: query_date, prev_date_str
+                                # 也支持 generic keys: date, prev_date
+                                formatted_query = query.format(
+                                    query_date=d1, 
+                                    prev_date_str=d2,
+                                    date=d1,
+                                    prev_date=d2
+                                )
+                            except Exception as e:
+                                logger.warning(f"Query formatting failed: {e}. Using original query.")
+                                formatted_query = query
+                                
+                            batch_name = f"AutoCrawl_{target.id}_{yesterday.strftime('%Y%m%d')}"
+                            
+                            result = await crawler.fetch_and_parse(
+                                query=formatted_query,
+                                batch_name=batch_name
+                            )
+                            logger.info(f"目标 {target.name} 爬取完成: {result}")
+                            
+                            # 更新 Target 状态 (可选)
+                            # target.last_crawled_at = datetime.now()
+                            # ...
+                            
+                    except Exception as e:
+                        logger.error(f"执行爬虫目标 {target.id} 失败: {e}")
+
+            # 2. 触发历史数据同步 - 移至 17:00 的任务 run_wencai_data_sync
+            # logger.info("问财爬虫完成，数据同步将在 17:00 任务中执行")
             
         except Exception as e:
-            logger.error(f"每日问财爬虫失败: {e}")
+            logger.error(f"每日问财爬虫任务异常: {e}")
+            
+    async def run_wencai_data_sync(self):
+        """问财数据同步与评分（17:00）"""
+        logger.info("定时任务: 开始问财数据同步与评分")
+        try:
+            today_str = datetime_date.today().strftime("%Y-%m-%d")
+            
+            # 1. 触发历史数据同步 (CSV Sync)
+            sync_endpoint = f"/api/v1/stock/sync/wencai/{today_str}/0"
+            logger.info(f"触发历史数据同步: {sync_endpoint}")
+            sync_result = await self._call_api(sync_endpoint)
+            logger.info(f"历史数据同步响应: {sync_result}")
+            
+            # 2. 计算积分量价 (Calculate Scores)
+            # 假设 /api/v1/rankings/calculate/{date} 会计算当日所有股票的评分
+            score_endpoint = f"/api/v1/rankings/calculate/{today_str}"
+            logger.info(f"触发评分计算: {score_endpoint}")
+            score_result = await self._call_api(score_endpoint)
+            logger.info(f"评分计算响应: {score_result}")
+            
+        except Exception as e:
+            logger.error(f"问财数据同步与评分任务失败: {e}")
     
     async def run_wencai_date_range_crawler(self, start_date: datetime_date, end_date: datetime_date) -> Dict[str, Any]:
         """

@@ -226,7 +226,7 @@ class StockSyncService:
         查找股票对应的CSV文件路径
         支持直接匹配和自动添加后缀 (.SH, .SZ, .BJ)
         """
-        history_daily_path = get_settings().csv_data_path
+        history_daily_path = get_settings().csv_data_path_stock_daily
         # 1. 尝试直接匹配
         path = os.path.join(history_daily_path, f"{code}.csv")
         if os.path.exists(path):
@@ -638,6 +638,14 @@ class StockSyncService:
                     return {"success": False, "message": "指定的股票不在该批次中"}
             else:
                 target_codes = batch_stocks
+
+            # Initialize stats
+            stats = {
+                "processed": 0,
+                "inserted": 0,
+                "csv_appended": 0,
+                "errors": 0
+            }
 
             # 调用原子方法
             for code in target_codes:

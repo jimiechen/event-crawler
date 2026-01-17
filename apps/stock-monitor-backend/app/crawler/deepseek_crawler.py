@@ -490,8 +490,13 @@ class DeepSeekCrawler(CrawlerBase):
             await self.start()
             
         try:
-            # 如果不是 latest，需要点击对应的会话
-            # ... navigation logic ...
+            # 如果不是 latest，尝试导航到特定会话
+            if chat_id and chat_id != "latest":
+                target_url = f"{self.base_url}/a/chat/s/{chat_id}"
+                if self.page.url != target_url:
+                    logger.info(f"正在导航到会话: {target_url}")
+                    await self.page.goto(target_url)
+                    await self.page.wait_for_load_state("networkidle")
             
             await self.page.wait_for_load_state("domcontentloaded")
             await self.page.wait_for_timeout(2000)
@@ -499,17 +504,40 @@ class DeepSeekCrawler(CrawlerBase):
             # 获取内容
             try:
                 # 尝试定位主要内容区域，避免包含侧边栏
-                # 假设主内容在 main 标签或特定的 div 中
-                content = await self.page.content()
-                # 简单的选择器尝试，实际需调整
-                # content = await self.page.locator("div[class*='chat-content']").inner_html()
+                # DeepSeek 的聊天内容通常在 id="root" 下的某个深层 div
+                # 我们尝试获取包含 markdown 类的父级容器
+                
+                content = await self.page.evaluate("""() => {
+                    // 策略：找到所有 .ds-markdown 的父容器
+                    const markdowns = document.querySelectorAll('.ds-markdown');
+                    if (markdowns.length > 0) {
+                        // 找到包含所有对话的容器
+                        // 通常是 markdowns[0] 的几个父级以上
+                        // 这里简化：直接提取所有 markdown 元素的内容拼接，或者提取 main 标签
+                        
+                        // 尝试1: 提取 main
+                        const main = document.querySelector('div[id="root"]'); // DeepSeek 通常在 root 下
+                        if (main) return main.innerHTML;
+                    }
+                    return document.body.innerHTML;
+                }""")
             except Exception:
                 content = await self.page.content()
                 
             # 转 Markdown
+            # 过滤掉一些导航栏等噪音 (markdownify 会处理一部分，但我们可以预处理)
             markdown_content = md(content, heading_style="ATX")
             
-            return markdown_content
+            # 简单的后处理清理
+            lines = markdown_content.split('\n')
+            cleaned_lines = []
+            for line in lines:
+                # 过滤掉常见的导航文本
+                if "New Chat" in line or "Search" in line or "History" in line:
+                    continue
+                cleaned_lines.append(line)
+                
+            return '\n'.join(cleaned_lines)
             
         except Exception as e:
             logger.error(f"读取会话失败: {e}")

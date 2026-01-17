@@ -30,7 +30,7 @@ class AShareAdapter:
             if stock_info:
                 context["stock_name"] = stock_info.name
                 context["stock_code"] = stock_code
-                context["industry"] = stock_info.industry or "Unknown"
+                context["industry"] = getattr(stock_info, 'industry', "Unknown")
             else:
                 context["stock_name"] = "Unknown"
                 context["stock_code"] = stock_code

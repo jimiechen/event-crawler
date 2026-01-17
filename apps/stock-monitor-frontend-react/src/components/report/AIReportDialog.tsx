@@ -1,7 +1,7 @@
 import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
-import { AIDecisionResult } from '@/types/arena';
+import type { AIDecisionResult } from '@/types/arena';
 
 interface AIReportDialogProps {
     open: boolean;

@@ -12,7 +12,7 @@ from app.models.arena_models import PromptTemplate, SignalDefinition, SignalPool
 from app.models.ai_decision import AIDecisionResult
 from app.database import get_db_session
 
-router = APIRouter(prefix="/arena", tags=["arena"])
+router = APIRouter(prefix="/api/v1/arena", tags=["arena"])
 
 # Database Setup
 arena_engine = create_async_engine(settings.arena_database_url, echo=False)
