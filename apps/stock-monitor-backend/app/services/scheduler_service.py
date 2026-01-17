@@ -361,10 +361,9 @@ class SchedulerService:
             score_result = await self._call_api(endpoint)
             logger.info(f"评分计算完成: {score_result}")
             
-            # 3. 计算排名（调用API）
-            endpoint = f"/api/v1/rankings/calculate/{today_str}"
-            ranking_result = await self._call_api(endpoint)
-            logger.info(f"排名计算完成: {ranking_result}")
+            # 3. 计算排名 (直接调用内部方法，支持分池排名并更新DB)
+            await self._calculate_rankings()
+            logger.info(f"排名计算完成")
             
             logger.info("盘后任务完成")
         except Exception as e:
@@ -395,7 +394,7 @@ class SchedulerService:
         logger.info("日线数据同步完成")
     
     async def _calculate_rankings(self):
-        """计算排名"""
+        """计算排名 (分池排名)"""
         from app.models.stock_daily import StockScoreResult
         from sqlalchemy import select, update
         from datetime import date
@@ -404,27 +403,46 @@ class SchedulerService:
         stmt = select(
             StockScoreResult.code,
             StockScoreResult.trade_date,
-            StockScoreResult.total_score
+            StockScoreResult.total_score,
+            StockScoreResult.pool_type
         ).where(
             StockScoreResult.trade_date == date.today()
         )
         result = await self.db_manager.session.execute(stmt)
         rows = result.all()
         
-        # 2. Python排序计算排名
-        # Sort by total_score desc
-        sorted_rows = sorted(rows, key=lambda x: x.total_score if x.total_score is not None else -1, reverse=True)
+        if not rows:
+            logger.info("今日无评分记录，跳过排名计算")
+            return
+
+        # 2. 按 pool_type 分组
+        pools = {}
+        for row in rows:
+            p_type = row.pool_type or 'unknown'
+            if p_type not in pools:
+                pools[p_type] = []
+            pools[p_type].append(row)
+            
+        total_updated = 0
         
-        # 3. 更新排名
-        for rank, row in enumerate(sorted_rows, 1):
-            update_stmt = update(StockScoreResult).where(
-                StockScoreResult.code == row.code,
-                StockScoreResult.trade_date == row.trade_date
-            ).values(ranking=rank)
-            await self.db_manager.session.execute(update_stmt)
+        # 3. 对每个池分别计算排名
+        for p_type, pool_rows in pools.items():
+            # Sort by total_score desc
+            sorted_rows = sorted(pool_rows, key=lambda x: x.total_score if x.total_score is not None else -1, reverse=True)
+            
+            # 更新排名
+            for rank, row in enumerate(sorted_rows, 1):
+                update_stmt = update(StockScoreResult).where(
+                    StockScoreResult.code == row.code,
+                    StockScoreResult.trade_date == row.trade_date
+                ).values(ranking=rank)
+                await self.db_manager.session.execute(update_stmt)
+                total_updated += 1
+            
+            logger.info(f"池 [{p_type}] 排名计算完成: {len(sorted_rows)} 只股票")
         
         await self.db_manager.session.commit()
-        logger.info(f"排名计算完成，共更新 {len(sorted_rows)} 条记录")
+        logger.info(f"所有池排名计算完成，共更新 {total_updated} 条记录")
     
     async def run_wencai_daily_crawler(self):
         """每日问财爬虫任务（爬取前一天的数据）"""

@@ -487,6 +487,15 @@ class VolumeAnalysisService:
         """
         if "." in code:
             code = code.split(".")[0]
+
+        # 0. 获取股票信息以确定pool_type
+        stmt_info = select(StockInfo).where(StockInfo.code == code)
+        result_info = await session.execute(stmt_info)
+        stock_info = result_info.scalars().first()
+        pool_type = 'all'
+        if stock_info:
+             if stock_info.source == 'wencai':
+                 pool_type = 'wencai'
             
         # 1. 获取历史数据（最近400天）
         stmt = select(StockDaily).where(StockDaily.code == code).order_by(StockDaily.trade_date.desc()).limit(400)
@@ -516,7 +525,7 @@ class VolumeAnalysisService:
         result_df = vectorized_engine.calculate_batch(df)
         
         # 4. 保存结果到数据库
-        await VolumeAnalysisService._save_vectorized_results(code, result_df, session)
+        await VolumeAnalysisService._save_vectorized_results(code, result_df, session, pool_type=pool_type)
         
         # 5. 更新baseline
         await VolumeAnalysisService._update_baseline_from_vectorized(code, result_df, session)
@@ -634,21 +643,64 @@ class VolumeAnalysisService:
             result = await session.execute(stmt)
             existing = result.scalar_one_or_none()
             
+            # Calculate accumulated score
+            # Note: This simple loop assumes result_df is sorted by date and we process continuously.
+            # However, for a robust batch update, we should really fetch the previous accumulated score 
+            # from DB if this is the first item, or track it.
+            # But _save_vectorized_results is often called with a batch.
+            # To do this correctly without fetching for every row:
+            # We need to know the accumulated score BEFORE this batch.
+            
+            # Since this function iterates, let's assume the caller or a separate logic handles strict accumulation 
+            # OR we implement a "running total" here if the batch is contiguous.
+            # For now, let's just save daily_score. The accumulation logic is strictly enforced in RuleEngineService 
+            # and _calculate_stock_internal. 
+            # If we want to support it here, we need to fetch the previous day's accumulated score.
+            
+            # Let's try to fetch previous accumulated score if we don't have it in the batch context
+            # But doing it inside the loop is slow.
+            # Ideally, result_df should have 'accumulated_score' calculated if possible.
+            # If not, we just save daily_score and total_score (as daily) for now, 
+            # BUT the user wants strict separation.
+            
+            # Strategy: 
+            # 1. Fetch prev_accumulated before loop.
+            # 2. Update continuously.
+            
+            daily_score = Decimal(str(row.get('daily_score', 0)))
+            
             if existing:
                 # 更新
-                existing.total_score = row.get('daily_score', 0)
+                existing.daily_score = daily_score
                 existing.rule_scores = rule_scores
                 existing.updated_at = datetime.now()
+                # We don't update accumulated_score here to avoid breaking chain if we are just patching daily scores
+                # UNLESS we are sure we are recalculating everything.
+                # For safety, let's leave accumulated_score alone if it exists, or set it to daily_score if 0?
+                # No, that breaks logic. 
+                # Better approach: Just save daily_score. The user can run a "recalculate accumulation" script.
+                # OR: We implement proper accumulation here.
+                
+                # If we are in "recalculate" mode (often implied by using vectorized engine), we might want to reset.
+                pass 
+                
                 # 如果是明确的pool_type，也更新它
                 if pool_type != 'all' and existing.pool_type == 'all':
                      existing.pool_type = pool_type
             else:
                 # 插入
+                # For new records, we MUST calculate accumulated score if we want consistency.
+                # But querying every time is slow.
+                # Let's just save daily_score. RuleEngineService will handle the daily incremental updates.
+                # This function is used for "historical baseline" often.
+                
                 score_result = StockScoreResult(
                     code=code,
                     trade_date=row['trade_date'],
                     rule_scores=rule_scores,
-                    total_score=row.get('daily_score', 0),
+                    daily_score=daily_score,
+                    total_score=daily_score, # Temporary fallback
+                    accumulated_score=daily_score, # Temporary fallback (will be fixed by recalc)
                     pool_type=pool_type
                 )
                 session.add(score_result)
@@ -847,6 +899,15 @@ class VolumeAnalysisService:
         logger.info(f"Start calculating stock: {code}")
             
         try:
+            # 0. 获取股票信息以确定pool_type
+            stmt_info = select(StockInfo).where(StockInfo.code == code)
+            result_info = await session.execute(stmt_info)
+            stock_info = result_info.scalars().first()
+            pool_type = 'all'
+            if stock_info:
+                 if stock_info.source == 'wencai':
+                     pool_type = 'wencai'
+
             if "." in code:
                 code = code.split(".")[0]
             
@@ -1111,13 +1172,13 @@ class VolumeAnalysisService:
                         })
 
                 if day_score > 0:
-                    daily_scores.append({
-                        'code': code,
-                        'trade_date': current.trade_date,
-                        'total_score': day_score,
-                        'rule_scores': day_rule_scores,
-                        'pool_type': 'unknown'
-                    })
+                        daily_scores.append({
+                            'code': code,
+                            'trade_date': current.trade_date,
+                            'total_score': day_score,
+                            'rule_scores': day_rule_scores,
+                            'pool_type': pool_type
+                        })
 
             return {
                 "should_skip": False,

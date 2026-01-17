@@ -270,6 +270,7 @@ class RuleEngineService:
                 
                 # Tag Scores
                 stock_tags = tag_map.get(code, [])
+                daily_score = Decimal(0)
                 for tag_info in stock_tags:
                     tag_name = tag_info["name"]
                     tag_score = Decimal(str(tag_info["score"]))
@@ -278,20 +279,29 @@ class RuleEngineService:
                         score_key = f"tag_{tag_name}"
                         if score_key not in scores:
                             scores[score_key] = float(tag_score)
-                            total_score += tag_score
+                            daily_score += tag_score
                 
-                # Cumulative Score Logic: Add previous total_score
+                # Cumulative Score Logic: Add previous accumulated_score
+                accumulated_score = daily_score
+                
                 # Get previous score (most recent before target_date)
                 async with self.db_manager.get_session() as session:
-                    stmt = select(StockScoreResult.total_score)\
+                    stmt = select(StockScoreResult.accumulated_score, StockScoreResult.total_score)\
                         .where(StockScoreResult.code == code, StockScoreResult.trade_date < target_date)\
                         .order_by(StockScoreResult.trade_date.desc())\
                         .limit(1)
                     prev_res = await session.execute(stmt)
-                    prev_score = prev_res.scalar_one_or_none()
+                    prev_row = prev_res.first()
                     
-                    if prev_score:
-                        total_score += prev_score
+                    prev_accumulated = Decimal(0)
+                    if prev_row:
+                        # Prefer accumulated_score, fallback to total_score (migration support)
+                        if prev_row[0] is not None:
+                            prev_accumulated = prev_row[0]
+                        elif prev_row[1] is not None:
+                            prev_accumulated = prev_row[1]
+                            
+                        accumulated_score += prev_accumulated
                     else:
                         # Fallback: Calculate baseline from history (Self-Healing)
                         # If no previous score found (e.g. first run, or gap), we try two methods:
@@ -304,23 +314,33 @@ class RuleEngineService:
                         start_date = target_date - timedelta(days=window_days)
                         
                         # Method 1: Fetch all rule_scores in the window from StockScoreResult
-                        hist_stmt = select(StockScoreResult.rule_scores)\
+                        # We use daily_score if available, otherwise sum rule_scores
+                        hist_stmt = select(StockScoreResult.rule_scores, StockScoreResult.daily_score, StockScoreResult.total_score)\
                             .where(
                                 StockScoreResult.code == code, 
                                 StockScoreResult.trade_date >= start_date,
                                 StockScoreResult.trade_date < target_date
                             )
                         hist_res = await session.execute(hist_stmt)
-                        hist_records = hist_res.scalars().all()
+                        hist_records = hist_res.all()
                         
                         baseline_score = Decimal(0)
                         has_history_scores = False
                         
-                        for r_scores in hist_records:
-                            if r_scores:
+                        for r_scores, r_daily, r_total in hist_records:
+                            if r_daily is not None and r_daily > 0:
+                                baseline_score += r_daily
+                                has_history_scores = True
+                            elif r_scores:
+                                # Old format: sum from rule_scores
                                 has_history_scores = True
                                 for s_val in r_scores.values():
                                     baseline_score += Decimal(str(s_val))
+                            elif r_total is not None and r_total > 0:
+                                # Fallback to total_score if we are desperate (historical data might have only total_score as daily)
+                                # But wait, if we are recalculating, we might want to be strict.
+                                # Let's assume calculate_historical_baseline will handle it if we don't find proper daily scores.
+                                pass
                         
                         # Method 2: If no history scores found (First Day Logic), calculate from StockDaily
                         # This ensures "First Day Basic Score" is calculated even if no previous ScoreResults exist
@@ -329,14 +349,16 @@ class RuleEngineService:
                             baseline_score = await VolumeAnalysisService.calculate_historical_baseline(code, target_date, session)
                         
                         logger.info(f"Calculated baseline for {code}: {baseline_score}")
-                        total_score += baseline_score
+                        accumulated_score += baseline_score
 
                 # 保存结果
                 results.append({
                     "code": code,
                     "trade_date": target_date,
                     "rule_scores": scores,
-                    "total_score": total_score,
+                    "daily_score": daily_score,
+                    "accumulated_score": accumulated_score,
+                    "total_score": accumulated_score, # Keep synced for compatibility
                     "ranking": 0, # 暂时不排，后续更新
                     "pool_type": pool_map.get(code, "unknown")
                 })

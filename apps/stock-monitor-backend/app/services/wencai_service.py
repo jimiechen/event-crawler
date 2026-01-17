@@ -53,6 +53,125 @@ class WencaiService:
         result = await self.db.execute(stmt)
         return result.scalars().all()
     
+    async def save_stocks(self, stocks: List[Dict[str, Any]], batch_id: int = None) -> None:
+        """
+        保存爬取到的股票信息到数据库 (StockInfo & WencaiStock)
+        并触发基础分计算
+        """
+        from app.services.volume_analysis_service import VolumeAnalysisService
+        
+        for stock_data in stocks:
+            try:
+                stock_code = stock_data.get('stock_code')
+                stock_name = stock_data.get('stock_name')
+                
+                if not stock_code:
+                    continue
+                    
+                # 1. 更新 StockInfo (核心库)
+                # 确保代码格式统一 (移除后缀用于查找，但保存时可能需要后缀)
+                # StockService.create_or_update_stock_info expects 'stock_code', 'stock_name', 'market'
+                
+                # 简单推断市场
+                market = 'CN'
+                if '.' in stock_code:
+                    market = stock_code.split('.')[1]
+                elif stock_code.startswith('6'):
+                    market = 'SH'
+                elif stock_code.startswith('0') or stock_code.startswith('3'):
+                    market = 'SZ'
+                elif stock_code.startswith('4') or stock_code.startswith('8'):
+                    market = 'BJ'
+                
+                info_data = {
+                    'stock_code': stock_code,
+                    'stock_name': stock_name,
+                    'market': market,
+                    'is_active': True,
+                    'source': 'wencai' # 标记来源
+                }
+                
+                # 创建或更新
+                stock_info = await self.stock_service.create_or_update_stock_info(info_data)
+                
+                # 2. 如果提供了 batch_id，保存到 WencaiStock (爬虫记录)
+                if batch_id:
+                    # check if exists
+                    stmt = select(WencaiStock).where(
+                        WencaiStock.crawl_batch_id == str(batch_id),
+                        WencaiStock.stock_code == stock_code
+                    )
+                    res = await self.db.execute(stmt)
+                    if not res.scalar_one_or_none():
+                        wencai_stock = WencaiStock(
+                            crawl_batch_id=str(batch_id),
+                            stock_code=stock_code,
+                            stock_name=stock_name,
+                            latest_price=stock_data.get('latest_price'),
+                            change_percent=stock_data.get('change_percent')
+                        )
+                        self.db.add(wencai_stock)
+                
+                # 3. 触发基础分计算 (如果是新入库或尚未计算)
+                # 无论是否新股，只要上榜问财，就应该检查是否需要计算/更新基础分
+                # 这里我们触发一次 "Historical Baseline" 计算，针对 "今天" (或上榜日)
+                # 但 VolumeAnalysisService.calculate_historical_baseline 是计算 target_date 的 baseline
+                # 我们应该使用当前日期作为 target_date
+                
+                target_date = date.today()
+                # 如果 stock_data 中包含日期 (回溯模式)，使用该日期
+                if 'date' in stock_data:
+                    if isinstance(stock_data['date'], str):
+                        target_date = datetime.strptime(stock_data['date'], "%Y-%m-%d").date()
+                    elif isinstance(stock_data['date'], date):
+                        target_date = stock_data['date']
+                
+                # 异步触发计算，或者同步等待？为了数据一致性，建议同步等待或放入队列
+                # 这里直接调用，注意性能
+                # 只有当没有分数记录时才强制计算基础分? 
+                # 用户要求: "问财上榜就入库计算基础分"
+                
+                # 检查是否已有分数
+                from app.models.stock_daily import StockScoreResult
+                score_stmt = select(StockScoreResult).where(
+                    StockScoreResult.code == stock_code,
+                    StockScoreResult.trade_date == target_date
+                )
+                score_res = await self.db.execute(score_stmt)
+                if not score_res.scalar_one_or_none():
+                    logger.info(f"Triggering baseline calculation for {stock_code} on {target_date}")
+                    # 我们不仅要计算 baseline，还要计算当天的 total_score (baseline + daily)
+                    # 但这里我们只负责 "入库计算基础分" (baseline)
+                    # 完整的评分逻辑通常由 RuleEngineService 处理
+                    # 但为了满足 "First Day" 逻辑，我们需要确保 Baseline 被计算并保存
+                    
+                    baseline = await VolumeAnalysisService.calculate_historical_baseline(stock_code, target_date, self.db)
+                    
+                    # 如果有 daily_score (从 volume analysis)，也应该加上
+                    # 但这里我们可能没有 daily data loaded yet via Vectorized Engine for just this stock
+                    # 简单起见，先保存 baseline 作为 accumulated_score (如果 daily_score 为 0)
+                    # 实际上，calculate_historical_baseline 返回的是 "past 250 days sum"
+                    # 这就是 accumulated_score 的一部分 (excluding today)
+                    
+                    # 构造 StockScoreResult
+                    # 注意：calculate_historical_baseline 内部其实没有保存 StockScoreResult，它只是返回数值
+                    # 我们需要保存它
+                    
+                    new_score = StockScoreResult(
+                        code=stock_code,
+                        trade_date=target_date,
+                        accumulated_score=baseline,
+                        total_score=baseline, # Compat
+                        daily_score=0, # 暂无今日动态分
+                        pool_type='wencai'
+                    )
+                    self.db.add(new_score)
+                    
+            except Exception as e:
+                logger.error(f"Error saving stock {stock_data.get('stock_code')}: {e}")
+        
+        await self.db.commit()
+
     def parse_html_table(self, html_content: str, debug: bool = False) -> List[Dict[str, Any]]:
         """
         解析问财HTML表格数据

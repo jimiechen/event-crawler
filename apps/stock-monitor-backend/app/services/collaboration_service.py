@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 class CollaborationService:
     """协作文档管理服务"""
     
-    def __init__(self, base_dir: str = "collaboration_docs"):
+    def __init__(self, db=None, base_dir: str = "collaboration_docs"):
+        self.db = db
         self.base_dir = Path(base_dir)
         self.ensure_directories()
     
@@ -72,7 +73,8 @@ class CollaborationService:
                     version="v1.0.0",
                     author=author,
                     signature=f"[{datetime.now().strftime('%Y-%m-%d %H:%M')}] @{author}: 创建文档",
-                    content=doc_content,
+                    # DB Optimization: Do NOT store full content in DB, only file path is needed.
+                    content=f"See file: {filepath.relative_to(self.base_dir)}", 
                     content_hash=self._calculate_hash(doc_content),
                     change_description="创建文档"
                 )
@@ -133,7 +135,8 @@ class CollaborationService:
                     version=self._increment_version(existing_content),
                     author=author,
                     signature=signature,
-                    content=updated_content,
+                    # DB Optimization: Do NOT store full content in DB
+                    content=f"See file: {doc_path}",
                     content_hash=self._calculate_hash(updated_content),
                     backup_path=str(backup_path.relative_to(self.base_dir)),
                     change_description=signature
@@ -264,36 +267,66 @@ class CollaborationService:
         in_metadata = False
         in_content = False
         
+        # 提取旧版本号并递增
+        old_version = self._extract_metadata(existing_content).get("version", "v1.0.0")
+        new_version = self._increment_version_string(old_version)
+        
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
         for line in lines:
             if line.startswith("## 元数据"):
                 in_metadata = True
                 updated_lines.append(line)
             elif line.startswith("## 变更记录"):
+                # 结束内容部分（如果尚未结束）
+                in_content = False
                 # 添加新的变更记录
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 updated_lines.append(line)
-                updated_lines.append(f"- [{now}] @{author}: {signature}")
+                updated_lines.append(f"- [{now_str}] @{author}: {signature}")
                 in_metadata = False
             elif in_metadata and line.startswith("- 最后更新:"):
-                # 更新最后更新时间
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                updated_lines.append(f"- 最后更新: {now}")
+                updated_lines.append(f"- 最后更新: {now_str}")
+            elif in_metadata and line.startswith("- 当前模型:"):
+                updated_lines.append(f"- 当前模型: {author}")
+            elif in_metadata and line.startswith("- 文档版本:"):
+                updated_lines.append(f"- 文档版本: {new_version}")
             elif line.startswith("## 内容"):
                 # 替换内容部分
                 updated_lines.append(line)
                 updated_lines.append(new_content)
-                # 跳过旧的内容行
+                updated_lines.append("") # 增加空行
+                # 开始跳过旧的内容行，直到遇到 "## 变更记录"
                 in_content = True
-                continue
-            elif in_content and line.startswith("## "):
-                # 遇到下一个标题，结束内容部分
-                in_content = False
-                updated_lines.append(line)
-            elif not in_content:
+            elif in_content:
+                # 处于内容部分，检查是否遇到下一个主标题（通常是 变更记录）
+                if line.startswith("## 变更记录"):
+                    in_content = False
+                    # 重新处理这一行（添加到结果中）
+                    updated_lines.append(line)
+                    updated_lines.append(f"- [{now_str}] @{author}: {signature}")
+                else:
+                    # 跳过旧内容
+                    pass
+            else:
                 updated_lines.append(line)
         
         return '\n'.join(updated_lines)
-    
+
+    def _increment_version_string(self, version_str: str) -> str:
+        """递增版本号字符串"""
+        try:
+            version_parts = version_str.replace("v", "").split(".")
+            major, minor, patch = int(version_parts[0]), int(version_parts[1]), int(version_parts[2])
+            patch += 1
+            return f"v{major}.{minor}.{patch}"
+        except:
+            return "v1.0.1"
+            
+    def _increment_version(self, existing_content: str) -> str:
+        """递增版本号（用于DB记录）"""
+        metadata = self._extract_metadata(existing_content)
+        return self._increment_version_string(metadata.get("version", "v1.0.0"))
+
     def _extract_metadata(self, content: str) -> Dict[str, str]:
         """提取文档元数据"""
         metadata = {}
@@ -312,27 +345,14 @@ class CollaborationService:
                 metadata["doc_type"] = line.split(": ", 1)[1]
         
         return metadata
-    
+
     def _extract_doc_type(self, doc_path: str) -> str:
         """从文档路径提取文档类型"""
         parts = doc_path.split('/')
         if len(parts) >= 2:
             return parts[0]
         return "unknown"
-    
-    def _increment_version(self, existing_content: str) -> str:
-        """递增版本号"""
-        metadata = self._extract_metadata(existing_content)
-        current_version = metadata.get("version", "v1.0.0")
-        
-        # 解析版本号
-        try:
-            version_parts = current_version.replace("v", "").split(".")
-            major, minor, patch = int(version_parts[0]), int(version_parts[1]), int(version_parts[2])
-            patch += 1
-            return f"v{major}.{minor}.{patch}"
-        except:
-            return "v1.0.1"
+
     
     def _calculate_hash(self, content: str) -> str:
         """计算内容哈希"""

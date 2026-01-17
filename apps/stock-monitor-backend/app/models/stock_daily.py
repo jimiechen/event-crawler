@@ -90,7 +90,9 @@ class StockScoreResult(BaseModel):
     trade_date: Mapped[date] = mapped_column(Date, nullable=False, comment="评分日期")
     
     rule_scores: Mapped[dict] = mapped_column(JSON, nullable=True, comment="各规则得分详情")
-    total_score: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), default=0, comment="总分")
+    daily_score: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), default=0, comment="每日得分")
+    accumulated_score: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), default=0, comment="累计得分")
+    total_score: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), default=0, comment="总分(兼容字段，同accumulated_score)")
     ranking: Mapped[int] = mapped_column(Integer, nullable=True, comment="排名")
     
     pool_type: Mapped[str] = mapped_column(String(20), default="unknown", comment="股票池类型(self_selected/wencai)")

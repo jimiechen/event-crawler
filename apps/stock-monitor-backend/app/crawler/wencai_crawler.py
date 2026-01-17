@@ -66,6 +66,15 @@ class WencaiCrawler(CrawlerBase):
         # 解析
         parsed_stocks = self.wencai_service.parse_html_table(html_content, debug=True)
         
+        if parsed_stocks:
+            logger.info(f"Parsed {len(parsed_stocks)} stocks. Saving to database...")
+            # 传递 target_date 给 save_stocks 以便正确计算该日期的分数
+            if target_date:
+                for stock in parsed_stocks:
+                    stock['date'] = target_date
+            
+            await self.wencai_service.save_stocks(parsed_stocks, batch_id)
+        
         if not parsed_stocks:
             # Save HTML for debugging
             try:

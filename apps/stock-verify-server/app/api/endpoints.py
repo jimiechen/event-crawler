@@ -1,13 +1,17 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.core.database import get_db
 from app.services.cleaner import DataCleaner
-from app.services.simulator import SimulationEngine
+from app.services.simulator import SimulationEngine, DailyFlowSimulator
 from app.services.verifier import Verifier
 from app.services.backend_client import BackendClient
+from app.services.log_stream import log_manager
 from pydantic import BaseModel
 import httpx
+import json
+import asyncio
 from typing import Optional, List
 from loguru import logger
 
@@ -157,3 +161,38 @@ async def proxy_health():
             return {"status": "ok" if resp.status_code < 500 else "error"}
         except:
             return {"status": "error"}
+
+@router.get("/simulation/logs")
+async def simulation_logs(request: Request):
+    """
+    SSE endpoint for streaming simulation logs.
+    """
+    async def event_generator():
+        queue = await log_manager.subscribe()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                
+                # Wait for data with a timeout to allow checking disconnect
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield f"data: {json.dumps(data)}\n\n"
+                except asyncio.TimeoutError:
+                    # Send a heartbeat or just continue checking disconnect
+                    yield ": heartbeat\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await log_manager.unsubscribe(queue)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+@router.post("/simulation/daily-flow")
+async def start_daily_flow(req: StockRequest, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
+    """
+    Start the Daily Flow Simulation in background.
+    """
+    simulator = DailyFlowSimulator(db, req.stock_code)
+    background_tasks.add_task(simulator.run)
+    return {"status": "success", "message": "Daily flow simulation started"}
