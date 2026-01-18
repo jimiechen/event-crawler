@@ -224,11 +224,11 @@ class RankingService:
                     except Exception as e:
                         logger.error(f"Failed to calculate score for {code}: {e}")
         
-        # 3. 直接使用 accumulated_score 字段查询排名
+        # 3. 直接使用 total_score (accumulated_score的兼容字段，有索引) 字段查询排名
         stmt = select(
             WencaiStock.stock_code.label('code'),
             WencaiStock.stock_name,  # Add stock_name
-            StockScoreResult.accumulated_score.label('total_score'),
+            StockScoreResult.total_score.label('total_score'),
             StockScoreResult.ranking
         ).join(
             StockScoreResult, and_(
@@ -236,7 +236,7 @@ class RankingService:
                 StockScoreResult.trade_date == target_date
             )
         ).order_by(
-            desc(StockScoreResult.accumulated_score)
+            desc(StockScoreResult.total_score)
         ).limit(limit)
         
         result = await self.db.execute(stmt)

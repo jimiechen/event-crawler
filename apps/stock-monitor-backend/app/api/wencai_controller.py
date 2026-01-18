@@ -98,205 +98,131 @@ async def validate_wencai_stock(
     """
     try:
         logger.info(f"Received validate request: {request}")
-        # 1. 计算日期
-        pass
-
-        target_date = datetime.now()
-        if request.check_date:
-            try:
-                if "-" in request.check_date:
-                    target_date = datetime.strptime(request.check_date, "%Y-%m-%d")
-                else:
-                    target_date = datetime.strptime(request.check_date, "%Y%m%d")
-            except ValueError:
-                logger.warning(f"Invalid date format: {request.check_date}, using today")
-        
-        prev_day = target_date - timedelta(days=1)
-        # Simple weekend skipping (if Sunday, go to Friday; if Saturday, go to Friday)
-        while prev_day.weekday() >= 5:
-            prev_day -= timedelta(days=1)
-        
-        date_str = target_date.strftime("%Y年%m月%d日")
-        prev_date_str = prev_day.strftime("%Y年%m月%d日")
-        
-        logger.info(f"[WencaiValidate] Step 1: Date calculation - Today={date_str}, Prev={prev_date_str}")
-        
-        # 2. 构建查询
-        if request.query_template:
-            query = request.query_template.format(date=date_str, prev_date=prev_date_str)
-        else:
-            # 默认查询模板
-            query = f"{date_str}成交量是{prev_date_str}成交量的2.5倍以上，非北交 非创业版，非科创版，非ST，概念 行业，{prev_date_str}和{date_str}涨幅低于13% 收盘价低于25"
-            
-        logger.info(f"[WencaiValidate] Step 2: Validating stock {request.stock_code} with query: {query}")
-        
-        # 3. 调用爬虫
-        logger.info(f"[WencaiValidate] Step 3: Starting crawler execution...")
-        crawler = WencaiCrawler(db)
-        result = await crawler.fetch_and_parse(
-            query=query, 
-            batch_name=f"Validate_{request.stock_code}_{target_date.strftime('%Y%m%d')}",
-            target_stock_code=request.stock_code
-        )
-        
-        logger.info(f"[WencaiValidate] Step 4: Crawler result - Status={result.get('status')}, Found={result.get('found_target')}, Total={result.get('total')}")
-        
-        if result.get("status") != "completed":
-            return BaseResponse(
-                success=False,
-                message=f"爬虫执行失败: {result.get('error')}",
-                data=None
-            )
-            
-        found_target = result.get("found_target", False)
-        
-        # 4. 如果找到，加入临时池
-        added_to_pool = False
-        if found_target:
-            logger.info(f"[WencaiValidate] Step 5: Stock found! Preparing to add to temp pool...")
-            pattern_service = PatternAnalysisService(db)
-            
-            # 获取该股票的详细数据 (从爬虫结果中提取)
-            # 由于 fetch_and_parse 已经保存了数据到 wencai_stock 表
-            # 我们需要从 wencai_stock 表或者直接从 parsed result (如果 crawler 返回了) 获取
-            # 这里 crawler 只返回了 status, batch_id 等。
-            # 我们可以重新查询 WencaiService 获取刚才保存的数据，或者让 fetch_and_parse 返回数据。
-            # 为了简单，我们再次查询 WencaiService
-            
-            wencai_service = WencaiService(db)
-            batch_id = result["batch_id"]
-            
-            # 获取批次数据
-            stocks = await wencai_service.get_batch_data(batch_id)
-            target_stock_data = None
-            target_short = request.stock_code.split('.')[0]
-            
-            for stock in stocks:
-                if target_short in stock.stock_code:
-                    target_stock_data = stock
-                    break
-            
-            if target_stock_data:
-                # 构造临时池数据
-                # 使用 getattr 安全获取属性，因为 Row 对象可能缺少某些列
-                current_price = getattr(target_stock_data, 'current_price', 0) or 0
-                
-                temp_data = [{
-                    "code": target_stock_data.stock_code,
-                    "trade_date": target_date.date(),
-                    "open": getattr(target_stock_data, 'opening_price', current_price) or current_price,
-                    "close": current_price,
-                    "high": getattr(target_stock_data, 'highest_price', current_price) or current_price,
-                    "low": getattr(target_stock_data, 'lowest_price', current_price) or current_price,
-                    "volume": getattr(target_stock_data, 'volume', 0) or 0,
-                    "amount": getattr(target_stock_data, 'turnover', 0) or 0,
-                    "turnover": getattr(target_stock_data, 'turnover_rate', 0) or 0,
-                    "industry": getattr(target_stock_data, 'industry', '') or '',
-                    "concept": getattr(target_stock_data, 'concept', '') or ''
-                }]
-                
-                logger.info(f"[WencaiValidate] Stock Data: {temp_data}")
-                
-                await pattern_service.save_temp_data(temp_data, source="wencai_validate")
-                added_to_pool = True
-                logger.info(f"[WencaiValidate] Step 6: Stock {request.stock_code} successfully added to temp pool")
-            else:
-                logger.warning(f"[WencaiValidate] Stock {request.stock_code} validated but data retrieval failed from DB batch {batch_id}")
-        else:
-            logger.info(f"[WencaiValidate] Stock {request.stock_code} NOT found in query results.")
-            
-        # 提取所有找到的股票信息
-        all_found = []
-        raw_stocks = result.get("stocks", [])
-        for s in raw_stocks:
-            all_found.append({
-                "code": s.get("stock_code", ""),
-                "name": s.get("stock_name", "")
-            })
+        wencai_service = WencaiService(db)
+        result = await wencai_service.validate_stock(request.stock_code, request.stock_name)
         
         return BaseResponse(
-            success=True,
-            data=WencaiValidateResponse(
-                stock_code=request.stock_code,
-                is_valid=found_target,
-                query=query,
-                found_in_wencai=found_target,
-                added_to_pool=added_to_pool,
-                message="校验通过并已入池" if found_target else "校验未通过，问财结果中未找到该股票",
-                all_found_stocks=all_found
-            )
+            success=result["is_valid"],
+            data=WencaiValidateResponse(**result),
+            message="校验成功" if result["is_valid"] else "校验失败：不符合问财选股条件"
+        )
+        
+    except Exception as e:
+        logger.error(f"校验股票失败: {e}")
+        return BaseResponse(
+            success=False,
+            data=None,
+            message=f"校验股票失败: {str(e)}"
         )
 
-    except Exception as e:
-        logger.error(f"Validation failed: {e}")
-        return BaseResponse(success=False, message=str(e), data=None)
 
-
-@router.post("/parse", response_model=BaseResponse, summary="解析并保存问财HTML数据")
-async def parse_wencai_data(
+@router.post("/parse", response_model=BaseResponse, summary="解析HTML内容")
+async def parse_html(
     request: WencaiParseRequest,
     db: AsyncSession = Depends(get_db_session)
 ):
     """
-    保存问财页面HTML文件，并解析入库
+    解析问财HTML内容
+    直接传入HTML字符串进行解析
     """
     try:
-        # 生成文件名
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        # 生成一个简单的序号而不是批次ID
-        import random
-        file_id = random.randint(10, 99)
-        html_filename = f"wencai_html_{timestamp}_{file_id}.html"
-        
-        # 获取项目根目录路径
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        html_file_path = os.path.join(project_root, "debug", "html_files", html_filename)
-        
-        # 确保目录存在
-        os.makedirs(os.path.dirname(html_file_path), exist_ok=True)
-        
-        # 异步保存HTML文件
-        async with aiofiles.open(html_file_path, 'w', encoding='utf-8') as f:
-            await f.write(request.html_content)
-        
-        # 获取文件大小
-        file_size = len(request.html_content.encode('utf-8'))
-        
-        logger.info(f"HTML文件已保存: {html_file_path}, 大小: {file_size} 字节")
-        
-        # 创建抓取批次
         wencai_service = WencaiService(db)
-        batch_name = request.batch_name or f"在线解析_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        # 创建批次
         batch_id = await wencai_service.create_crawl_batch(
-            batch_name=batch_name, 
-            crawl_url=request.crawl_url, 
-            file_name=html_filename,
-            query_string=request.query_string
+            batch_name=request.batch_name or f"Manual_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            crawl_url=request.url,
+            query_string=request.query
+        )
+        
+        # 解析HTML
+        parsed_stocks = wencai_service.parse_html_table(request.html_content)
+        
+        # 保存结果
+        saved_count = 0
+        if parsed_stocks:
+            await wencai_service.save_stocks(parsed_stocks, batch_id)
+            saved_count = len(parsed_stocks)
+            
+            # 触发后续处理
+            await wencai_service.process_batch_data(batch_id)
+            await wencai_service.update_batch_status(batch_id, 'completed', saved_count, saved_count, 0)
+        else:
+            await wencai_service.update_batch_status(batch_id, 'completed', 0, 0, 0, 'No data parsed')
+        
+        # 构造响应
+        response_data = WencaiParseResponse(
+            batch_id=batch_id,
+            total_records=saved_count,
+            success_records=saved_count,
+            failed_records=0,
+            errors=[],
+            parsed_stocks=[WencaiStockData(**stock) for stock in parsed_stocks]
+        )
+        
+        return BaseResponse(
+            data=response_data,
+            message=f"解析完成，共 {saved_count} 条记录"
+        )
+        
+    except Exception as e:
+        logger.error(f"解析HTML失败: {e}")
+        return BaseResponse(
+            success=False,
+            data=None,
+            message=f"解析HTML失败: {str(e)}"
         )
 
-        # 解析HTML内容
-        parsed_stocks = wencai_service.parse_html_table(request.html_content, debug=False)
 
-        if not parsed_stocks:
-            await wencai_service.update_batch_status(batch_id, 'failed', 0, 0, 0, '未能解析到有效的股票数据')
-            return BaseResponse(
-                success=False,
-                data=WencaiParseResponse(
-                    batch_id=batch_id,
-                    total_records=0,
-                    success_records=0,
-                    failed_records=0,
-                    errors=['未能解析到有效的股票数据'],
-                    parsed_stocks=[]
-                ),
-                message="解析失败：未找到有效的股票数据"
-            )
-
-        # 保存解析结果
-        success_count, failed_count, errors = await wencai_service.save_wencai_stocks(batch_id, parsed_stocks)
+@router.post("/parse/file", response_model=BaseResponse, summary="解析HTML文件")
+async def parse_html_file(
+    batch_name: Optional[str] = Body(None),
+    html_content: str = Body(..., media_type="text/html"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    接收上传的HTML文件内容并解析
+    """
+    try:
+        wencai_service = WencaiService(db)
+        
+        # 创建批次
+        batch_id = await wencai_service.create_crawl_batch(
+            batch_name=batch_name or f"Upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+            crawl_url="file_upload",
+            query_string="file_upload"
+        )
+        
+        # 解析HTML
+        parsed_stocks = wencai_service.parse_html_table(html_content)
+        
+        # 保存结果
         total_records = len(parsed_stocks)
-        batch_status = 'completed' if success_count > 0 else 'failed'
-        await wencai_service.update_batch_status(batch_id, batch_status, total_records, success_count, failed_count, '; '.join(errors) if errors else None)
+        success_count = 0
+        failed_count = 0
+        errors = []
+        
+        if parsed_stocks:
+            try:
+                await wencai_service.save_stocks(parsed_stocks, batch_id)
+                success_count = total_records
+            except Exception as e:
+                logger.error(f"保存股票数据失败: {e}")
+                failed_count = total_records
+                errors.append(str(e))
+        
+        # 更新批次状态
+        batch_status = 'completed' if failed_count == 0 else 'failed'
+        error_msg = '; '.join(errors) if errors else None
+        
+        await wencai_service.update_batch_status(
+            batch_id, 
+            batch_status, 
+            total_records, 
+            success_records=success_count, 
+            failed_records=failed_count, 
+            error_message=error_msg
+        )
 
         # 触发后续处理流程（解析标签、关联股票等）
         if batch_status == 'completed':
@@ -398,30 +324,25 @@ async def get_crawl_batches(
         if status_filter:
             where_conditions.append("status = :status")
             params['status'] = status_filter
-
-        if query_date:
-            where_conditions.append("query_date = :query_date")
-            params['query_date'] = query_date
-        
-        # 只有在没有指定 query_date 时，才考虑 start_date/end_date (作为 created_at 过滤)
-        # 或者两者并存？通常 query_date 更精确。
-        # 这里保留 created_at 过滤作为补充
+            
         if start_date:
             where_conditions.append("created_at >= :start_date")
-            params['start_date'] = f"{start_date} 00:00:00"
+            params['start_date'] = start_date
             
         if end_date:
             where_conditions.append("created_at <= :end_date")
-            params['end_date'] = f"{end_date} 23:59:59"
-        
-        where_clause = ""
-        if where_conditions:
-            where_clause = "WHERE " + " AND ".join(where_conditions)
+            params['end_date'] = end_date
+            
+        if query_date:
+            where_conditions.append("query_date = :query_date")
+            params['query_date'] = query_date
+            
+        where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
         
         sql = f"""
         SELECT * FROM wencai_crawl_batches 
         {where_clause}
-        ORDER BY started_at DESC 
+        ORDER BY created_at DESC 
         LIMIT :limit OFFSET :offset
         """
         
@@ -430,72 +351,6 @@ async def get_crawl_batches(
         rows = result.fetchall()
         
         batches = [dict(row._mapping) for row in rows]
-        
-        # 获取这些批次的标签
-        if batches:
-            batch_ids = [b['id'] for b in batches]
-            
-            # 1. 查询关联表中的标签 (batch_tag_relations)
-            tag_sql = """
-            SELECT r.batch_id, t.id, t.name, t.tag_type, t.score
-            FROM stock_tags_info t
-            JOIN batch_tag_relations r ON t.id = r.tag_id
-            WHERE r.batch_id IN :batch_ids
-            """
-            
-            tag_result = await db.execute(text(tag_sql), {'batch_ids': tuple(batch_ids)})
-            tag_rows = tag_result.fetchall()
-            
-            # 构建 batch_id -> tags 映射 (来自关联表)
-            relation_tags_map = {}
-            for tag_row in tag_rows:
-                tag_data = dict(tag_row._mapping)
-                b_id = tag_data.pop('batch_id')
-                if b_id not in relation_tags_map:
-                    relation_tags_map[b_id] = []
-                relation_tags_map[b_id].append(tag_data)
-            
-            # 2. 合并 tags 字段中的标签
-            for batch in batches:
-                final_tags = []
-                seen_tag_names = set()
-                
-                # 先添加关联表的标签
-                rel_tags = relation_tags_map.get(batch['id'], [])
-                for tag in rel_tags:
-                    if tag['name'] not in seen_tag_names:
-                        final_tags.append(tag)
-                        seen_tag_names.add(tag['name'])
-                
-                # 再添加 tags 字段中的标签 (JSON column)
-                # 注意：tags 字段可能是字符串(JSON)或已经是对象(取决于驱动)，也可能是 None
-                col_tags_raw = batch.get('tags')
-                col_tags = []
-                
-                if col_tags_raw:
-                    if isinstance(col_tags_raw, str):
-                        try:
-                            col_tags = json.loads(col_tags_raw)
-                        except json.JSONDecodeError:
-                            col_tags = []
-                    elif isinstance(col_tags_raw, list):
-                        col_tags = col_tags_raw
-                
-                for tag in col_tags:
-                    # 统一字段名: JSON中存的是 type, 前端需要 tag_type
-                    tag_name = tag.get('name')
-                    if tag_name and tag_name not in seen_tag_names:
-                        # 转换结构适配前端
-                        new_tag = {
-                            'id': tag.get('id'),
-                            'name': tag_name,
-                            'tag_type': tag.get('type') or tag.get('tag_type'), # 兼容 type 和 tag_type
-                            'score': tag.get('score')
-                        }
-                        final_tags.append(new_tag)
-                        seen_tag_names.add(tag_name)
-                
-                batch['tags'] = final_tags
         
         return BaseResponse(
             data=batches,
@@ -619,88 +474,6 @@ async def run_wencai_crawler_by_date(
         result = await crawler.fetch_and_parse(
             query=query,
             batch_name=batch_name,
-            target_stock_code=None
-        )
-        
-        logger.info(f"问财爬虫完成: {result}")
-        
-        return BaseResponse(
-            success=result.get("status") == "completed",
-            data={
-                "batch_id": result.get("batch_id"),
-                "total": result.get("total"),
-                "success": result.get("success"),
-                "crawl_date": crawl_date,
-                "crawler_type": crawler_type
-            },
-            message=f"爬取完成：共 {result.get('total')} 条，成功 {result.get('success')} 条"
-        )
-        
-    except Exception as e:
-        logger.error(f"执行问财爬虫失败: {e}")
-        return BaseResponse(
-            success=False,
-            data=None,
-            message=f"执行问财爬虫失败: {str(e)}"
-        )
-
-
-@router.get("/crawler/{crawl_date}/{crawler_type}", response_model=BaseResponse, summary="按日期执行问财爬虫")
-async def run_wencai_crawler_by_date(
-    crawl_date: str = Path(..., description="爬取日期 (YYYY-MM-DD)"),
-    crawler_type: int = Path(..., description="爬虫类型 (1=问财爬虫)"),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    按日期执行问财爬虫
-    
-    Args:
-        crawl_date: 爬取日期，格式为 YYYY-MM-DD
-        crawler_type: 爬虫类型，当前只支持 1（问财爬虫）
-        db: 数据库会话
-    
-    Returns:
-        爬取结果，包含批次ID、成功数量等信息
-    """
-    try:
-        # 验证爬虫类型
-        if crawler_type != 1:
-            return BaseResponse(
-                success=False,
-                data=None,
-                message=f"不支持的爬虫类型: {crawler_type}，当前只支持类型 1（问财爬虫）"
-            )
-        
-        # 解析日期
-        try:
-            target_date = datetime.strptime(crawl_date, "%Y-%m-%d").date()
-        except ValueError:
-            return BaseResponse(
-                success=False,
-                data=None,
-                message=f"无效的日期格式: {crawl_date}，请使用 YYYY-MM-DD 格式"
-            )
-        
-        # 检查是否为周末
-        if target_date.weekday() >= 5:
-            return BaseResponse(
-                success=False,
-                data=None,
-                message=f"{crawl_date} 是周末，跳过爬取"
-            )
-        
-        logger.info(f"开始执行问财爬虫，日期: {crawl_date}，类型: {crawler_type}")
-        
-        # 创建爬虫实例
-        crawler = WencaiCrawler(db)
-        
-        # 生成批次名称
-        batch_name = f"AutoCrawl_{target_date.strftime('%Y%m%d')}"
-        
-        # 执行爬取（使用target_date自动生成查询条件）
-        result = await crawler.fetch_and_parse(
-            query=None,
-            batch_name=batch_name,
             target_stock_code=None,
             target_date=target_date
         )
@@ -797,459 +570,36 @@ async def get_wencai_stocks(
     stock_code: Optional[str] = Query(None, description="股票代码"),
     start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
-    limit: int = Query(100, ge=1, le=5000, description="返回数量限制"),
+    limit: int = Query(50, ge=1, le=1000, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db_session)
 ):
     """获取问财股票数据"""
     try:
-        # 构建查询SQL
-        where_conditions = []
-        params = {'limit': limit, 'offset': offset}
+        wencai_service = WencaiService(db)
         
+        # 兼容旧参数名
+        filters = {}
         if batch_id:
-            where_conditions.append("crawl_batch_id = :batch_id")
-            params['batch_id'] = batch_id
-        
+            filters['crawl_batch_id'] = batch_id
         if stock_code:
-            where_conditions.append("stock_code = :stock_code")
-            params['stock_code'] = stock_code
-
-        if start_date:
-            where_conditions.append("created_at >= :start_date")
-            params['start_date'] = f"{start_date} 00:00:00"
+            filters['stock_code'] = stock_code
             
-        if end_date:
-            where_conditions.append("created_at <= :end_date")
-            params['end_date'] = f"{end_date} 23:59:59"
-        
-        where_clause = ""
-        if where_conditions:
-            where_clause = "WHERE " + " AND ".join(where_conditions)
-        
-        sql = f"""
-        SELECT * FROM wencai_stocks 
-        {where_clause}
-        ORDER BY created_at DESC 
-        LIMIT :limit OFFSET :offset
-        """
-        
-        from sqlalchemy import text
-        result = await db.execute(text(sql), params)
-        rows = result.fetchall()
-        
-        stocks = [dict(row._mapping) for row in rows]
+        result = await wencai_service.get_stocks(
+            filters=filters,
+            limit=limit,
+            offset=offset
+        )
         
         return BaseResponse(
-            data=stocks,
-            message=f"获取问财股票数据成功，共 {len(stocks)} 条"
+            data=result,
+            message=f"获取股票数据成功，共 {len(result)} 条"
         )
         
     except Exception as e:
-        logger.error(f"获取问财股票数据失败: {e}")
-        
-        error_message = "获取问财股票数据失败"
-        if "database" in str(e).lower() or "connection" in str(e).lower():
-            error_message = "数据库连接错误，请稍后重试"
-        elif "timeout" in str(e).lower():
-            error_message = "查询超时，请稍后重试"
-        elif "invalid" in str(e).lower():
-            error_message = "查询参数无效，请检查股票代码或批次ID"
-        
+        logger.error(f"获取股票数据失败: {e}")
         return BaseResponse(
             success=False,
             data=[],
-            message=error_message
-        )
-
-
-@router.get("/stocks/latest", response_model=BaseResponse, summary="获取最新问财股票数据")
-async def get_latest_wencai_stocks(
-    limit: int = Query(100, ge=1, le=5000, description="返回数量限制"),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """获取最新的问财股票数据（每只股票的最新记录）"""
-    try:
-        wencai_service = WencaiService(db)
-        latest_stocks = await wencai_service.get_latest_wencai_stocks(limit)
-        
-        return BaseResponse(
-            data=latest_stocks,
-            message=f"获取最新问财股票数据成功，共 {len(latest_stocks)} 条"
-        )
-        
-    except Exception as e:
-        logger.error(f"获取最新问财股票数据失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取最新问财股票数据失败"
-        )
-
-
-@router.get("/stats", response_model=BaseResponse, summary="获取问财数据统计")
-async def get_wencai_stats(
-    days: int = Query(7, ge=1, le=30, description="统计天数"),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """获取问财数据抓取统计信息"""
-    try:
-        sql = """
-        SELECT 
-            DATE(started_at) as crawl_date,
-            COUNT(*) as total_batches,
-            SUM(total_records) as total_records,
-            SUM(success_records) as total_success,
-            SUM(failed_records) as total_failed
-        FROM wencai_crawl_batches
-        WHERE started_at >= DATE_SUB(NOW(), INTERVAL :days DAY)
-        GROUP BY DATE(started_at)
-        ORDER BY crawl_date DESC
-        """
-        
-        from sqlalchemy import text
-        from decimal import Decimal
-        
-        result = await db.execute(text(sql), {'days': days})
-        rows = result.fetchall()
-        
-        stats = []
-        for row in rows:
-            row_dict = dict(row._mapping)
-            # 计算成功率，处理Decimal类型
-            total_records = row_dict.get('total_records', 0)
-            success_records = row_dict.get('total_success', 0)
-            
-            if total_records and total_records > 0:
-                # 确保类型转换正确
-                success_rate = float(success_records) * 100.0 / float(total_records)
-                row_dict['avg_success_rate'] = round(success_rate, 2)
-            else:
-                row_dict['avg_success_rate'] = 0.0
-            
-            stats.append(row_dict)
-        
-        # 计算总体统计
-        total_batches = sum(int(row.get('total_batches', 0)) for row in stats)
-        total_records = sum(int(row.get('total_records', 0)) for row in stats)
-        total_success = sum(int(row.get('total_success', 0)) for row in stats)
-        total_failed = sum(int(row.get('total_failed', 0)) for row in stats)
-        
-        total_stats = {
-            'total_batches': total_batches,
-            'total_records': total_records,
-            'total_success': total_success,
-            'total_failed': total_failed,
-            'daily_stats': stats
-        }
-        
-        if total_records > 0:
-            total_stats['overall_success_rate'] = round(
-                float(total_success) * 100.0 / float(total_records), 2
-            )
-        else:
-            total_stats['overall_success_rate'] = 0.0
-        
-        return BaseResponse(
-            data=total_stats,
-            message=f"获取最近 {days} 天问财数据统计成功"
-        )
-        
-    except Exception as e:
-        logger.error(f"获取问财数据统计失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="获取问财数据统计失败"
-        )
-
-
-@router.delete("/stocks/{stock_code}", response_model=BaseResponse, summary="删除问财股票")
-async def delete_wencai_stock(
-    stock_code: str,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """删除指定的问财股票及其相关数据"""
-    try:
-        # 删除相关数据
-        from sqlalchemy import text
-        
-        # 删除股票数据
-        result = await db.execute(
-            text("DELETE FROM wencai_stocks WHERE stock_code = :stock_code"),
-            {'stock_code': stock_code}
-        )
-        deleted_stocks = result.rowcount
-        
-        # 删除去重记录
-        result = await db.execute(
-            text("DELETE FROM wencai_data_dedup WHERE stock_code = :stock_code"),
-            {'stock_code': stock_code}
-        )
-        
-        await db.commit()
-        
-        if deleted_stocks == 0:
-             return BaseResponse(
-                success=True, # Return true even if not found to be idempotent
-                data={'deleted_stock_code': stock_code, 'count': 0},
-                message=f"未找到股票 {stock_code}"
-            )
-
-        return BaseResponse(
-            data={'deleted_stock_code': stock_code, 'count': deleted_stocks},
-            message=f"股票 {stock_code} 删除成功"
-        )
-        
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除股票失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="删除股票失败"
-        )
-
-
-@router.post("/crawl/realtime", response_model=BaseResponse, summary="实时执行问财爬虫")
-async def crawl_realtime(
-    query: Optional[str] = Body(None, embed=True, description="自定义查询语句"),
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    实时执行问财爬虫
-    如果不提供 query，将使用默认的日期逻辑生成查询语句
-    """
-    try:
-        from datetime import datetime, timedelta
-        
-        # 如果未提供 query，自动生成
-        if not query:
-            date_obj = datetime.now()
-            # 如果是周末，调整到最近的周五
-            while date_obj.weekday() >= 5:
-                date_obj -= timedelta(days=1)
-            
-            # 计算 T-1
-            prev_date_obj = date_obj - timedelta(days=1)
-            while prev_date_obj.weekday() >= 5:
-                prev_date_obj -= timedelta(days=1)
-                
-            query_date = date_obj.strftime("%Y年%m月%d日")
-            prev_date_str = prev_date_obj.strftime("%Y年%m月%d日")
-            
-            # 默认查询逻辑
-            query = f"{query_date}成交量是{prev_date_str}成交量的2.9倍以上，非北交，非创业板，非科创版，非ST，概念，行业，{prev_date_str}和{query_date}涨幅低于13%，收盘价低于25"
-            
-        logger.info(f"开始执行实时问财爬虫，Query: {query}")
-        
-        crawler = WencaiCrawler(db)
-        batch_name = f"Realtime_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        result = await crawler.fetch_and_parse(query, batch_name=batch_name)
-        
-        return BaseResponse(
-            success=result.get("status") == "completed",
-            data={
-                "batch_id": result.get("batch_id"),
-                "total": result.get("total"),
-                "success": result.get("success"),
-                "query": query
-            },
-            message=f"爬取完成：共 {result.get('total')} 条，成功 {result.get('success')} 条"
-        )
-        
-    except Exception as e:
-        logger.error(f"执行实时问财爬虫失败: {e}")
-        return BaseResponse(
-            success=False,
-            data=None,
-            message=f"执行实时问财爬虫失败: {str(e)}"
-        )
-
-
-@router.delete("/batches/{batch_id}", response_model=BaseResponse, summary="删除抓取批次")
-async def delete_crawl_batch(
-    batch_id: int,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """删除指定的抓取批次及其相关数据"""
-    try:
-        # 检查批次是否存在
-        wencai_service = WencaiService(db)
-        batch_info = await wencai_service.get_batch_info(batch_id)
-        
-        if not batch_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"批次不存在: {batch_id}"
-            )
-        
-        # 删除相关数据
-        from sqlalchemy import text
-        
-        # 删除股票数据
-        await db.execute(
-            text("DELETE FROM wencai_stocks WHERE crawl_batch_id = :batch_id"),
-            {'batch_id': batch_id}
-        )
-        
-        # 删除去重记录
-        await db.execute(
-            text("DELETE FROM wencai_data_dedup WHERE crawl_batch_id = :batch_id"),
-            {'batch_id': batch_id}
-        )
-        
-        # 删除批次记录
-        await db.execute(
-            text("DELETE FROM wencai_crawl_batches WHERE id = :batch_id"),
-            {'batch_id': batch_id}
-        )
-        
-        await db.commit()
-        
-        return BaseResponse(
-            data={'deleted_batch_id': batch_id},
-            message=f"批次 {batch_id} 及其相关数据删除成功"
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"删除批次失败: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="删除批次失败"
-        )
-
-
-@router.post("/parse-file", response_model=BaseResponse, summary="解析HTML文件")
-async def parse_wencai_file(
-    request: WencaiParseFileRequest,
-    db: AsyncSession = Depends(get_db_session)
-):
-    """
-    读取本地HTML文件并解析问财数据
-    
-    Args:
-        request: 包含文件路径和批次信息的请求
-        db: 数据库会话
-        
-    Returns:
-        解析结果，包含详细的调试信息
-    """
-    try:
-        wencai_service = WencaiService(db)
-        
-        # 处理文件路径
-        file_path = request.file_path
-        
-        # 如果只提供了文件名，则在debug目录中查找
-        if not os.path.isabs(file_path):
-            # 获取项目根目录路径
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-            debug_dir = os.path.join(project_root, "debug", "html_files")
-            file_path = os.path.join(debug_dir, file_path)
-        
-        # 检查文件是否存在
-        if not os.path.exists(file_path):
-            return BaseResponse(
-                success=False,
-                data=None,
-                message=f"文件不存在: {file_path}"
-            )
-        
-        # 读取HTML文件内容
-        try:
-            async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
-                html_content = await f.read()
-            
-            logger.info(f"成功读取HTML文件: {file_path}, 文件大小: {len(html_content)} 字符")
-        except Exception as e:
-            logger.error(f"读取HTML文件失败: {e}")
-            return BaseResponse(
-                success=False,
-                data=None,
-                message=f"读取文件失败: {str(e)}"
-            )
-        
-        # 生成批次名称
-        batch_name = request.batch_name or f"文件解析测试_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        # 提取文件名用于索引
-        file_name = os.path.basename(file_path)
-        
-        # 创建抓取批次，传递文件名用于索引
-        batch_id = await wencai_service.create_crawl_batch(batch_name, request.crawl_url or file_path, file_name)
-        
-        # 解析HTML数据（带详细调试信息）
-        logger.info(f"开始解析HTML文件数据，批次ID: {batch_id}, 文件: {file_path}")
-        parsed_stocks = wencai_service.parse_html_table(html_content, debug=True)
-        
-        if not parsed_stocks:
-            # 更新批次状态为失败
-            await wencai_service.update_batch_status(
-                batch_id, 'failed', 0, 0, 0, '未能解析到有效的股票数据'
-            )
-            
-            return BaseResponse(
-                success=False,
-                data=WencaiParseResponse(
-                    batch_id=batch_id,
-                    total_records=0,
-                    success_records=0,
-                    failed_records=0,
-                    errors=['未能解析到有效的股票数据'],
-                    parsed_stocks=[]
-                ),
-                message=f"解析失败：未找到有效的股票数据 (文件: {os.path.basename(file_path)})"
-            )
-        
-        # 保存股票数据
-        logger.info(f"开始保存 {len(parsed_stocks)} 条股票数据")
-        success_count, failed_count, errors = await wencai_service.save_wencai_stocks(
-            batch_id, parsed_stocks
-        )
-        
-        # 更新批次状态
-        total_records = len(parsed_stocks)
-        batch_status = 'completed' if success_count > 0 else 'failed'
-        error_message = '; '.join(errors) if errors else None
-        
-        await wencai_service.update_batch_status(
-            batch_id, batch_status, total_records, success_count, failed_count, error_message
-        )
-        
-        # 转换解析的股票数据为响应格式
-        parsed_stocks_response = []
-        for stock in parsed_stocks:  # 返回所有解析的数据用于调试
-            try:
-                parsed_stocks_response.append(WencaiStockData(**stock))
-            except Exception as e:
-                logger.warning(f"转换股票数据失败: {e}")
-        
-        response_data = WencaiParseResponse(
-            batch_id=batch_id,
-            total_records=total_records,
-            success_records=success_count,
-            failed_records=failed_count,
-            errors=errors,
-            parsed_stocks=parsed_stocks_response
-        )
-        
-        message = f"文件解析完成：{os.path.basename(file_path)} - 总计 {total_records} 条，成功 {success_count} 条，失败 {failed_count} 条"
-        
-        return BaseResponse(
-            success=batch_status == 'completed',
-            data=response_data,
-            message=message
-        )
-        
-    except Exception as e:
-        logger.error(f"解析HTML文件失败: {e}")
-        
-        error_message = f"解析HTML文件失败: {str(e)}"
-        
-        return BaseResponse(
-            success=False,
-            data=None,
-            message=error_message
+            message=f"获取股票数据失败: {str(e)}"
         )
