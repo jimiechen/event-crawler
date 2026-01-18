@@ -127,25 +127,46 @@ class SimulationService:
 
     async def step2_wencai_crawler_and_score(self):
         """
-        Step 2: 2025-11-20
+        Step 2: 2025-11-20 (Deprecated in favor of streaming version)
+        """
+        async for event in self.step2_stream():
+            pass
+        return {"status": "success", "message": "Step 2 executed via stream wrapper"}
+
+    async def step2_stream(self):
+        """
+        Step 2: 2025-11-20 with SSE Streaming
         - 调用真实问财爬虫，抓取2025-11-20的数据
         - 爬虫自动计算基础分
         - 更新 603601 历史数据
         - 计算所有股票的当日评分
         """
+        import json
         target_date = date(2025, 11, 20)
         
+        def sse_msg(msg_type, content, data=None):
+            payload = {"type": msg_type, "message": content, "data": data, "timestamp": datetime.now().isoformat()}
+            return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
         try:
+            yield sse_msg("info", f"开始执行 Step 2: 日期 {target_date}")
+            
             # 1. 调用真实问财爬虫API
             logger.info(f"Calling Wencai Crawler for {target_date}")
+            yield sse_msg("step", "正在调用问财爬虫...", {"target_date": str(target_date)})
+            
             crawler_res = await BackendClient.call_wencai_crawler(target_date.strftime("%Y-%m-%d"))
             
             if not crawler_res.get('success'):
-                raise Exception(f"Wencai Crawler failed: {crawler_res.get('message')}")
+                error_msg = f"Wencai Crawler failed: {crawler_res.get('message')}"
+                yield sse_msg("error", error_msg)
+                raise Exception(error_msg)
             
+            yield sse_msg("step", f"爬虫执行完成: {crawler_res.get('message')}", crawler_res)
             logger.info(f"Wencai Crawler completed: {crawler_res}")
             
             # 2. 更新 603601 历史数据（添加2025-11-20一天）
+            yield sse_msg("step", "正在更新 603601 历史数据...")
             code_603601 = "603601"
             await self.session.execute(text("""
                 DELETE FROM stock_daily 
@@ -156,19 +177,20 @@ class SimulationService:
             await self._load_csv_data(code_603601, target_date, days=1)
             
             await self.session.commit()
+            yield sse_msg("step", "603601 历史数据更新完成")
             
             # 3. 计算所有股票的当日评分(2025-11-20)
+            yield sse_msg("step", "正在触发全量评分计算...")
             logger.info(f"Triggering batch calculation for {target_date}")
             res = await BackendClient.trigger_calculation(target_date.strftime("%Y-%m-%d"), 0)
             
-            return {
-                "status": "success",
-                "message": f"Step 2 executed. Wencai Crawler: {crawler_res.get('message')}. Calculation: {res.get('message')}",
-                "crawler_data": crawler_res,
-                "backend_data": res
-            }
-        
+            yield sse_msg("step", f"评分计算完成: {res.get('message')}", res)
+            
+            yield sse_msg("success", "Step 2 执行成功！")
+            
         except Exception as e:
             await self.session.rollback()
             logger.error(f"Step 2 failed: {e}")
-            raise e
+            yield sse_msg("error", f"执行失败: {str(e)}")
+            # Don't raise, just end stream with error
+            return

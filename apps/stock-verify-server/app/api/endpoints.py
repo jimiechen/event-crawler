@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db as get_db_session
 from app.services.cleaner import DataCleaner
@@ -18,8 +19,31 @@ async def simulation_step1(db: AsyncSession = Depends(get_db_session)):
     result = await service.step1_calculate_603601_baseline()
     return result
 
-@router.post("/simulation/step2")
+@router.get("/simulation/step2")
 async def simulation_step2(db: AsyncSession = Depends(get_db_session)):
+    """
+    Step 2 Simulation with SSE Streaming
+    Use GET for SSE compatibility
+    """
     service = SimulationService(db)
-    result = await service.step2_wencai_crawler_and_score()
-    return result
+    return StreamingResponse(
+        service.step2_stream(),
+        media_type="text/event-stream"
+    )
+
+@router.post("/simulation/step2")
+async def simulation_step2_post(db: AsyncSession = Depends(get_db_session)):
+    """
+    Backward compatible POST endpoint (non-streaming or streaming?)
+    Ideally we want streaming here too, but some clients might expect JSON.
+    Let's make it stream too, but typically POST streams are rare in browsers.
+    But verifying script uses POST.
+    Let's support both.
+    """
+    service = SimulationService(db)
+    # If we want JSON result, we can iterate stream and collect last result?
+    # Or just stream.
+    return StreamingResponse(
+        service.step2_stream(),
+        media_type="text/event-stream"
+    )

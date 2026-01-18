@@ -21,6 +21,24 @@ async def call_api(session, url, method="POST", data=None):
                     text = await response.text()
                     print(text)
                     return None
+                
+                # Check for SSE
+                if 'text/event-stream' in response.headers.get('Content-Type', ''):
+                    print(f"SSE Stream from {url}:")
+                    last_data = None
+                    async for line in response.content:
+                        line = line.decode('utf-8').strip()
+                        if line.startswith('data: '):
+                            import json
+                            try:
+                                json_str = line[6:]
+                                data = json.loads(json_str)
+                                print(f"  [SSE] {data.get('type')}: {data.get('message')}")
+                                last_data = data
+                            except:
+                                pass
+                    return last_data.get('data') if last_data else {"status": "success", "message": "Stream completed"}
+                
                 return await response.json()
         else:
             async with session.get(url, params=data) as response:
