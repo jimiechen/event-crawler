@@ -578,6 +578,8 @@ class WencaiStock(BaseModel):
     volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
     crawl_batch_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否活跃")
+
     # 新增字段
     concept: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="所属概念")
     industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="所属行业")

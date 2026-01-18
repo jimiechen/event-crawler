@@ -46,6 +46,7 @@ class DatabaseManager:
                     connect_args={"check_same_thread": False}
                 )
             else:
+                # echo=True will log all SQL statements to stdout
                 self.engine = create_async_engine(
                     self._get_async_url(),
                     echo=False,

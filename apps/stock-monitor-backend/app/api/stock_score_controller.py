@@ -68,7 +68,6 @@ async def get_latest_scores(
     trade_date: Optional[date] = Query(None, description="交易日期"),
     code: Optional[str] = Query(None, description="股票代码"),
     min_score: Optional[float] = Query(None, description="最低总分"),
-    pool_type: Optional[str] = Query(None, description="股票池类型"),
     page: int = Query(1, ge=1, description="页码"),
     page_size: int = Query(20, ge=1, le=100, description="每页数量"),
     db: AsyncSession = Depends(get_db_session)
@@ -94,9 +93,6 @@ async def get_latest_scores(
     if min_score is not None:
         query = query.where(StockScoreResult.total_score >= min_score)
         
-    if pool_type:
-        query = query.where(StockScoreResult.pool_type == pool_type)
-        
     # 计算总数
     count_stmt = select(func.count(StockScoreResult.id))
     if trade_date:
@@ -105,8 +101,6 @@ async def get_latest_scores(
         count_stmt = count_stmt.where(StockScoreResult.code == code)
     if min_score is not None:
         count_stmt = count_stmt.where(StockScoreResult.total_score >= min_score)
-    if pool_type:
-        count_stmt = count_stmt.where(StockScoreResult.pool_type == pool_type)
 
     total = (await db.execute(count_stmt)).scalar() or 0
     

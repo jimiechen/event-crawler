@@ -9,7 +9,6 @@ import sys
 import asyncio
 from contextlib import asynccontextmanager
 from typing import Dict, Any
-
 from fastapi import FastAPI, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -18,10 +17,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import uvicorn
-import nest_asyncio
+# import nest_asyncio
 
 # 解决 Playwright 在某些环境下的事件循环问题
-nest_asyncio.apply()
+# nest_asyncio.apply()
 
 # 添加项目根目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

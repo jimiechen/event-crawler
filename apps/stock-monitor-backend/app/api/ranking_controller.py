@@ -27,76 +27,11 @@ async def get_growth_ranking(
 ):
     """
     Get stock ranking based on score growth between start_date and end_date.
-    Growth = Score(end_date) - Score(start_date)
+    Growth = Sum(daily_score) in range.
     """
     try:
-        # Calculate growth as Sum(total_score) in range
-        # User feedback implies "Growth Score" = "Points gained in this period"
-        # Since StockScoreResult stores daily scores, we sum them up.
-        
-        # Also fetch the total score of the LAST day for display if needed (or just return 0/growth)
-        # The frontend expects "total_score" field.
-        
-        # Subquery to get sum of scores in range
-        growth_query = select(
-            StockScoreResult.code,
-            func.sum(StockScoreResult.total_score).label('growth')
-        ).where(
-            and_(
-                StockScoreResult.trade_date >= start_date,
-                StockScoreResult.trade_date <= end_date
-            )
-        ).group_by(
-            StockScoreResult.code
-        ).order_by(
-            desc('growth')
-        ).limit(limit)
-        
-        growth_result = await db.execute(growth_query)
-        growth_data = growth_result.all()
-        
-        # Get names and maybe latest score for context
-        ranking_data = []
-        if growth_data:
-            codes = [row.code for row in growth_data]
-            
-            # Fetch names
-            names_query = select(StockInfo.code, StockInfo.name).where(StockInfo.code.in_(codes))
-            names_result = await db.execute(names_query)
-            names_map = {row.code: row.name for row in names_result.all()}
-            
-            # Fetch latest daily score (for "Details" column which often shows latest rule match)
-            # Or fetch the score on end_date specifically?
-            # Let's try to get score and rule_scores on end_date
-            details_query = select(
-                StockScoreResult.code, 
-                StockScoreResult.total_score,
-                StockScoreResult.rule_scores
-            ).where(
-                and_(
-                    StockScoreResult.code.in_(codes),
-                    StockScoreResult.trade_date == end_date
-                )
-            )
-            details_result = await db.execute(details_query)
-            details_map = {row.code: row for row in details_result.all()}
-            
-            for row in growth_data:
-                code = row.code
-                growth = float(row.growth or 0)
-                
-                detail = details_map.get(code)
-                end_score = float(detail.total_score) if detail else 0.0
-                rule_scores = detail.rule_scores if detail else {}
-                
-                ranking_data.append({
-                    "code": code,
-                    "name": names_map.get(code, code),
-                    "growth": growth,
-                    "total_score": end_score, # Return end_date score as total_score for consistency with frontend expectations?
-                    "rule_scores": rule_scores
-                })
-
+        service = RankingService(db)
+        ranking_data = await service.get_score_growth_ranking(start_date, end_date, limit=limit)
         return BaseResponse(success=True, message="ok", data=ranking_data)
 
     except Exception as e:
@@ -115,7 +50,7 @@ async def get_total_ranking(
 ):
     """
     Get stock ranking based on sum of total scores for the last 250 days ending at target_date.
-    Logic: Sum(total_score) where trade_date in [target_date - 250 days, target_date]
+    Logic: Sum(daily_score) where trade_date in [target_date - 250 days, target_date]
     """
     try:
         # If no date provided, default to today
@@ -141,17 +76,34 @@ async def calculate_ranking_by_date(
 ):
     """
     按日期计算股票排名
+    如果该日期没有评分数据，会自动触发Pathway引擎进行计算
     """
     try:
         from datetime import datetime
         target_date = datetime.strptime(calculate_date, "%Y-%m-%d").date()
         
         service = RankingService(db)
+        
+        # 1. 检查该日期是否已有评分数据
+        has_scores = await service.has_scores_for_date(target_date)
+        
+        message_prefix = "排名数据已存在"
+        if not has_scores:
+            # 2. 如果没有，触发Pathway引擎计算
+            # 导入放在这里避免潜在的循环依赖
+            from ..services.pathway_engine import PathwayVolumePriceEngine
+            engine = PathwayVolumePriceEngine(db)
+            
+            # 计算该日期的评分
+            await engine.calculate_daily_scores(target_date)
+            message_prefix = "排名计算完成(新触发)"
+        
+        # 3. 获取排名数据
         ranking_data = await service.get_total_score_ranking(target_date, limit=1000)
         
         return BaseResponse(
             success=True,
-            message=f"排名计算完成，日期: {calculate_date}",
+            message=f"{message_prefix}，日期: {calculate_date}",
             data=ranking_data
         )
     except Exception as e:

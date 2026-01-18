@@ -3,212 +3,110 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stock Verification Console - Daily Simulation</title>
+    <title>603601 全流程可视化回溯 (Stock Verify Server)</title>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 20px; background-color: #f5f5f5; color: #333; }
-        .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        h1 { border-bottom: 2px solid #eee; padding-bottom: 15px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
-        
-        .stepper { display: flex; justify-content: space-between; margin-bottom: 30px; position: relative; }
-        .stepper::before { content: ''; position: absolute; top: 15px; left: 0; right: 0; height: 2px; background: #eee; z-index: 1; }
-        .step { position: relative; z-index: 2; background: white; padding: 0 10px; text-align: center; width: 14%; }
-        .step-circle { width: 32px; height: 32px; border-radius: 50%; background: #eee; color: #666; display: flex; align-items: center; justify-content: center; margin: 0 auto 8px; font-weight: bold; border: 2px solid #ddd; transition: all 0.3s; }
-        .step.active .step-circle { background: #007bff; color: white; border-color: #007bff; box-shadow: 0 0 0 4px rgba(0,123,255,0.2); }
-        .step.success .step-circle { background: #28a745; color: white; border-color: #28a745; }
-        .step.failed .step-circle { background: #dc3545; color: white; border-color: #dc3545; }
-        .step-title { font-size: 12px; color: #666; font-weight: bold; }
-        
-        .main-controls { display: flex; gap: 20px; margin-bottom: 20px; align-items: flex-end; }
-        .input-group { flex: 1; max-width: 200px; }
-        label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 14px; }
-        input[type="text"] { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
-        
-        .btn-start { background-color: #007bff; color: white; padding: 12px 24px; border: none; border-radius: 4px; font-size: 16px; font-weight: bold; cursor: pointer; transition: background 0.2s; flex: 1; }
-        .btn-start:hover { background-color: #0069d9; }
-        .btn-start:disabled { background-color: #ccc; cursor: not-allowed; }
-
-        .panels { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
-        
-        .log-panel { background: #1e1e1e; color: #0f0; padding: 15px; border-radius: 6px; height: 400px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 13px; line-height: 1.5; border: 1px solid #333; }
-        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #333; padding-bottom: 2px; }
-        .log-time { color: #888; margin-right: 8px; }
-        
-        .status-panel { background: #f8f9fa; padding: 15px; border-radius: 6px; border: 1px solid #ddd; height: 400px; overflow-y: auto; }
-        .status-item { padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; }
-        .status-item:last-child { border-bottom: none; }
-        .status-label { font-weight: bold; }
-        .status-val { font-family: monospace; }
-        
-        .badge { padding: 2px 6px; border-radius: 3px; font-size: 11px; }
-        .badge-success { background: #d4edda; color: #155724; }
-        .badge-warning { background: #fff3cd; color: #856404; }
-        .badge-danger { background: #f8d7da; color: #721c24; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 15px; }
+        .control-panel { display: grid; grid-template-columns: 1fr; gap: 15px; margin-top: 30px; }
+        .btn { padding: 15px 20px; font-size: 16px; border: none; border-radius: 5px; cursor: pointer; transition: all 0.3s; font-weight: bold; text-align: left; display: flex; align-items: center; }
+        .btn-icon { margin-right: 10px; font-size: 20px; }
+        .btn-danger { background-color: #e74c3c; color: white; }
+        .btn-danger:hover { background-color: #c0392b; }
+        .btn-primary { background-color: #3498db; color: white; }
+        .btn-primary:hover { background-color: #2980b9; }
+        .btn-success { background-color: #2ecc71; color: white; }
+        .btn-success:hover { background-color: #27ae60; }
+        .log-panel { margin-top: 30px; background-color: #2c3e50; color: #ecf0f1; padding: 15px; border-radius: 5px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 14px; }
+        .log-entry { margin-bottom: 5px; border-bottom: 1px solid #34495e; padding-bottom: 3px; }
+        .log-time { color: #95a5a6; margin-right: 10px; }
+        .status-badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; margin-left: auto; }
+        .status-waiting { background-color: #f39c12; color: white; }
+        .status-done { background-color: #2ecc71; color: white; }
+        .desc { font-size: 0.9em; color: #7f8c8d; margin-top: 5px; margin-left: 34px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>
-            <span>Stock Simulation Center</span>
-            <span style="font-size: 14px; font-weight: normal; color: #666;">Target: Stock Verify Server</span>
-        </h1>
+        <h1>603601 验收模拟控制台</h1>
+        <p style="text-align: center; color: #7f8c8d;">端口: 8001 | 目标后端: 8000</p>
         
-        <div class="stepper">
-            <div class="step" id="step-1">
-                <div class="step-circle">1</div>
-                <div class="step-title">Wencai Crawler<br>(08:00)</div>
+        <div class="control-panel">
+            <div>
+                <button class="btn btn-danger" onclick="executeAction('reset')" style="width: 100%">
+                    <span class="btn-icon">🔴</span> 1. 清空所有数据 (Reset)
+                </button>
+                <div class="desc">清空所有业务表，仅保留标签规则。重置环境。</div>
             </div>
-            <div class="step" id="step-2">
-                <div class="step-circle">2</div>
-                <div class="step-title">Data Sync<br>(08:30)</div>
+
+            <div>
+                <button class="btn btn-primary" onclick="executeAction('step1')" style="width: 100%">
+                    <span class="btn-icon">1️⃣</span> 2. Step 1: 603601 上榜 (2025-11-19)
+                </button>
+                <div class="desc">注入 603601 及 250 天历史K线，触发后端评分计算。预期: 1 条数据。</div>
             </div>
-            <div class="step" id="step-3">
-                <div class="step-circle">3</div>
-                <div class="step-title">Realtime Monitor<br>(09:30)</div>
-            </div>
-            <div class="step" id="step-4">
-                <div class="step-circle">4</div>
-                <div class="step-title">Post-Market<br>(15:05)</div>
-            </div>
-            <div class="step" id="step-5">
-                <div class="step-circle">5</div>
-                <div class="step-title">Review & Score<br>(15:30)</div>
-            </div>
-            <div class="step" id="step-6">
-                <div class="step-circle">6</div>
-                <div class="step-title">AI Report<br>(17:00)</div>
+
+            <div>
+                <button class="btn btn-success" onclick="executeAction('step2')" style="width: 100%">
+                    <span class="btn-icon">2️⃣</span> 3. Step 2: 问财扩容 (2025-11-20)
+                </button>
+                <div class="desc">注入 11 只新股及历史K线，触发全量评分。预期: 12 条数据，603601 排名变化。</div>
             </div>
         </div>
 
-        <div class="main-controls">
-            <div class="input-group">
-                <label for="stockCode">Stock Code</label>
-                <input type="text" id="stockCode" value="603601" placeholder="e.g. 603601">
-            </div>
-            <button class="btn-start" id="btnStart" onclick="startSimulation()">🚀 Start Daily Flow Simulation</button>
-        </div>
-
-        <div class="panels">
-            <div class="log-panel" id="logPanel">
-                <div class="log-entry"><span class="log-time">--:--:--</span>Ready to start simulation...</div>
-            </div>
-            <div class="status-panel" id="statusPanel">
-                <h3>Execution Status</h3>
-                <div id="statusList">
-                    <div class="status-item"><span class="status-label">Status</span><span class="status-val">Idle</span></div>
-                </div>
-            </div>
+        <div class="log-panel" id="logPanel">
+            <div class="log-entry"><span class="log-time">System</span> Ready. Waiting for commands...</div>
         </div>
     </div>
 
     <script>
-        const API_BASE = '/api';
-        let eventSource = null;
-
-        function initSSE() {
-            if (eventSource) {
-                eventSource.close();
-            }
-            
-            eventSource = new EventSource(`${API_BASE}/simulation/logs`);
-            
-            eventSource.onmessage = function(event) {
-                try {
-                    const data = JSON.parse(event.data);
-                    log(data.message, data.timestamp);
-                    handleStepUpdate(data);
-                } catch (e) {
-                    console.error("Parse error", e);
-                }
-            };
-            
-            eventSource.onerror = function(err) {
-                console.log("SSE Error", err);
-                // Don't log error to UI to avoid spam
-            };
-        }
-
-        function log(msg, time) {
+        function log(message, type='info') {
             const panel = document.getElementById('logPanel');
-            const div = document.createElement('div');
-            div.className = 'log-entry';
-            div.innerHTML = `<span class="log-time">${time || new Date().toLocaleTimeString()}</span>${msg}`;
-            panel.appendChild(div);
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            const time = new Date().toLocaleTimeString();
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+            panel.appendChild(entry);
             panel.scrollTop = panel.scrollHeight;
         }
 
-        function handleStepUpdate(data) {
-            if (data.step) {
-                updateStepper(data.step, data.status);
-            }
+        async function executeAction(action) {
+            let endpoint = '';
+            let label = '';
             
-            if (data.status === 'success' && data.step === 'complete') {
-                document.getElementById('btnStart').disabled = false;
-                document.getElementById('btnStart').innerText = "🚀 Start Daily Flow Simulation";
-                log("Simulation finished successfully.");
-            }
-        }
-
-        function updateStepper(step, status) {
-            if (step === 'start') {
-                resetStepper();
-                return;
-            }
-            if (step === 'complete') return;
-            
-            const el = document.getElementById(`step-${step}`);
-            if (!el) return;
-            
-            // Remove previous classes
-            el.classList.remove('active', 'success', 'failed');
-            
-            if (status === 'running') {
-                el.classList.add('active');
-            } else if (status === 'success') {
-                el.classList.add('success');
-            } else if (status === 'failed') {
-                el.classList.add('failed');
-            }
-        }
-
-        function resetStepper() {
-            for(let i=1; i<=6; i++) {
-                const el = document.getElementById(`step-${i}`);
-                if (el) el.classList.remove('active', 'success', 'failed');
-            }
-        }
-
-        async function startSimulation() {
-            const code = document.getElementById('stockCode').value;
-            if (!code) return alert("Please enter stock code");
-            
-            document.getElementById('btnStart').disabled = true;
-            document.getElementById('btnStart').innerText = "⏳ Simulation Running...";
-            document.getElementById('logPanel').innerHTML = ''; // Clear logs
-            
-            // Ensure SSE is connected
-            if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
-                initSSE();
+            switch(action) {
+                case 'reset':
+                    endpoint = '/api/clear-all';
+                    label = '清空数据';
+                    break;
+                case 'step1':
+                    endpoint = '/api/simulation/step1';
+                    label = 'Step 1 (2025-11-19)';
+                    break;
+                case 'step2':
+                    endpoint = '/api/simulation/step2';
+                    label = 'Step 2 (2025-11-20)';
+                    break;
             }
 
+            log(`Starting ${label}...`, 'pending');
+            
             try {
-                const res = await fetch(`${API_BASE}/simulation/daily-flow`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ stock_code: code })
-                });
-                const data = await res.json();
-                if(data.status !== 'success') {
-                    alert("Failed to start: " + data.message);
-                    document.getElementById('btnStart').disabled = false;
+                const response = await fetch(endpoint, { method: 'POST' });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    log(`✅ ${label} Success: ${data.message}`);
+                    if (data.backend_data) {
+                        log(`   Backend: ${JSON.stringify(data.backend_data)}`);
+                    }
+                } else {
+                    log(`❌ ${label} Failed: ${data.detail || 'Unknown error'}`);
                 }
-            } catch (e) {
-                alert("Error starting simulation: " + e);
-                document.getElementById('btnStart').disabled = false;
+            } catch (error) {
+                log(`❌ ${label} Error: ${error.message}`);
             }
         }
-
-        // Initialize SSE on load
-        window.onload = initSSE;
     </script>
 </body>
 </html>

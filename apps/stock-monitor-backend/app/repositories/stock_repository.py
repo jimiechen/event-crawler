@@ -12,22 +12,43 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from .base import BaseRepository
-from ..models.stock import StockInfo, StockData, DataDedupLog, TonghuashunRawLog
+from ..models.stock import StockInfo, StockData, DataDedupLog, TonghuashunRawLog, WencaiStock
 
 
 class StockRepository(BaseRepository[StockInfo]):
-    """股票信息仓库"""
+    """股票信息仓库 (已迁移至 WencaiStock 作为数据源)"""
     
     def __init__(self, session: AsyncSession):
         super().__init__(StockInfo, session)
     
+    def _wencai_to_stock_info(self, ws: WencaiStock) -> StockInfo:
+        """Helper to convert WencaiStock to StockInfo"""
+        if not ws:
+            return None
+        
+        mkt = 'unknown'
+        if ws.stock_code.startswith('6'): mkt = 'SH'
+        elif ws.stock_code.startswith(('0', '3')): mkt = 'SZ'
+        elif ws.stock_code.startswith(('4', '8')): mkt = 'BJ'
+        
+        return StockInfo(
+            id=ws.id,
+            code=ws.stock_code,
+            name=ws.stock_name,
+            market=mkt,
+            is_active=ws.is_active,
+            created_at=ws.created_at or datetime.now(),
+            updated_at=datetime.now()
+        )
+
     async def find_by_code(self, code: str) -> Optional[StockInfo]:
         """根据股票代码查找股票信息"""
         try:
-            result = await self.session.execute(
-                select(StockInfo).where(StockInfo.code == code)
-            )
-            return result.scalar_one_or_none()
+            # Get latest record for the code
+            stmt = select(WencaiStock).where(WencaiStock.stock_code == code).order_by(desc(WencaiStock.created_at), desc(WencaiStock.id)).limit(1)
+            result = await self.session.execute(stmt)
+            ws = result.scalar_one_or_none()
+            return self._wencai_to_stock_info(ws)
         except Exception as e:
             logger.error(f"根据代码查找股票信息失败 (code: {code}): {e}")
             raise
@@ -35,10 +56,13 @@ class StockRepository(BaseRepository[StockInfo]):
     async def find_by_codes(self, codes: List[str]) -> List[StockInfo]:
         """根据股票代码列表查找股票信息"""
         try:
-            result = await self.session.execute(
-                select(StockInfo).where(StockInfo.code.in_(codes))
-            )
-            return result.scalars().all()
+            # Get latest records for the codes
+            latest_ids = select(func.max(WencaiStock.id)).where(WencaiStock.stock_code.in_(codes)).group_by(WencaiStock.stock_code).scalar_subquery()
+            stmt = select(WencaiStock).where(WencaiStock.id.in_(latest_ids))
+            
+            result = await self.session.execute(stmt)
+            wencai_stocks = result.scalars().all()
+            return [self._wencai_to_stock_info(ws) for ws in wencai_stocks]
         except Exception as e:
             logger.error(f"根据代码列表查找股票信息失败 (codes: {codes}): {e}")
             raise
@@ -46,10 +70,13 @@ class StockRepository(BaseRepository[StockInfo]):
     async def find_active_stocks(self) -> List[StockInfo]:
         """查找所有活跃股票"""
         try:
-            result = await self.session.execute(
-                select(StockInfo).where(StockInfo.is_active == True)
-            )
-            return result.scalars().all()
+            # Get latest records that are active
+            latest_ids = select(func.max(WencaiStock.id)).group_by(WencaiStock.stock_code).scalar_subquery()
+            stmt = select(WencaiStock).where(WencaiStock.id.in_(latest_ids), WencaiStock.is_active == True)
+            
+            result = await self.session.execute(stmt)
+            wencai_stocks = result.scalars().all()
+            return [self._wencai_to_stock_info(ws) for ws in wencai_stocks]
         except Exception as e:
             logger.error(f"查找活跃股票失败: {e}")
             raise
@@ -57,10 +84,24 @@ class StockRepository(BaseRepository[StockInfo]):
     async def find_by_market(self, market: str) -> List[StockInfo]:
         """根据市场类型查找股票"""
         try:
-            result = await self.session.execute(
-                select(StockInfo).where(StockInfo.market == market)
-            )
-            return result.scalars().all()
+            from sqlalchemy import or_
+            
+            # Filter first, then get latest? No, get latest then filter by market (which is derived from code)
+            # Actually market is derived from code, so we can filter by code pattern on the latest records.
+            
+            latest_ids = select(func.max(WencaiStock.id)).group_by(WencaiStock.stock_code).scalar_subquery()
+            stmt = select(WencaiStock).where(WencaiStock.id.in_(latest_ids))
+            
+            if market.upper() == 'SH':
+                stmt = stmt.where(WencaiStock.stock_code.like('6%'))
+            elif market.upper() == 'SZ':
+                stmt = stmt.where(or_(WencaiStock.stock_code.like('0%'), WencaiStock.stock_code.like('3%')))
+            elif market.upper() == 'BJ':
+                stmt = stmt.where(or_(WencaiStock.stock_code.like('8%'), WencaiStock.stock_code.like('4%')))
+            
+            result = await self.session.execute(stmt)
+            wencai_stocks = result.scalars().all()
+            return [self._wencai_to_stock_info(ws) for ws in wencai_stocks]
         except Exception as e:
             logger.error(f"根据市场查找股票失败 (market: {market}): {e}")
             raise
@@ -68,7 +109,7 @@ class StockRepository(BaseRepository[StockInfo]):
     async def get_all_codes(self) -> List[str]:
         """获取所有股票代码"""
         try:
-            result = await self.session.execute(select(StockInfo.code).distinct())
+            result = await self.session.execute(select(WencaiStock.stock_code).distinct())
             return result.scalars().all()
         except Exception as e:
             logger.error(f"获取所有股票代码失败: {e}")
@@ -82,20 +123,23 @@ class StockRepository(BaseRepository[StockInfo]):
     ) -> List[StockInfo]:
         """搜索股票（支持股票代码和名称模糊匹配）"""
         try:
+            latest_ids = select(func.max(WencaiStock.id)).group_by(WencaiStock.stock_code).scalar_subquery()
+            
             # 构建搜索条件：股票代码或股票名称包含关键词
             search_condition = (
-                (StockInfo.code.ilike(f"%{keyword}%")) |
-                (StockInfo.name.ilike(f"%{keyword}%"))
+                (WencaiStock.stock_code.ilike(f"%{keyword}%")) |
+                (WencaiStock.stock_name.ilike(f"%{keyword}%"))
             )
             
             result = await self.session.execute(
-                select(StockInfo)
-                .where(search_condition)
-                .order_by(asc(StockInfo.code))
+                select(WencaiStock)
+                .where(WencaiStock.id.in_(latest_ids), search_condition)
+                .order_by(asc(WencaiStock.stock_code))
                 .offset(offset)
                 .limit(limit)
             )
-            return result.scalars().all()
+            wencai_stocks = result.scalars().all()
+            return [self._wencai_to_stock_info(ws) for ws in wencai_stocks]
         except Exception as e:
             logger.error(f"搜索股票失败 (keyword: {keyword}): {e}")
             raise
@@ -107,13 +151,17 @@ class StockRepository(BaseRepository[StockInfo]):
     ) -> List[StockInfo]:
         """分页获取股票列表"""
         try:
+            latest_ids = select(func.max(WencaiStock.id)).group_by(WencaiStock.stock_code).scalar_subquery()
+            
             result = await self.session.execute(
-                select(StockInfo)
-                .order_by(asc(StockInfo.code))
+                select(WencaiStock)
+                .where(WencaiStock.id.in_(latest_ids))
+                .order_by(asc(WencaiStock.stock_code))
                 .offset(offset)
                 .limit(limit)
             )
-            return result.scalars().all()
+            wencai_stocks = result.scalars().all()
+            return [self._wencai_to_stock_info(ws) for ws in wencai_stocks]
         except Exception as e:
             logger.error(f"分页获取股票列表失败: {e}")
             raise
@@ -147,17 +195,20 @@ class StockRepository(BaseRepository[StockInfo]):
                 func.max(StockDaily.trade_date).label('last_date')
             ).group_by(StockDaily.code).subquery()
 
-            # Base query: Join StockInfo with latest_dates
-            # We select StockInfo and the last_date
-            query = select(StockInfo, latest_dates.c.last_date).outerjoin(
-                latest_dates, StockInfo.code == latest_dates.c.code
+            # Latest WencaiStock subquery
+            latest_ids = select(func.max(WencaiStock.id)).group_by(WencaiStock.stock_code).scalar_subquery()
+
+            # Base query: Join latest WencaiStock with latest_dates
+            # We select WencaiStock and the last_date
+            query = select(WencaiStock, latest_dates.c.last_date).where(WencaiStock.id.in_(latest_ids)).outerjoin(
+                latest_dates, WencaiStock.stock_code == latest_dates.c.code
             )
 
             # Apply filters
             if keyword:
                 query = query.where(
-                    (StockInfo.code.ilike(f"%{keyword}%")) |
-                    (StockInfo.name.ilike(f"%{keyword}%"))
+                    (WencaiStock.stock_code.ilike(f"%{keyword}%")) |
+                    (WencaiStock.stock_name.ilike(f"%{keyword}%"))
                 )
             
             if date_filter:
@@ -177,7 +228,7 @@ class StockRepository(BaseRepository[StockInfo]):
             
             # Apply sorting and pagination
             # Sort by last_date desc, then code asc
-            query = query.order_by(desc(latest_dates.c.last_date), asc(StockInfo.code))
+            query = query.order_by(desc(latest_dates.c.last_date), asc(WencaiStock.stock_code))
             query = query.offset((page - 1) * page_size).limit(page_size)
             
             result = await self.session.execute(query)
@@ -185,15 +236,21 @@ class StockRepository(BaseRepository[StockInfo]):
             
             stock_list = []
             for row in rows:
-                stock = row[0]
+                ws = row[0]
                 last_date = row[1]
                 
+                # Determine market
+                mkt = 'unknown'
+                if ws.stock_code.startswith('6'): mkt = 'SH'
+                elif ws.stock_code.startswith(('0', '3')): mkt = 'SZ'
+                elif ws.stock_code.startswith(('4', '8')): mkt = 'BJ'
+                
                 stock_list.append({
-                    "code": stock.code,
-                    "name": stock.name,
-                    "market": stock.market,
+                    "code": ws.stock_code,
+                    "name": ws.stock_name,
+                    "market": mkt,
                     "last_sync_date": last_date.strftime("%Y-%m-%d") if last_date else None,
-                    "is_active": stock.is_active
+                    "is_active": ws.is_active
                 })
                 
             return stock_list, total
@@ -313,16 +370,26 @@ class StockDataRepository(BaseRepository[StockData]):
     ) -> tuple[List[Dict[str, Any]], int]:
         """获取所有股票数据，包含股票名称，返回(数据列表, 总数)"""
         try:
-            # Base query: Join StockData and StockInfo
-            base_query = select(StockData, StockInfo.name.label('stock_name')).outerjoin(
-                StockInfo, StockData.code == StockInfo.code
+            # Subquery for unique code->name map (latest name)
+            latest_names_subq = select(
+                WencaiStock.stock_code, 
+                WencaiStock.stock_name
+            ).where(
+                WencaiStock.id.in_(
+                    select(func.max(WencaiStock.id)).group_by(WencaiStock.stock_code).scalar_subquery()
+                )
+            ).subquery()
+
+            # Base query: Join StockData and latest_names_subq
+            base_query = select(StockData, latest_names_subq.c.stock_name.label('stock_name')).outerjoin(
+                latest_names_subq, StockData.code == latest_names_subq.c.stock_code
             )
             
             # Apply filters to base query
             if stock_code:
                 base_query = base_query.where(
                     (StockData.code.ilike(f"%{stock_code}%")) |
-                    (StockInfo.name.ilike(f"%{stock_code}%"))
+                    (latest_names_subq.c.stock_name.ilike(f"%{stock_code}%"))
                 )
 
             if request_timestamp:

@@ -44,68 +44,90 @@ class StockService:
     async def get_stock_info(self, stock_code: str) -> Optional[StockInfo]:
         """获取股票基本信息"""
         try:
-            info = await self.stock_repo.find_by_code(stock_code)
+            # 从 WencaiStock 获取信息
+            stmt = select(WencaiStock).where(WencaiStock.stock_code == stock_code)
+            result = await self.session.execute(stmt)
+            ws = result.scalar_one_or_none()
             
-            if not info:
-                # 尝试其他代码格式
-                alt_code = None
-                if '.' in stock_code:
-                    alt_code = stock_code.split('.')[0]
-                else:
-                    if stock_code.startswith('6'): alt_code = f"{stock_code}.SH"
-                    elif stock_code.startswith('0') or stock_code.startswith('3'): alt_code = f"{stock_code}.SZ"
-                    elif stock_code.startswith('4') or stock_code.startswith('8'): alt_code = f"{stock_code}.BJ"
+            if not ws:
+                 # 尝试去掉后缀
+                 if '.' in stock_code:
+                     short_code = stock_code.split('.')[0]
+                     stmt = select(WencaiStock).where(WencaiStock.stock_code == short_code)
+                     result = await self.session.execute(stmt)
+                     ws = result.scalar_one_or_none()
+            
+            if ws:
+                mkt = 'unknown'
+                if ws.stock_code.startswith('6'): mkt = 'SH'
+                elif ws.stock_code.startswith(('0', '3')): mkt = 'SZ'
+                elif ws.stock_code.startswith(('4', '8')): mkt = 'BJ'
                 
-                if alt_code:
-                    logger.info(f"First attempt for {stock_code} failed, trying alternative code: {alt_code}")
-                    info = await self.stock_repo.find_by_code(alt_code)
+                # 返回临时的 StockInfo 对象
+                return StockInfo(
+                    id=ws.id,
+                    code=ws.stock_code,
+                    name=ws.stock_name,
+                    market=mkt,
+                    is_active=ws.is_active,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                )
             
-            # 临时硬编码 fallback (针对 Tushare 限流导致无法获取名称的情况)
-            # if not info and (stock_code == '603601' or stock_code == '603601.SH'):
-            #     logger.warning(f"Using hardcoded fallback for {stock_code}")
-            #     # 构造一个临时的 StockInfo 对象或字典
-            #     # 注意: 这里最好返回 StockInfo 模型实例，或者让调用者处理字典
-            #     # 但 stock_repo.find_by_code 返回的是模型实例
-            #     # 我们这里创建一个临时的模型实例
-            #     info = StockInfo(
-            #         code='603601.SH',
-            #         name='中科曙光',
-            #         market='SH',
-            #         is_active=True
-            #     )
-            
-            return info
+            return None
         except Exception as e:
             logger.error(f"获取股票信息失败 (code: {stock_code}): {e}")
             raise
     
     async def create_or_update_stock_info(self, stock_data: Dict[str, Any]) -> StockInfo:
-        """创建或更新股票基本信息"""
+        """创建或更新股票基本信息 - 迁移至 WencaiStock"""
         try:
             stock_code = stock_data.get('stock_code')
             if not stock_code:
                 raise ValueError("股票代码不能为空")
             
-            # 检查是否已存在
-            existing_stock = await self.stock_repo.find_by_code(stock_code)
+            # Check WencaiStock
+            stmt = select(WencaiStock).where(WencaiStock.stock_code == stock_code)
+            result = await self.session.execute(stmt)
+            ws = result.scalar_one_or_none()
             
-            if existing_stock:
-                # 更新现有股票信息
-                update_data = {
-                    'name': stock_data.get('stock_name', existing_stock.name),
-                    'market': stock_data.get('market', existing_stock.market),
-                    'is_active': stock_data.get('is_active', existing_stock.is_active)
-                }
-                return await self.stock_repo.update(existing_stock.id, update_data)
+            if ws:
+                # Update
+                if 'stock_name' in stock_data:
+                    ws.stock_name = stock_data['stock_name']
+                if 'is_active' in stock_data:
+                    ws.is_active = stock_data['is_active']
+                
+                # Commit handled by caller or here? 
+                # StockRepository.create usually commits. We should probably commit here.
+                await self.session.commit()
+                await self.session.refresh(ws)
             else:
-                # 创建新股票信息
-                create_data = {
-                    'code': stock_code,
-                    'name': stock_data.get('stock_name', ''),
-                    'market': stock_data.get('market', 'SZ'),
-                    'is_active': stock_data.get('is_active', True)
-                }
-                return await self.stock_repo.create(create_data)
+                # Create
+                ws = WencaiStock(
+                    stock_code=stock_code,
+                    stock_name=stock_data.get('stock_name', ''),
+                    is_active=stock_data.get('is_active', True)
+                )
+                self.session.add(ws)
+                await self.session.commit()
+                await self.session.refresh(ws)
+            
+            # Return transient StockInfo
+            mkt = 'unknown'
+            if ws.stock_code.startswith('6'): mkt = 'SH'
+            elif ws.stock_code.startswith(('0', '3')): mkt = 'SZ'
+            elif ws.stock_code.startswith(('4', '8')): mkt = 'BJ'
+            
+            return StockInfo(
+                id=ws.id,
+                code=ws.stock_code,
+                name=ws.stock_name,
+                market=mkt,
+                is_active=ws.is_active,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
+            )
         except Exception as e:
             logger.error(f"创建或更新股票信息失败: {e}")
             raise
@@ -117,19 +139,48 @@ class StockService:
         limit: int = 100,
         offset: int = 0
     ) -> List[StockInfo]:
-        """获取股票列表"""
+        """获取股票列表 - 从WencaiStock获取"""
         try:
-            filters = {}
-            if market:
-                filters['market'] = market
-            if active_only:
-                filters['status'] = True
+            from sqlalchemy import or_
+            # 使用 WencaiStock 表
+            stmt = select(WencaiStock)
             
-            return await self.stock_repo.get_multi(
-                filters=filters,
-                limit=limit,
-                skip=offset
-            )
+            if active_only:
+                stmt = stmt.where(WencaiStock.is_active == True)
+            
+            if market:
+                # 简单的市场推断
+                if market.upper() == 'SH':
+                    stmt = stmt.where(WencaiStock.stock_code.like('6%'))
+                elif market.upper() == 'SZ':
+                    stmt = stmt.where(or_(WencaiStock.stock_code.like('0%'), WencaiStock.stock_code.like('3%')))
+                elif market.upper() == 'BJ':
+                     stmt = stmt.where(or_(WencaiStock.stock_code.like('8%'), WencaiStock.stock_code.like('4%')))
+
+            stmt = stmt.limit(limit).offset(offset)
+            
+            result = await self.session.execute(stmt)
+            wencai_stocks = result.scalars().all()
+            
+            # 转换为 StockInfo 对象以兼容接口
+            stock_infos = []
+            for ws in wencai_stocks:
+                mkt = 'unknown'
+                if ws.stock_code.startswith('6'): mkt = 'SH'
+                elif ws.stock_code.startswith(('0', '3')): mkt = 'SZ'
+                elif ws.stock_code.startswith(('4', '8')): mkt = 'BJ'
+                
+                stock_infos.append(StockInfo(
+                    id=ws.id,
+                    code=ws.stock_code,
+                    name=ws.stock_name,
+                    market=mkt,
+                    is_active=ws.is_active,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                ))
+            
+            return stock_infos
         except Exception as e:
             logger.error(f"获取股票列表失败: {e}")
             raise
@@ -427,7 +478,15 @@ class StockService:
         try:
             # 如果没有提供股票代码，返回全局统计信息
             if not stock_code:
-                total_stocks = await self.stock_repo.count()
+                # Count WencaiStock instead of StockInfo
+                from sqlalchemy import func
+                stmt = select(func.count(WencaiStock.id))
+                if True: # active only? default to all for stats maybe, or match active
+                    pass 
+                
+                result = await self.session.execute(stmt)
+                total_stocks = result.scalar() or 0
+                
                 return {
                     "total_stocks": total_stocks,
                     "message": "全局统计信息"
@@ -686,11 +745,34 @@ class StockService:
     ) -> List[StockInfo]:
         """搜索股票（支持股票代码和名称模糊匹配）"""
         try:
-            return await self.stock_repo.search_stocks(
-                keyword=query,
-                limit=limit,
-                offset=offset
-            )
+            from sqlalchemy import or_
+            # Use WencaiStock table
+            stmt = select(WencaiStock).where(
+                or_(
+                    WencaiStock.stock_code.ilike(f"%{query}%"),
+                    WencaiStock.stock_name.ilike(f"%{query}%")
+                )
+            ).limit(limit).offset(offset)
+            
+            result = await self.session.execute(stmt)
+            wencai_stocks = result.scalars().all()
+            
+            # Convert to StockInfo objects
+            stock_infos = []
+            for ws in wencai_stocks:
+                mkt = self._determine_market(ws.stock_code)
+                
+                stock_infos.append(StockInfo(
+                    id=ws.id,
+                    code=ws.stock_code,
+                    name=ws.stock_name,
+                    market=mkt,
+                    is_active=ws.is_active,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                ))
+            
+            return stock_infos
         except Exception as e:
             logger.error(f"搜索股票失败 (keyword: {query}): {e}")
             raise
@@ -702,10 +784,23 @@ class StockService:
     ) -> List[StockInfo]:
         """获取分页股票列表"""
         try:
-            return await self.stock_repo.get_stocks_with_pagination(
-                limit=limit,
-                offset=offset
-            )
+            stmt = select(WencaiStock).order_by(WencaiStock.stock_code).limit(limit).offset(offset)
+            result = await self.session.execute(stmt)
+            wencai_stocks = result.scalars().all()
+            
+            stock_infos = []
+            for ws in wencai_stocks:
+                mkt = self._determine_market(ws.stock_code)
+                stock_infos.append(StockInfo(
+                    id=ws.id,
+                    code=ws.stock_code,
+                    name=ws.stock_name,
+                    market=mkt,
+                    is_active=ws.is_active,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
+                ))
+            return stock_infos
         except Exception as e:
             logger.error(f"获取分页股票列表失败: {e}")
             raise
@@ -884,16 +979,6 @@ class StockService:
                     standard_data = self._convert_to_standard_format(decoded_stock_data, request_timestamp)
                     logger.info(f"📊 标准格式数据: {standard_data}")
                     
-                    # 确保股票信息存在
-                    logger.info(f"🏢 确保股票 {stock_code} 信息存在...")
-                    stock_info_data = {
-                        'stock_code': stock_code,
-                        'stock_name': decoded_stock_data.get('stock_name', ''),
-                        'market': self._determine_market(stock_code)
-                    }
-                    logger.info(f"📋 股票信息: {stock_info_data}")
-                    await self.create_or_update_stock_info(stock_info_data)
-                    
                     # 检查数据去重
                     logger.info(f"🔍 检查股票 {stock_code} 数据是否重复...")
                     is_duplicate = await self.dedup_service.check_duplicate(standard_data)
@@ -1038,14 +1123,22 @@ class StockService:
 
     async def toggle_stock_status(self, stock_code: str, is_active: bool) -> bool:
         """
-        切换股票状态 (激活/停用)
+        切换股票状态 (激活/停用) - 更新最新的问财记录
         """
         try:
-            stock = await self.stock_repo.find_by_code(stock_code)
-            if not stock:
+            # Update Latest WencaiStock
+            stmt = select(WencaiStock).where(
+                WencaiStock.stock_code == stock_code
+            ).order_by(WencaiStock.id.desc()).limit(1)
+            
+            result = await self.session.execute(stmt)
+            ws = result.scalar_one_or_none()
+            
+            if not ws:
                 raise ValueError(f"股票 {stock_code} 不存在")
             
-            await self.stock_repo.update(stock.id, {"is_active": is_active})
+            ws.is_active = is_active
+            await self.session.commit()
             return True
         except Exception as e:
             logger.error(f"切换股票状态失败: {e}")

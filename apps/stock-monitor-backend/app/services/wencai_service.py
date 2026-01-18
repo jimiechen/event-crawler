@@ -68,47 +68,30 @@ class WencaiService:
                 if not stock_code:
                     continue
                     
-                # 1. 更新 StockInfo (核心库)
-                # 确保代码格式统一 (移除后缀用于查找，但保存时可能需要后缀)
-                # StockService.create_or_update_stock_info expects 'stock_code', 'stock_name', 'market'
-                
-                # 简单推断市场
-                market = 'CN'
-                if '.' in stock_code:
-                    market = stock_code.split('.')[1]
-                elif stock_code.startswith('6'):
-                    market = 'SH'
-                elif stock_code.startswith('0') or stock_code.startswith('3'):
-                    market = 'SZ'
-                elif stock_code.startswith('4') or stock_code.startswith('8'):
-                    market = 'BJ'
-                
-                info_data = {
-                    'stock_code': stock_code,
-                    'stock_name': stock_name,
-                    'market': market,
-                    'is_active': True,
-                    'source': 'wencai' # 标记来源
-                }
-                
-                # 创建或更新
-                stock_info = await self.stock_service.create_or_update_stock_info(info_data)
-                
                 # 2. 如果提供了 batch_id，保存到 WencaiStock (爬虫记录)
                 if batch_id:
-                    # check if exists
+                    # check if exists in current batch
                     stmt = select(WencaiStock).where(
                         WencaiStock.crawl_batch_id == str(batch_id),
                         WencaiStock.stock_code == stock_code
                     )
                     res = await self.db.execute(stmt)
                     if not res.scalar_one_or_none():
+                        # Determine is_active status (inherit from previous latest or default to True)
+                        prev_stmt = select(WencaiStock.is_active).where(
+                            WencaiStock.stock_code == stock_code
+                        ).order_by(WencaiStock.id.desc()).limit(1)
+                        prev_res = await self.db.execute(prev_stmt)
+                        prev_status = prev_res.scalar_one_or_none()
+                        is_active = True if prev_status is None else prev_status
+
                         wencai_stock = WencaiStock(
                             crawl_batch_id=str(batch_id),
                             stock_code=stock_code,
                             stock_name=stock_name,
                             latest_price=stock_data.get('latest_price'),
-                            change_percent=stock_data.get('change_percent')
+                            change_percent=stock_data.get('change_percent'),
+                            is_active=is_active
                         )
                         self.db.add(wencai_stock)
                 
@@ -861,11 +844,6 @@ class WencaiService:
                     
                     # 尝试从本地加载历史数据 (按需加载)
                     try:
-                        # 1. 加载股票基本信息
-                        local_basic = await LocalDataService.get_stock_basic(stock_code)
-                        if local_basic:
-                            await self.stock_service.create_or_update_stock_info(local_basic)
-                        
                         # 2. 加载日线数据 (近250天)
                         local_daily = await LocalDataService.get_daily_data(stock_code, limit=250)
                         if local_daily:
@@ -1031,17 +1009,29 @@ class WencaiService:
 
     async def _insert_wencai_stock(self, batch_id: int, stock_data: Dict[str, Any]):
         """插入问财股票数据 - 保存核心字段及概念、行业、原始数据"""
+        
+        # Determine is_active status
+        stock_code = stock_data.get('stock_code')
+        is_active = True
+        if stock_code:
+             prev_stmt = select(WencaiStock.is_active).where(
+                 WencaiStock.stock_code == stock_code
+             ).order_by(WencaiStock.id.desc()).limit(1)
+             prev_res = await self.db.execute(prev_stmt)
+             prev_status = prev_res.scalar_one_or_none()
+             is_active = True if prev_status is None else prev_status
+
         sql = """
         INSERT INTO wencai_stocks (
-            stock_code, stock_name, current_price, volume, crawl_batch_id, concept, industry, raw_data, price_change_percent
+            stock_code, stock_name, current_price, volume, crawl_batch_id, concept, industry, raw_data, price_change_percent, is_active
         ) VALUES (
-            :stock_code, :stock_name, :current_price, :volume, :crawl_batch_id, :concept, :industry, :raw_data, :price_change_percent
+            :stock_code, :stock_name, :current_price, :volume, :crawl_batch_id, :concept, :industry, :raw_data, :price_change_percent, :is_active
         )
         """
         
         # 提取字段
         core_params = {
-            'stock_code': stock_data.get('stock_code'),
+            'stock_code': stock_code,
             'stock_name': stock_data.get('stock_name'),
             'current_price': stock_data.get('current_price'),
             'volume': stock_data.get('volume'),
@@ -1049,7 +1039,8 @@ class WencaiService:
             'concept': stock_data.get('concept'),
             'industry': stock_data.get('industry'),
             'raw_data': stock_data.get('raw_data'),
-            'price_change_percent': stock_data.get('price_change_percent')
+            'price_change_percent': stock_data.get('price_change_percent'),
+            'is_active': is_active
         }
         
         await self.db.execute(text(sql), core_params)
@@ -1410,37 +1401,7 @@ class WencaiService:
                 stock_code = stock_row.stock_code
                 stock_name = stock_row.stock_name
                 
-                # 5.1 更新 stock_info 表
                 try:
-                    # 检查是否存在
-                    existing_stock = await self.stock_service.get_stock_info(stock_code)
-                    
-                    if existing_stock:
-                        # 更新现有记录 (如果需要)
-                        if existing_stock.name != stock_name:
-                            await self.stock_service.stock_repo.update(existing_stock.id, {'name': stock_name})
-                    else:
-                        # 插入新记录
-                        market = "unknown"
-                        if stock_code.startswith('6') or stock_code.startswith('90'): market = "SH"
-                        elif stock_code.startswith('0') or stock_code.startswith('3'): market = "SZ"
-                        elif stock_code.startswith('4') or stock_code.startswith('8') or stock_code.startswith('920'): market = "BJ"
-                        
-                        create_data = {
-                            'stock_code': stock_code,
-                            'stock_name': stock_name,
-                            'market': market,
-                            'is_active': False,
-                            'source': 'wencai'
-                        }
-                        try:
-                            await self.stock_service.create_or_update_stock_info(create_data)
-                        except Exception as e:
-                            logger.warning(f"并发插入股票 {stock_code} 可能已存在，尝试更新: {e}")
-                            existing_stock = await self.stock_service.get_stock_info(stock_code)
-                            if existing_stock and existing_stock.name != stock_name:
-                                await self.stock_service.stock_repo.update(existing_stock.id, {'name': stock_name})
-                    
                     # 5.2 关联标签
                     if tag_ids:
                         for t_id in tag_ids:

@@ -86,9 +86,11 @@
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-lg font-bold text-gray-800">积分增长排名</h3>
                     <div class="flex space-x-2 items-center">
-                        <input type="date" v-model="rankingStats.growthStartDate" class="border rounded px-2 py-1 text-xs">
-                        <span class="text-gray-400">-</span>
-                        <input type="date" v-model="rankingStats.growthEndDate" class="border rounded px-2 py-1 text-xs">
+                        <div class="flex items-center space-x-1">
+                            <button @click="adjustDate('growthDate', -1)" class="px-1 bg-gray-200 rounded hover:bg-gray-300 text-xs">&lt;</button>
+                            <input type="date" v-model="rankingStats.growthDate" class="border rounded px-2 py-1 text-xs w-28">
+                            <button @click="adjustDate('growthDate', 1)" class="px-1 bg-gray-200 rounded hover:bg-gray-300 text-xs">&gt;</button>
+                        </div>
                         <button @click="fetchGrowthRanking" class="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700">查询</button>
                     </div>
                 </div>
@@ -99,7 +101,10 @@
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">排名</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">代码</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">名称</th>
-                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">增长分</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">基础分</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">动态分</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">总分</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">排名变化</th>
                                 <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">详情</th>
                             </tr>
                         </thead>
@@ -110,13 +115,18 @@
                                 <td class="px-4 py-2 text-sm text-gray-500">{{ index + 1 }}</td>
                                 <td class="px-4 py-2 text-sm font-medium text-blue-600">{{ item.code }}</td>
                                 <td class="px-4 py-2 text-sm text-gray-900">{{ item.name }}</td>
-                                <td class="px-4 py-2 text-sm font-bold text-green-600">+{{ item.growth.toFixed(2) }}</td>
+                                <td class="px-4 py-2 text-sm text-gray-600">{{ (item.base_score || 0).toFixed(2) }}</td>
+                                <td class="px-4 py-2 text-sm text-gray-600">{{ (item.dynamic_score || 0).toFixed(2) }}</td>
+                                <td class="px-4 py-2 text-sm font-bold text-green-600">+{{ (item.growth || 0).toFixed(2) }}</td>
+                                <td class="px-4 py-2 text-sm" :class="getRankChangeClass(item.rank_change)">
+                                    {{ formatRankChange(item.rank_change) }}
+                                </td>
                                 <td class="px-4 py-2 text-xs text-gray-500 max-w-xs truncate" :title="formatRuleScores(item.rule_scores)">
                                     {{ formatRuleScores(item.rule_scores) }}
                                 </td>
                             </tr>
                             <tr v-if="rankingStats.growthList.length === 0">
-                                <td colspan="5" class="px-4 py-8 text-center text-gray-500 text-sm">暂无数据</td>
+                                <td colspan="8" class="px-4 py-8 text-center text-gray-500 text-sm">暂无数据</td>
                             </tr>
                         </tbody>
                     </table>
@@ -129,7 +139,11 @@
                     <h3 class="text-lg font-bold text-gray-800">总分排名 (250日)</h3>
                     <div class="flex space-x-2 items-center">
                         <span class="text-xs text-gray-500">截止:</span>
-                        <input type="date" v-model="rankingStats.totalDate" class="border rounded px-2 py-1 text-xs">
+                        <div class="flex items-center space-x-1">
+                            <button @click="adjustDate('totalDate', -1)" class="px-1 bg-gray-200 rounded hover:bg-gray-300 text-xs">&lt;</button>
+                            <input type="date" v-model="rankingStats.totalDate" class="border rounded px-2 py-1 text-xs w-28">
+                            <button @click="adjustDate('totalDate', 1)" class="px-1 bg-gray-200 rounded hover:bg-gray-300 text-xs">&gt;</button>
+                        </div>
                         <button @click="fetchTotalRanking" class="bg-purple-600 text-white px-3 py-1 rounded text-xs hover:bg-purple-700">查询</button>
                     </div>
                 </div>
@@ -150,7 +164,7 @@
                                 <td class="px-4 py-2 text-sm text-gray-500">{{ index + 1 }}</td>
                                 <td class="px-4 py-2 text-sm font-medium text-blue-600">{{ item.code }}</td>
                                 <td class="px-4 py-2 text-sm text-gray-900">{{ item.name }}</td>
-                                <td class="px-4 py-2 text-sm font-bold text-purple-600">{{ item.score.toFixed(2) }}</td>
+                                <td class="px-4 py-2 text-sm font-bold text-purple-600">{{ Number(item.score || 0).toFixed(2) }}</td>
                             </tr>
                             <tr v-if="rankingStats.totalList.length === 0">
                                 <td colspan="4" class="px-4 py-8 text-center text-gray-500 text-sm">暂无数据</td>
@@ -445,9 +459,10 @@
 
                 // Ranking State
                 const rankingStats = ref({
-                    growthStartDate: '',
-                    growthEndDate: '',
+                    growthDate: '',
+                    growthPoolType: 'wencai',
                     totalDate: '',
+                    totalPoolType: 'wencai',
                     growthList: [],
                     totalList: []
                 });
@@ -595,23 +610,41 @@
                     };
                     const dateStr = fmt(targetDate);
                     
-                    rankingStats.value.growthStartDate = dateStr;
-                    rankingStats.value.growthEndDate = dateStr;
+                    rankingStats.value.growthDate = dateStr;
                     rankingStats.value.totalDate = dateStr;
+                    
+                    // Default to Wencai pool as requested
+                    rankingStats.value.growthPoolType = 'wencai';
+                    rankingStats.value.totalPoolType = 'wencai';
+                };
+
+                const adjustDate = (field, days) => {
+                    const currentStr = rankingStats.value[field];
+                    if (!currentStr) return;
+                    
+                    const date = new Date(currentStr);
+                    date.setDate(date.getDate() + days);
+                    
+                    const y = date.getFullYear();
+                    const m = String(date.getMonth() + 1).padStart(2, '0');
+                    const d = String(date.getDate()).padStart(2, '0');
+                    
+                    rankingStats.value[field] = `${y}-${m}-${d}`;
                 };
 
                 const fetchGrowthRanking = async () => {
-                    if (!rankingStats.value.growthStartDate || !rankingStats.value.growthEndDate) {
+                    if (!rankingStats.value.growthDate) {
                          // Attempt to init if missing
                          initDates();
-                         if (!rankingStats.value.growthStartDate) return;
+                         if (!rankingStats.value.growthDate) return;
                     }
                     try {
                         const res = await axios.get('/api/v1/rankings/growth', {
                             params: {
-                                start_date: rankingStats.value.growthStartDate,
-                                end_date: rankingStats.value.growthEndDate,
-                                limit: 10
+                                start_date: rankingStats.value.growthDate,
+                                end_date: rankingStats.value.growthDate,
+                                limit: 100,
+                                pool_type: rankingStats.value.growthPoolType || undefined
                             }
                         });
                         if (res.data.success) {
@@ -627,7 +660,7 @@
                         const res = await axios.get('/api/v1/rankings/total', {
                             params: {
                                 target_date: rankingStats.value.totalDate,
-                                limit: 10
+                                limit: 100
                             }
                         });
                         if (res.data.success) {
@@ -637,6 +670,18 @@
                         console.error('Failed to fetch total ranking:', error);
                     }
                 };
+
+                // Watchers for auto-refresh
+                Vue.watch(() => rankingStats.value.growthDate, () => {
+                     if (rankingStats.value.growthDate) {
+                         fetchGrowthRanking();
+                     }
+                });
+                Vue.watch(() => rankingStats.value.totalDate, () => {
+                     if (rankingStats.value.totalDate) {
+                         fetchTotalRanking();
+                     }
+                });
 
                 const fetchRankings = async () => {
                     await Promise.all([fetchGrowthRanking(), fetchTotalRanking()]);
@@ -686,28 +731,42 @@
                     }
                 };
 
-                const formatRuleScores = (scoresStr) => {
-                    if (!scoresStr) return '-';
+                const getRankChangeClass = (change) => {
+                    if (change === 9999) return 'text-purple-600 font-bold'; // New
+                    if (change > 0) return 'text-red-600 font-bold'; // Improved (e.g. +5)
+                    if (change < 0) return 'text-green-600 font-bold'; // Declined (e.g. -3)
+                    return 'text-gray-400'; // No change
+                };
+
+                const formatRankChange = (change) => {
+                    if (change === 9999) return 'NEW';
+                    if (change > 0) return `↑ ${change}`;
+                    if (change < 0) return `↓ ${Math.abs(change)}`;
+                    return '-';
+                };
+
+                const formatRuleScores = (scores) => {
+                    if (!scores) return '-';
                     try {
-                        const scores = typeof scoresStr === 'string' ? JSON.parse(scoresStr) : scoresStr;
-                        if (!scores || typeof scores !== 'object') return '-';
+                        const scoreObj = typeof scores === 'string' ? JSON.parse(scores) : scores;
+                        if (!scoreObj || typeof scoreObj !== 'object') return '-';
                         
                         const parts = [];
                         
                         // Volume Multiplier
-                        if (scores.vol_3x) parts.push(`3倍量(5分)`);
-                        else if (scores.vol_2x) parts.push(`2倍量(3分)`);
+                        if (scoreObj.vol_3x) parts.push(`3倍量(5分)`);
+                        else if (scoreObj.vol_2x) parts.push(`2倍量(3分)`);
                         
-                        // Low Volume
-                        if (scores.low_vol_20) parts.push(`20日地量(1分)`);
-                        else if (scores.low_vol_10) parts.push(`10日地量(1分)`);
-                        else if (scores.low_vol_5) parts.push(`5日地量(1分)`);
-                        
-                        // Other tags
-                        for (const [key, val] of Object.entries(scores)) {
-                            if (key.startsWith('tag_') && val > 0) {
-                                const tagName = key.replace('tag_', '');
-                                parts.push(`${tagName}(${val}分)`);
+                        // Generic iteration for all keys (including Chinese keys)
+                        for (const [key, val] of Object.entries(scoreObj)) {
+                            // Skip known English keys if we handled them above (or just duplicate them, but cleaner to handle all here)
+                            // If key is Chinese, display it directly
+                            // e.g. "3倍量": 300
+                            if (val > 0) {
+                                // If key is English 'vol_3x' etc, we might want to skip if we handled it. 
+                                // But simpler is to just print everything in format "Key(Val)"
+                                // Filter out 0 values
+                                parts.push(`${key}(${val})`);
                             }
                         }
                         
@@ -860,14 +919,18 @@
                     fetchRankings,
                     fetchGrowthRanking,
                     fetchTotalRanking,
+                    adjustDate,
                     navigateToTestTool,
                     changeStockPage,
                     changeWencaiPage,
                     formatDateTime,
                     formatBonusItems,
                     formatRuleScores,
+                    getRankChangeClass,
+                    formatRankChange,
                     getSparklinePath,
-                    syncTdx
+                    syncTdx,
+                    adjustDate
                 };
             }
         }).mount('#app');

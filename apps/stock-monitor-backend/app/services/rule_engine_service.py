@@ -184,6 +184,22 @@ class RuleEngineService:
             # 获取股票池映射
             pool_map = await self.repository.get_stock_pool_map()
             
+            # --- 修复方案: 基础分计算检查 (Ref: 603601评分模拟系统测试计划.md) ---
+            # 如果是首次计算（没有历史评分记录），先调用 analyze_stock() 生成历史数据
+            if stock_code:
+                async with self.db_manager.get_session() as session:
+                    stmt = select(StockScoreResult).where(
+                        StockScoreResult.code == stock_code,
+                        StockScoreResult.trade_date < target_date
+                    )
+                    result = await session.execute(stmt)
+                    has_history = result.first() is not None
+                    
+                    if not has_history:
+                        logger.info(f"No history scores for {stock_code}, running analyze_stock() first...")
+                        await VolumeAnalysisService.analyze_stock(stock_code, session=session)
+                        await session.commit()
+            
             # --- 1.5 执行异动分析 (生成标签) ---
             # 用户要求: 定时任务执行评分时，需要先执行异动分析生成标签
             logger.info(f"开始执行异动分析(生成标签) - 目标日期: {target_date}, 股票数量: {len(target_codes)}")
@@ -360,7 +376,7 @@ class RuleEngineService:
                     "accumulated_score": accumulated_score,
                     "total_score": accumulated_score, # Keep synced for compatibility
                     "ranking": 0, # 暂时不排，后续更新
-                    "pool_type": pool_map.get(code, "unknown")
+                    "pool_type": "wencai"
                 })
                 success_count += 1
                 

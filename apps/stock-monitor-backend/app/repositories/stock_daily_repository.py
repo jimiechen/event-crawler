@@ -188,101 +188,28 @@ class StockDailyRepository:
 
 
     async def get_target_stocks(self) -> List[str]:
-        """获取需要采集的股票代码列表(从StockInfo获取)"""
+        """获取需要采集的股票代码列表(从WencaiStock获取)"""
         async with self.db_manager.get_session() as session:
-            # 从StockInfo表获取所有股票代码
-            result = await session.execute(select(StockInfo.code).distinct())
-            return [r[0] for r in result.all()]
+            # 从WencaiStock表获取所有活跃股票代码
+            result = await session.execute(select(WencaiStock.stock_code).where(WencaiStock.is_active == True))
+            return [r for r in result.scalars().all()]
 
     async def sync_stock_pool(self) -> Dict[str, int]:
-        """同步股票池数据(自选股/问财)到StockInfo表"""
-        # 注意：由于StockPool已废弃，此方法逻辑可能需要更新或废弃
-        # 原逻辑是同步 MonitorList 和 WencaiStock 到 StockPool
-        # 现逻辑应为同步 MonitorList 和 WencaiStock 到 StockInfo
-        
-        async with self.db_manager.get_session() as session:
-            # 1. 获取最新数据
-            # 自选股
-            monitor_result = await session.execute(
-                select(MonitorList.code, StockInfo.name)
-                .join(StockInfo, MonitorList.code == StockInfo.code, isouter=True)
-                .where(MonitorList.is_active == True)
-            )
-            monitor_list = monitor_result.all()
-            
-            # 问财股
-            wencai_result = await session.execute(select(WencaiStock.stock_code, WencaiStock.stock_name))
-            wencai_list = wencai_result.all()
-            
-            count_monitor = 0
-            count_wencai = 0
-            
-            # 2. 更新 StockInfo 的 source 字段
-            # 优先处理 MonitorList (self_selected)
-            for code, name in monitor_list:
-                stmt = select(StockInfo).where(StockInfo.code == code)
-                existing = (await session.execute(stmt)).scalar_one_or_none()
-                
-                if existing:
-                    existing.source = 'self_selected'
-                    existing.is_active = True
-                else:
-                    # 如果不存在，创建新的 (虽然理论上MonitorList有外键约束，但为了健壮性)
-                    new_stock = StockInfo(
-                        code=code,
-                        name=name or code, # Fallback name
-                        source='self_selected',
-                        is_active=True
-                    )
-                    session.add(new_stock)
-                count_monitor += 1
-                
-            # 处理 WencaiStock (wencai)
-            # 如果已经是 self_selected，则保持 self_selected (或变为 both? 目前只存单个 source)
-            # 假设 self_selected 优先级更高
-            for code, name in wencai_list:
-                stmt = select(StockInfo).where(StockInfo.code == code)
-                existing = (await session.execute(stmt)).scalar_one_or_none()
-                
-                if existing:
-                    if existing.source != 'self_selected':
-                        existing.source = 'wencai'
-                        # existing.is_active = True # 问财同步过来的通常默认活跃? 用户之前要求 is_active=0
-                        # 根据用户最新要求：is_active=0
-                        # 但如果是 self_selected 变为 wencai (不可能，上面已过滤)，或者纯新 wencai
-                        # 这里我们只更新 source
-                else:
-                     # 理论上应该在问财同步时就插入了 StockInfo
-                     # 这里做个兜底
-                    new_stock = StockInfo(
-                        code=code,
-                        name=name,
-                        source='wencai',
-                        is_active=False
-                    )
-                    session.add(new_stock)
-                count_wencai += 1
-            
-            await session.commit()
-            
-            return {
-                "self_selected": count_monitor,
-                "wencai": count_wencai,
-                "total_records": count_monitor + count_wencai # Approximate
-            }
+        """同步股票池数据 - 已废弃 (不再同步到 StockInfo)"""
+        # User requested to clear StockInfo and stop using it.
+        # This function is now a no-op.
+        return {
+            "self_selected": 0,
+            "wencai": 0,
+            "total_records": 0
+        }
 
     async def get_stock_pool_map(self) -> Dict[str, str]:
-        """获取股票代码对应的池类型映射"""
+        """获取股票代码对应的池类型映射 - 统一返回 'wencai'"""
         async with self.db_manager.get_session() as session:
-            result = await session.execute(select(StockInfo.code, StockInfo.source))
-            data = result.all()
-            
-            pool_map = {}
-            for code, source in data:
-                if source:
-                    pool_map[code] = source
-                        
-            return pool_map
+            result = await session.execute(select(WencaiStock.stock_code).where(WencaiStock.is_active == True))
+            codes = result.scalars().all()
+            return {code: 'wencai' for code in codes}
 
 
     async def save_task_log(self, log_data: Dict[str, Any]) -> TaskLog:

@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
 from app.models.stock_daily import StockDaily, StockScoreResult
-from app.models.stock import StockInfo
+from app.models.stock import StockInfo, WencaiStock
 from app.models.tag_management import StockTagInfo
 from app.utils.technical_indicators import calculate_expma
 from app.models.volume_analysis import StockVolumeBaseline
@@ -234,7 +234,8 @@ class PathwayVolumePriceEngine:
             total_score = tag_score
 
             await self._save_score_result(symbol, trade_date, tags, total_score)
-            await self._aggregate_to_stock_info(symbol, trade_date, total_score)
+            # Deprecated: StockInfo is no longer used for storing scores
+            # await self._aggregate_to_stock_info(symbol, trade_date, total_score)
 
             logger.info(f"Pathway计算完成: {symbol} {trade_date} 评分={total_score} 标签={len(tags)}")
 
@@ -576,8 +577,11 @@ class PathwayVolumePriceEngine:
         """
         results = []
         try:
-            # 1. Get all active stocks
-            stmt = select(StockInfo).where(StockInfo.is_active == True)
+            # 1. Get all active stocks (Switch to WencaiStock)
+            # Use latest record for each stock code that is active
+            latest_ids = select(func.max(WencaiStock.id)).group_by(WencaiStock.stock_code).scalar_subquery()
+            stmt = select(WencaiStock).where(WencaiStock.id.in_(latest_ids), WencaiStock.is_active == True)
+            
             res = await self.db_session.execute(stmt)
             stocks = res.scalars().all()
             
@@ -585,7 +589,7 @@ class PathwayVolumePriceEngine:
             
             # 2. Process each stock
             for stock in stocks:
-                score_res = await self.calculate_score_for_date(stock.code, target_date)
+                score_res = await self.calculate_score_for_date(stock.stock_code, target_date)
                 if score_res:
                     results.append(score_res)
             

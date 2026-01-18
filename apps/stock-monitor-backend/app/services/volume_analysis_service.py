@@ -623,19 +623,58 @@ class VolumeAnalysisService:
             pool_type: 股票池类型
         """
         from app.models.stock_daily import StockScoreResult
+        from app.models.volume_analysis import VolumeAnalysisResult
+        from sqlalchemy import insert
+        
+        # 1. Clean up existing VolumeAnalysisResult for the date range
+        if not result_df.empty:
+            min_date = result_df['trade_date'].min()
+            max_date = result_df['trade_date'].max()
+            stmt = delete(VolumeAnalysisResult).where(
+                VolumeAnalysisResult.code == code,
+                VolumeAnalysisResult.trade_date >= min_date,
+                VolumeAnalysisResult.trade_date <= max_date
+            )
+            await session.execute(stmt)
+            
+        volume_analysis_records = []
         
         for _, row in result_df.iterrows():
             # 解析tags_str
             tags_str = row.get('tags_str', '')
             tags = tags_str.split(',') if tags_str else []
             
+            # 收集 VolumeAnalysisResult
+            if tags:
+                trade_date = row['trade_date']
+                close = Decimal(str(row.get('close', 0)))
+                vol = Decimal(str(row.get('vol', 0)))
+                
+                for tag in tags:
+                    if not tag or tag == 'basic_info':
+                        continue
+                        
+                    # Determine value
+                    value = close
+                    if '地量' in tag:
+                        value = vol
+                        
+                    volume_analysis_records.append({
+                        "code": code,
+                        "trade_date": trade_date,
+                        "analysis_type": tag,
+                        "value": value,
+                        "description": f"触发: {tag}",
+                        "extra_data": {}
+                    })
+
             # 构建rule_scores
             rule_scores = {}
             for tag in tags:
                 if tag and tag != 'basic_info':
                     rule_scores[tag] = VolumeAnalysisService.TAG_SCORES.get(tag, 0)
             
-            # 检查是否已存在
+            # Check if exists
             stmt = select(StockScoreResult).where(
                 StockScoreResult.code == code,
                 StockScoreResult.trade_date == row['trade_date']
@@ -643,68 +682,44 @@ class VolumeAnalysisService:
             result = await session.execute(stmt)
             existing = result.scalar_one_or_none()
             
-            # Calculate accumulated score
-            # Note: This simple loop assumes result_df is sorted by date and we process continuously.
-            # However, for a robust batch update, we should really fetch the previous accumulated score 
-            # from DB if this is the first item, or track it.
-            # But _save_vectorized_results is often called with a batch.
-            # To do this correctly without fetching for every row:
-            # We need to know the accumulated score BEFORE this batch.
-            
-            # Since this function iterates, let's assume the caller or a separate logic handles strict accumulation 
-            # OR we implement a "running total" here if the batch is contiguous.
-            # For now, let's just save daily_score. The accumulation logic is strictly enforced in RuleEngineService 
-            # and _calculate_stock_internal. 
-            # If we want to support it here, we need to fetch the previous day's accumulated score.
-            
-            # Let's try to fetch previous accumulated score if we don't have it in the batch context
-            # But doing it inside the loop is slow.
-            # Ideally, result_df should have 'accumulated_score' calculated if possible.
-            # If not, we just save daily_score and total_score (as daily) for now, 
-            # BUT the user wants strict separation.
-            
-            # Strategy: 
-            # 1. Fetch prev_accumulated before loop.
-            # 2. Update continuously.
-            
+            # Get scores from DataFrame
             daily_score = Decimal(str(row.get('daily_score', 0)))
+            # IMPORTANT: Save accumulated_score (total_score)
+            total_score = Decimal(str(row.get('total_score', 0)))
             
             if existing:
-                # 更新
+                # Update
                 existing.daily_score = daily_score
+                existing.accumulated_score = total_score  # Fix: Save accumulated score
+                existing.total_score = total_score        # Fix: Save total score (legacy field)
                 existing.rule_scores = rule_scores
                 existing.updated_at = datetime.now()
-                # We don't update accumulated_score here to avoid breaking chain if we are just patching daily scores
-                # UNLESS we are sure we are recalculating everything.
-                # For safety, let's leave accumulated_score alone if it exists, or set it to daily_score if 0?
-                # No, that breaks logic. 
-                # Better approach: Just save daily_score. The user can run a "recalculate accumulation" script.
-                # OR: We implement proper accumulation here.
                 
-                # If we are in "recalculate" mode (often implied by using vectorized engine), we might want to reset.
-                pass 
-                
-                # 如果是明确的pool_type，也更新它
+                # If pool_type is specific, update it
                 if pool_type != 'all' and existing.pool_type == 'all':
                      existing.pool_type = pool_type
             else:
-                # 插入
-                # For new records, we MUST calculate accumulated score if we want consistency.
-                # But querying every time is slow.
-                # Let's just save daily_score. RuleEngineService will handle the daily incremental updates.
-                # This function is used for "historical baseline" often.
-                
+                # Insert
                 score_result = StockScoreResult(
                     code=code,
                     trade_date=row['trade_date'],
-                    rule_scores=rule_scores,
                     daily_score=daily_score,
-                    total_score=daily_score, # Temporary fallback
-                    accumulated_score=daily_score, # Temporary fallback (will be fixed by recalc)
-                    pool_type=pool_type
+                    accumulated_score=total_score, # Fix: Save accumulated score
+                    total_score=total_score,       # Fix: Save total score
+                    rule_scores=rule_scores,
+                    pool_type=pool_type,
+                    created_at=datetime.now(),
+                    updated_at=datetime.now()
                 )
                 session.add(score_result)
         
+        # Bulk insert VolumeAnalysisResult
+        if volume_analysis_records:
+            await session.execute(
+                insert(VolumeAnalysisResult),
+                volume_analysis_records
+            )
+
         await session.commit()
         logger.debug(f"💾 已保存 {len(result_df)} 条评分结果")
     
