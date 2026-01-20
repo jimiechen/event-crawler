@@ -127,6 +127,7 @@ class WencaiCrawler(CrawlerBase):
             "batch_id": batch_id,
             "total": len(parsed_stocks),
             "success": success,
+            "errors": errors,  # Return errors for debugging
             "found_target": found_target if target_stock_code else None,
             "stocks": parsed_stocks
         }

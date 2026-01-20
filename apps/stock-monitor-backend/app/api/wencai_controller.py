@@ -486,6 +486,7 @@ async def run_wencai_crawler_by_date(
                 "batch_id": result.get("batch_id"),
                 "total": result.get("total"),
                 "success": result.get("success"),
+                "errors": result.get("errors"),
                 "crawl_date": crawl_date,
                 "crawler_type": crawler_type
             },

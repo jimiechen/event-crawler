@@ -68,21 +68,29 @@ class LocalDataService:
         logger.info("本地历史数据加载完成")
 
     @classmethod
-    async def load_local_data_for_stocks(cls, stock_service, codes: List[str], end_date: Optional[date] = None):
+    async def load_local_data_for_stocks(cls, stock_service, codes: List[str], end_date: Optional[date] = None, limit: Optional[int] = None):
         """
         加载指定股票列表的本地历史数据
         """
+        if limit is None:
+            limit = get_settings().volumes_num
+
         daily_dir = cls.get_daily_dir()
         if not os.path.exists(daily_dir):
             logger.warning(f"Local daily data directory not found: {daily_dir}")
             return
 
-        logger.info(f"开始加载 {len(codes)} 只指定股票的本地数据... (End Date: {end_date})")
+        logger.info(f"开始加载 {len(codes)} 只指定股票的本地数据... (End Date: {end_date}, Limit: {limit})")
         processed = 0
         for code in codes:
             try:
                 # 加载日线数据
-                daily_data = await cls.get_daily_data(code, limit=250, end_date=end_date)
+                daily_data = await cls.get_daily_data(code, limit=limit, end_date=end_date)
+                
+                # Check for data sufficiency if limit is large (implying analysis intent)
+                if limit >= 200 and len(daily_data) < limit:
+                    logger.warning(f"Stock {code}: Loaded {len(daily_data)} records, expected ~{limit}. Analysis may fail.")
+
                 if daily_data:
                     await stock_service.stock_daily_repo.batch_save_daily_data(daily_data)
                 
@@ -197,13 +205,16 @@ class LocalDataService:
         return None
 
     @classmethod
-    async def get_daily_data(cls, code: str, limit: int = 250, end_date: Optional[date] = None) -> List[Dict]:
+    async def get_daily_data(cls, code: str, limit: Optional[int] = None, end_date: Optional[date] = None) -> List[Dict]:
         """
         从本地CSV读取日线数据 (近 limit 天)
         合并 daily (OHLC) 和 daily_basic (换手率/量比) 数据
         支持自动匹配文件名后缀 (e.g. code='600724' can find '600724.SH.csv')
         返回数据的 code 字段将统一为无后缀格式
         """
+        if limit is None:
+            limit = get_settings().volumes_num
+
         # Normalize input code
         normalized_code = code.split('.')[0]
         
@@ -241,7 +252,9 @@ class LocalDataService:
                 reader = csv.DictReader(f)
                 for row in reader:
                     try:
-                        date_str = row['交易日期']
+                        date_str = row.get('交易日期') or row.get('trade_date')
+                        if not date_str:
+                            continue
                         daily_records[date_str] = row
                     except KeyError:
                         continue
@@ -257,7 +270,9 @@ class LocalDataService:
                     reader = csv.DictReader(f)
                     for row in reader:
                         try:
-                            date_str = row['交易日期']
+                            date_str = row.get('交易日期') or row.get('trade_date')
+                            if not date_str:
+                                continue
                             basic_records[date_str] = row
                         except KeyError:
                             continue
@@ -269,11 +284,28 @@ class LocalDataService:
         data_list = []
         
         # Sort dates descending to get latest 'limit' days
+        # Need to normalize date strings for sorting if formats differ?
+        # Assuming one file has consistent format.
         sorted_dates = sorted(daily_records.keys(), reverse=True)
         
+        # Helper to parse date
+        def parse_date(d_str):
+            try:
+                return datetime.strptime(d_str, "%Y-%m-%d").date()
+            except ValueError:
+                try:
+                    return datetime.strptime(d_str, "%Y%m%d").date()
+                except ValueError:
+                    return None
+
         if end_date:
-            end_date_str = end_date.strftime("%Y-%m-%d")
-            sorted_dates = [d for d in sorted_dates if d <= end_date_str]
+            # Filter by converting to date object first
+            filtered_dates = []
+            for d in sorted_dates:
+                d_obj = parse_date(d)
+                if d_obj and d_obj <= end_date:
+                    filtered_dates.append(d)
+            sorted_dates = filtered_dates
             
         sorted_dates = sorted_dates[:limit]
         
@@ -282,15 +314,18 @@ class LocalDataService:
             basic_row = basic_records.get(date_str, {})
             
             try:
-                trade_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                trade_date = parse_date(date_str)
+                if not trade_date:
+                    continue
                 
-                # Parse OHLC etc.
-                open_price = Decimal(daily_row.get('开盘价') or 0)
-                high_price = Decimal(daily_row.get('最高价') or 0)
-                low_price = Decimal(daily_row.get('最低价') or 0)
-                close_price = Decimal(daily_row.get('收盘价') or 0)
-                vol = Decimal(daily_row.get('成交量(手)') or 0)
-                amount = Decimal(daily_row.get('成交额(千元)') or 0)
+                # Parse OHLC etc. (Handle Chinese and English headers)
+                open_price = Decimal(daily_row.get('开盘价') or daily_row.get('open') or 0)
+                high_price = Decimal(daily_row.get('最高价') or daily_row.get('high') or 0)
+                low_price = Decimal(daily_row.get('最低价') or daily_row.get('low') or 0)
+                close_price = Decimal(daily_row.get('收盘价') or daily_row.get('close') or 0)
+                vol = Decimal(daily_row.get('成交量(手)') or daily_row.get('vol') or 0)
+                amount = Decimal(daily_row.get('成交额(千元)') or daily_row.get('amount') or 0)
+
                 
                 # Parse basic data
                 turnover_rate = Decimal(basic_row.get('换手率(%)') or 0)

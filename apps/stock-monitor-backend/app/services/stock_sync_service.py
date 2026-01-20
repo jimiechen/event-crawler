@@ -129,13 +129,14 @@ class StockSyncService:
         
         return missing_dates
     
-    def _append_to_csv(self, csv_path: str, new_data: pd.DataFrame) -> int:
+    async def _append_to_csv(self, csv_path: str, new_data: pd.DataFrame, code: Optional[str] = None) -> int:
         """
         追加数据到CSV文件
         
         Args:
             csv_path: CSV文件路径
             new_data: 新数据DataFrame
+            code: 股票代码 (用于填补缺口)
         
         Returns:
             追加的行数
@@ -147,21 +148,99 @@ class StockSyncService:
             else:
                 existing_df = pd.DataFrame()
             
-            # 合并数据
-            merged_df = pd.concat([existing_df, new_data], ignore_index=True)
+            # Detect header language
+            is_chinese_header = False
+            if not existing_df.empty:
+                if '交易日期' in existing_df.columns:
+                    is_chinese_header = True
             
-            # 去重（按日期）
+            # Normalize existing DF
+            existing_df_norm = self._normalize_df(existing_df)
+            
+            # Normalize new data
+            new_data_norm = self._normalize_df(new_data)
+            
+            # --- Date Gap Validation & Filling ---
+            if not existing_df_norm.empty and 'trade_date' in existing_df_norm.columns:
+                try:
+                    last_date_str = str(existing_df_norm['trade_date'].max())
+                    if last_date_str.endswith('.0'):
+                         last_date_str = last_date_str[:-2]
+                    last_date = datetime.strptime(last_date_str, "%Y%m%d").date()
+                    
+                    if not new_data_norm.empty and 'trade_date' in new_data_norm.columns:
+                        temp_dates = pd.to_datetime(new_data_norm['trade_date'], errors='coerce').dt.date
+                        first_new_date = temp_dates.min()
+                        
+                        if pd.notnull(first_new_date):
+                            days_diff = (first_new_date - last_date).days
+                            if days_diff > 1:
+                                logger.warning(f"Date gap detected for {code or 'unknown'}: CSV last {last_date} -> New first {first_new_date} (Diff: {days_diff} days). Attempting to fill...")
+                                
+                                gap_start = (last_date + timedelta(days=1)).strftime("%Y%m%d")
+                                gap_end = (first_new_date - timedelta(days=1)).strftime("%Y%m%d")
+                                
+                                # Need code for fetching
+                                target_code = code
+                                if not target_code and 'code' in new_data_norm.columns:
+                                     target_code = str(new_data_norm['code'].iloc[0])
+                                
+                                if target_code:
+                                    ts_code = self.tushare_service._add_suffix(target_code)
+                                    missing_df = await self.tushare_service.get_daily(ts_code, gap_start, gap_end)
+                                    
+                                    if missing_df is not None and not missing_df.empty:
+                                        logger.info(f"Successfully fetched {len(missing_df)} missing records for {target_code}")
+                                        missing_df_norm = self._normalize_df(missing_df)
+                                        # Append missing data to new_data_norm
+                                        new_data_norm = pd.concat([missing_df_norm, new_data_norm], ignore_index=True)
+                                    else:
+                                        logger.warning(f"No data found for gap {gap_start}-{gap_end}")
+                                else:
+                                    logger.warning("Cannot fill gap: Stock code not provided")
+
+                except Exception as gap_err:
+                    logger.error(f"Error during date gap check: {gap_err}")
+            # --- End Gap Validation ---
+
+            # Combine
+            merged_df = pd.concat([existing_df_norm, new_data_norm], ignore_index=True)
+            
+            # Deduplicate
             if 'trade_date' in merged_df.columns:
+                merged_df['trade_date'] = pd.to_datetime(merged_df['trade_date'], errors='coerce').dt.strftime('%Y%m%d')
                 merged_df.drop_duplicates(subset=['trade_date'], keep='last', inplace=True)
-            
-            # 排序
-            if 'trade_date' in merged_df.columns:
                 merged_df.sort_values('trade_date', inplace=True)
             
-            # 保存回CSV
-            merged_df.to_csv(csv_path, index=False)
+            # Convert back to Chinese if needed
+            final_df = merged_df
+            if is_chinese_header:
+                 cn_map = {
+                    'code': '股票代码', 'trade_date': '交易日期', 'open': '开盘价',
+                    'high': '最高价', 'low': '最低价', 'close': '收盘价',
+                    'pre_close': '昨收价', 'change': '涨跌额', 'pct_chg': '涨跌幅',
+                    'vol': '成交量(手)', 'amount': '成交额(千元)'
+                 }
+                 # Only map columns that exist
+                 cols_to_rename = {k: v for k, v in cn_map.items() if k in final_df.columns}
+                 final_df = final_df.rename(columns=cols_to_rename)
+                 
+                 # Reorder columns to match standard if possible
+                 ordered_cols = [
+                    "股票代码", "交易日期", "开盘价", "最高价", "最低价", "收盘价", 
+                    "昨收价", "涨跌额", "涨跌幅", "成交量(手)", "成交额(千元)"
+                 ]
+                 final_cols = [c for c in ordered_cols if c in final_df.columns]
+                 # Add any extra columns
+                 for c in final_df.columns:
+                     if c not in final_cols:
+                         final_cols.append(c)
+                 final_df = final_df[final_cols]
+
+            # Save
+            final_df.to_csv(csv_path, index=False)
             
-            return len(new_data)
+            return len(new_data_norm)
         except Exception as e:
             logger.error(f"追加数据到CSV失败: {e}")
             return 0
@@ -768,46 +847,10 @@ class StockSyncService:
             csv_path = self._find_csv_path(code)
             if csv_path and csv_rows:
                 try:
-                    # Append mode 'a'
-                    # Check if header exists? Usually yes.
-                    # We just append new rows.
-                    # CAUTION: Need to ensure we don't duplicate. 
-                    # Ideally, read existing CSV, concat, drop duplicates, save.
-                    
-                    existing_df = pd.read_csv(csv_path)
-                    
-                    # Normalize existing DF to prevent mixed columns
-                    existing_df = self._normalize_df(existing_df)
-                    
                     new_df = pd.DataFrame(csv_rows)
-                    # Normalize new DF to ensure same columns and format
-                    new_df = self._normalize_df(new_df)
-                    
-                    # Ensure strict incremental date
-                    if not existing_df.empty and 'trade_date' in existing_df.columns:
-                        last_date = existing_df['trade_date'].max()
-                        # Ensure comparison is done on strings YYYYMMDD
-                        if isinstance(last_date, str):
-                            # Filter new_df to only include dates strictly greater than last_date
-                            new_df = new_df[new_df['trade_date'] > last_date]
-                    
-                    if new_df.empty:
-                        # No new data to append
-                        return {"success": True, "inserted": inserted_count, "csv_appended": 0, "message": "No new data to append"}
-
-                    # Append and Save
-                    combined_df = pd.concat([existing_df, new_df])
-                    
-                    # Double check date format before saving (should be YYYYMMDD string from _normalize_df)
-                    # But if user wants consistent CSV, YYYYMMDD is good.
-                    
-                    combined_df.to_csv(csv_path, index=False)
-                    csv_appended_count = len(new_df)
-                    
+                    csv_appended_count = await self._append_to_csv(csv_path, new_df, code=code)
                 except Exception as e:
                     logger.error(f"Error appending CSV for {code}: {e}")
-                    # Don't fail the whole task if CSV append fails? 
-                    # Maybe just log it.
 
             return {"success": True, "inserted": inserted_count, "csv_appended": csv_appended_count}
         

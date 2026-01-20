@@ -14,6 +14,7 @@ from app.services.baostock_service import BaostockService
 from app.services.akshare_service import AkshareService
 from app.services.tdx_service import TdxService
 from app.services.local_data_service import LocalDataService
+from app.services.stock_service import StockService
 from app.api.test_tool_schemas import (
     AddCustomStockRequest, 
     AddCustomStockResponse,
@@ -30,11 +31,71 @@ router = APIRouter(prefix="/api/v1/test-tool", tags=["测试工具"])
 
 import re
 
-from app.models.stock_daily import StockDaily
-from sqlalchemy import select
+from app.models.stock_daily import StockDaily, StockScoreResult
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
+from app.models.volume_analysis import VolumeAnalysisResult
 
 PREFERRED_PLATFORM = "tushare"
+
+class ValidationCountsRequest(BaseModel):
+    codes: List[str]
+    min_count: int = 250
+
+@router.post("/validate-data-counts")
+async def validate_data_counts(
+    request: ValidationCountsRequest,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """
+    Validate that specific stocks have at least N records in results tables
+    """
+    codes = request.codes
+    min_count = request.min_count
+    
+    if not codes:
+        return {"status": "skipped", "message": "No codes provided"}
+        
+    # Check VolumeAnalysisResult
+    stmt_vol = (
+        select(VolumeAnalysisResult.code, func.count(VolumeAnalysisResult.id).label("count"))
+        .where(VolumeAnalysisResult.code.in_(codes))
+        .group_by(VolumeAnalysisResult.code)
+    )
+    res_vol = await db.execute(stmt_vol)
+    vol_counts = {r.code: r.count for r in res_vol.all()}
+    
+    # Check StockScoreResult
+    stmt_score = (
+        select(StockScoreResult.code, func.count(StockScoreResult.id).label("count"))
+        .where(StockScoreResult.code.in_(codes))
+        .group_by(StockScoreResult.code)
+    )
+    res_score = await db.execute(stmt_score)
+    score_counts = {r.code: r.count for r in res_score.all()}
+    
+    failures = []
+    for code in codes:
+        v_count = vol_counts.get(code, 0)
+        s_count = score_counts.get(code, 0)
+        
+        if v_count < min_count or s_count < min_count:
+            failures.append({
+                "code": code,
+                "vol_count": v_count,
+                "score_count": s_count,
+                "required": min_count
+            })
+            
+    if failures:
+        return {
+            "status": "failed",
+            "message": f"Found {len(failures)} stocks with insufficient data",
+            "failures": failures,
+            "details": failures
+        }
+    
+    return {"status": "success", "message": "All stocks passed validation"}
 
 class SetPlatformRequest(BaseModel):
     platform: str
@@ -391,7 +452,31 @@ async def validate_data(payload: Dict[str, Any] = Body(...)):
         "details": {}
     }
 
-@router.get("/env-check")
+@router.post("/load-local-data")
+async def load_local_data(payload: Dict[str, Any] = Body(...)):
+    """
+    加载本地CSV数据到数据库
+    """
+    codes = payload.get("codes", [])
+    end_date_str = payload.get("end_date")
+    limit = payload.get("limit")
+    
+    if not codes:
+        return {"status": "error", "message": "No codes provided"}
+        
+    end_date = None
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        except:
+            pass
+            
+    stock_service = StockService(db_manager)
+    await LocalDataService.load_local_data_for_stocks(stock_service, codes, end_date=end_date, limit=limit)
+    
+    return {"status": "success", "message": f"Loaded data for {len(codes)} stocks"}
+
+@router.get("/env-check", response_model=List[EnvCheckResult])
 async def env_check():
     results = []
     

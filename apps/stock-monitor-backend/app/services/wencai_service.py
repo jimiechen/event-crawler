@@ -37,6 +37,48 @@ class WencaiService:
         self.tag_mgmt_service = TagManagementService(db)
         self.stock_service = StockService(db)
 
+    async def get_stocks(
+        self,
+        filters: Dict[str, Any] = None,
+        limit: int = 50,
+        offset: int = 0
+    ) -> List[Dict[str, Any]]:
+        """
+        获取问财股票列表
+        :param filters: 过滤条件 (crawl_batch_id, stock_code, etc.)
+        :param limit: 限制数量
+        :param offset: 偏移量
+        """
+        try:
+            stmt = select(WencaiStock)
+            
+            if filters:
+                for key, value in filters.items():
+                    if hasattr(WencaiStock, key):
+                        stmt = stmt.where(getattr(WencaiStock, key) == value)
+            
+            stmt = stmt.order_by(WencaiStock.id.desc()).limit(limit).offset(offset)
+            
+            result = await self.db.execute(stmt)
+            stocks = result.scalars().all()
+            
+            return [
+                {
+                    "id": s.id,
+                    "stock_code": s.stock_code,
+                    "stock_name": s.stock_name,
+                    "crawl_batch_id": int(s.crawl_batch_id) if s.crawl_batch_id is not None and str(s.crawl_batch_id).isdigit() else None,
+                    "current_price": float(s.current_price) if s.current_price else None,
+                    "price_change_percent": None, # 模型中暂无此字段
+                    "is_active": s.is_active,
+                    "created_at": s.created_at
+                }
+                for s in stocks
+            ]
+        except Exception as e:
+            logger.error(f"查询问财股票失败: {e}")
+            raise e
+
     async def get_batch_by_name(self, batch_name: str) -> Optional[WencaiCrawlBatch]:
         """
         根据批次名称获取批次信息
@@ -89,8 +131,8 @@ class WencaiService:
                             crawl_batch_id=str(batch_id),
                             stock_code=stock_code,
                             stock_name=stock_name,
-                            latest_price=stock_data.get('latest_price'),
-                            change_percent=stock_data.get('change_percent'),
+                            current_price=stock_data.get('latest_price') or stock_data.get('current_price'),
+                            # change_percent=stock_data.get('change_percent'), # 模型中暂无此字段
                             is_active=is_active
                         )
                         self.db.add(wencai_stock)
@@ -828,11 +870,17 @@ class WencaiService:
         success_count = 0
         failed_count = 0
         errors = []
+        seen_codes = set()
         
         try:
             for stock_data in stocks_data:
                 try:
                     stock_code = stock_data.get('stock_code')
+                    
+                    # 去重检查
+                    if stock_code in seen_codes:
+                        continue
+                    seen_codes.add(stock_code)
                     stock_name = stock_data.get('stock_name')
 
                     # 验证必要字段
@@ -1022,10 +1070,10 @@ class WencaiService:
              is_active = True if prev_status is None else prev_status
 
         sql = """
-        INSERT INTO wencai_stocks (
-            stock_code, stock_name, current_price, volume, crawl_batch_id, concept, industry, raw_data, price_change_percent, is_active
+        INSERT IGNORE INTO wencai_stocks (
+            stock_code, stock_name, current_price, volume, crawl_batch_id, concept, industry, raw_data, is_active
         ) VALUES (
-            :stock_code, :stock_name, :current_price, :volume, :crawl_batch_id, :concept, :industry, :raw_data, :price_change_percent, :is_active
+            :stock_code, :stock_name, :current_price, :volume, :crawl_batch_id, :concept, :industry, :raw_data, :is_active
         )
         """
         
@@ -1039,7 +1087,7 @@ class WencaiService:
             'concept': stock_data.get('concept'),
             'industry': stock_data.get('industry'),
             'raw_data': stock_data.get('raw_data'),
-            'price_change_percent': stock_data.get('price_change_percent'),
+            # 'price_change_percent': stock_data.get('price_change_percent'), # Database does not have this column
             'is_active': is_active
         }
         
@@ -1219,12 +1267,10 @@ class WencaiService:
         """插入去重记录 - 使用 INSERT IGNORE 避免重复键错误"""
         sql = """
         INSERT IGNORE INTO wencai_data_dedup (
-            stock_code, data_hash, crawl_batch_id, 
-            stock_name, current_price, change_percent
+            stock_code, data_hash, crawl_batch_id
         )
         VALUES (
-            :stock_code, :data_hash, :crawl_batch_id,
-            :stock_name, :current_price, :change_percent
+            :stock_code, :data_hash, :crawl_batch_id
         )
         """
         
@@ -1234,9 +1280,9 @@ class WencaiService:
                 'stock_code': stock_code,
                 'data_hash': data_hash,
                 'crawl_batch_id': batch_id,
-                'stock_name': stock_name,
-                'current_price': current_price,
-                'change_percent': change_percent
+                # 'stock_name': stock_name,
+                # 'current_price': current_price,
+                # 'change_percent': change_percent
             }
         )
     

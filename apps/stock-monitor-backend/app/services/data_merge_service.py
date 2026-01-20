@@ -17,6 +17,8 @@ from sqlalchemy.dialects.mysql import insert
 
 from app.models.stock_daily import StockDaily
 from app.config.settings import get_settings
+from app.database import db_manager
+from app.services.tushare_service import TushareService
 
 logger = logging.getLogger(__name__)
 
@@ -927,6 +929,78 @@ class DataMergeService:
             logger.info(f"CSV中已存在该日期，跳过追加")
             return
         
+        # --- Date Gap Validation & Filling ---
+        try:
+            if os.path.exists(csv_file_path) and os.path.getsize(csv_file_path) > 0:
+                # Get last date from CSV
+                max_date = None
+                with open(csv_file_path, 'r', encoding='utf-8') as f:
+                     reader = csv.DictReader(f)
+                     for row in reader:
+                         d_str = row.get('交易日期') or row.get('trade_date')
+                         if d_str:
+                             try:
+                                 d = self._parse_date(d_str)
+                                 if max_date is None or d > max_date:
+                                     max_date = d
+                             except:
+                                 pass
+                
+                current_date = self._parse_date(data.get('trade_date') or data.get('日期'))
+                
+                if max_date and current_date:
+                    days_diff = (current_date - max_date).days
+                    if days_diff > 1:
+                        logger.warning(f"Date gap detected for {stock_code}: CSV last {max_date} -> New {current_date} (Diff: {days_diff} days). Attempting to fill...")
+                        
+                        gap_start = (max_date + timedelta(days=1)).strftime("%Y%m%d")
+                        gap_end = (current_date - timedelta(days=1)).strftime("%Y%m%d")
+                        
+                        # Fetch missing data from Tushare
+                        ts_service = TushareService(db_manager)
+                        ts_code = ts_service._add_suffix(stock_code)
+                        
+                        missing_df = await ts_service.get_daily(ts_code, gap_start, gap_end)
+                        
+                        if missing_df is not None and not missing_df.empty:
+                            logger.info(f"Successfully fetched {len(missing_df)} missing records for {stock_code}")
+                            
+                            # Sort by date
+                            missing_df = missing_df.sort_values('trade_date')
+                            missing_records = missing_df.to_dict('records')
+                            
+                            # Append missing records to CSV
+                            with open(csv_file_path, 'a', encoding='utf-8', newline='') as f:
+                                # Determine fieldnames from file or standard
+                                fieldnames = [
+                                    "股票代码", "交易日期", "开盘价", "最高价", "最低价", "收盘价", 
+                                    "昨收价", "涨跌额", "涨跌幅", "成交量(手)", "成交额(千元)"
+                                ]
+                                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                                
+                                for m_row in missing_records:
+                                    csv_row = {
+                                        "股票代码": m_row['ts_code'],
+                                        "交易日期": self._format_date(str(m_row['trade_date'])),
+                                        "开盘价": str(m_row['open']),
+                                        "最高价": str(m_row['high']),
+                                        "最低价": str(m_row['low']),
+                                        "收盘价": str(m_row['close']),
+                                        "昨收价": str(m_row.get('pre_close', 0)),
+                                        "涨跌额": str(m_row.get('change', 0)),
+                                        "涨跌幅": str(m_row.get('pct_chg', 0)),
+                                        "成交量(手)": str(m_row.get('vol', 0)),
+                                        "成交额(千元)": str(m_row.get('amount', 0))
+                                    }
+                                    writer.writerow(csv_row)
+                                    
+                        else:
+                             logger.warning(f"Failed to fetch missing data for {stock_code} gap {gap_start}-{gap_end}")
+
+        except Exception as gap_err:
+            logger.error(f"Error during date gap check for {stock_code}: {gap_err}")
+        # --- End Date Gap Validation ---
+
         try:
             # 确定列名
             if 'ts_code' in data:
@@ -1037,9 +1111,8 @@ class DataMergeService:
     ) -> Optional[Dict[str, Any]]:
         """从Tushare获取单个股票的单日数据"""
         try:
-            from app.services.tushare_service import TushareService
-            
-            tushare_service = TushareService(self.db)
+            # Use global db_manager
+            tushare_service = TushareService(db_manager)
             date_str = trade_date.strftime("%Y%m%d")
             
             # 调用Tushare服务

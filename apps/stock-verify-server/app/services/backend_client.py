@@ -13,7 +13,7 @@ class BackendClient:
         url = f"{cls.BASE_URL}/scores/calculate/{date_str}/{batch_id}"
         logger.info(f"Triggering calculation via {url}")
         
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             try:
                 response = await client.get(url)
                 response.raise_for_status()
@@ -75,3 +75,64 @@ class BackendClient:
             except Exception as e:
                 logger.error(f"Failed to call Wencai Crawler: {e}")
                 raise e
+
+    @classmethod
+    async def get_wencai_stocks(cls, batch_id: int):
+        """
+        调用后端API获取问财股票数据
+        GET /api/v1/wencai/stocks?batch_id={batch_id}
+        """
+        url = f"{cls.BASE_URL}/wencai/stocks?batch_id={batch_id}&limit=1000"
+        logger.info(f"Fetching Wencai stocks via {url}")
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.get(url)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                logger.error(f"Failed to fetch Wencai stocks: {e}")
+                raise e
+
+    @classmethod
+    async def load_local_data(cls, codes: list, end_date: str = None):
+        """
+        调用后端API加载本地数据
+        POST /api/v1/test-tool/load-local-data
+        """
+        url = f"{cls.BASE_URL}/test-tool/load-local-data"
+        logger.info(f"Loading local data via {url}")
+        
+        payload = {"codes": codes}
+        if end_date:
+            payload["end_date"] = end_date
+            
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            try:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                logger.error(f"Failed to load local data: {e}")
+                raise e
+
+    @classmethod
+    async def validate_data_counts(cls, codes: list, min_count: int = 250):
+        """
+        调用后端API验证数据数量
+        POST /api/v1/test-tool/validate-data-counts
+        """
+        url = f"{cls.BASE_URL}/test-tool/validate-data-counts"
+        logger.info(f"Validating data counts via {url}")
+        
+        payload = {"codes": codes, "min_count": min_count}
+            
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            try:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+                return response.json()
+            except Exception as e:
+                logger.error(f"Failed to validate data counts: {e}")
+                raise e
+

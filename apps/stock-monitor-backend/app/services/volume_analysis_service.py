@@ -604,6 +604,16 @@ class VolumeAnalysisService:
         
         result_df = vectorized_engine.calculate_batch(df)
         
+        # 3.1 保存/更新 Baseline (StockVolumeBaseline)
+        # 这一步确保每次计算基础分时，也会更新该股票的成交量异动基准 (2倍量/3倍量/地量日期)
+        # 这对于后续的每日监控至关重要
+        try:
+            await VolumeAnalysisService._update_baseline_from_vectorized(code, result_df, session)
+        except Exception as e:
+            # 记录错误但不阻断流程，因为主要目的是返回分数
+            from loguru import logger
+            logger.error(f"Failed to update baseline for {code}: {e}")
+
         # 4. 汇总得分
         total_baseline = Decimal(0)
         if 'daily_score' in result_df.columns:

@@ -5,6 +5,7 @@ from sqlalchemy import select, desc, and_, func
 from sqlalchemy.orm import aliased
 from app.models.stock_daily import StockScoreResult, StockDaily
 from app.models.stock import StockInfo, WencaiStock
+from app.database import db_manager
 from .volume_analysis_service import VolumeAnalysisService
 from loguru import logger
 
@@ -54,34 +55,8 @@ class RankingService:
         """
         Calculate ranking based on score growth (sum of daily scores) between start_date and end_date.
         Growth = Sum(daily_score) in range.
-       # ALWAYS uses WencaiStock pool.
+        # ALWAYS uses WencaiStock pool.
         """
-        # 0. Check if scores exist in range. If not, trigger calculation.
-        # We check if there are ANY scores between start_date and end_date.
-        query_check = select(func.count(StockScoreResult.id)).where(
-            StockScoreResult.trade_date >= start_date,
-            StockScoreResult.trade_date <= end_date
-        )
-        res_check = await self.db.execute(query_check)
-        count = res_check.scalar()
-        
-        if count == 0:
-            from app.services.volume_analysis_service import VolumeAnalysisService
-            logger.info(f"No scores found between {start_date} and {end_date}, triggering calculation...")
-            
-            # Get Wencai stocks
-            wencai_stmt = select(WencaiStock.stock_code)
-            wencai_res = await self.db.execute(wencai_stmt)
-            wencai_codes = [r.stock_code for r in wencai_res.all()]
-            
-            if wencai_codes:
-                logger.info(f"Triggering calculation for {len(wencai_codes)} stocks...")
-                for code in wencai_codes:
-                    try:
-                        await VolumeAnalysisService._analyze_stock_impl(code, self.db)
-                    except Exception as e:
-                        logger.error(f"Failed to calculate score for {code}: {e}")
-        
         # Calculate growth as Sum(daily_score) in range
         
         conditions = [
@@ -192,51 +167,41 @@ class RankingService:
 
     async def get_total_score_ranking(self, target_date: date, limit: int = 20):
         """
-        Calculate ranking based on accumulated_score (250 days rolling total).
-        Directly uses accumulated_score field instead of SUM aggregation.
+        Calculate ranking based on accumulated_score (Latest available snapshot).
+        Finds the latest score record for each stock on or before target_date.
+        Compatible with MySQL 5.7 (No Window Functions).
         """
         from datetime import timedelta
         
-        window_days = 250
-        start_date = target_date - timedelta(days=window_days)
+        # 3. 使用 Max-Date 子查询获取每个股票在 target_date 之前(含)的最新一条记录
+        # Strategy:
+        # 1. Subquery: Find MAX(trade_date) for each code where trade_date <= target_date
+        # 2. Join StockScoreResult on (code, trade_date) == (code, max_date)
         
-        # 1. 检查 target_date 是否已有评分记录
-        has_scores = await self.has_scores_for_date(target_date)
+        # Subquery: Get latest date per stock
+        latest_dates_subquery = select(
+            StockScoreResult.code,
+            func.max(StockScoreResult.trade_date).label('max_date')
+        ).where(
+            StockScoreResult.trade_date <= target_date
+        ).group_by(
+            StockScoreResult.code
+        ).subquery()
         
-        # 2. 如果没有，触发评分计算
-        if not has_scores:
-            from app.services.volume_analysis_service import VolumeAnalysisService
-            
-            logger.info(f"No scores found for {target_date}, triggering calculation...")
-            
-            # 获取问财股票池
-            wencai_stmt = select(WencaiStock.stock_code)
-            wencai_res = await self.db.execute(wencai_stmt)
-            wencai_codes = [r.stock_code for r in wencai_res.all()]
-            
-            if wencai_codes:
-                logger.info(f"Triggering calculation for {len(wencai_codes)} stocks...")
-                for code in wencai_codes:
-                    try:
-                        # 使用 VolumeAnalysisService 的完整分析流程
-                        # 这会获取400天历史数据，调用向量化引擎计算，并保存结果（包括累计分）
-                        await VolumeAnalysisService._analyze_stock_impl(code, self.db)
-                    except Exception as e:
-                        logger.error(f"Failed to calculate score for {code}: {e}")
-        
-        # 3. 直接使用 total_score (accumulated_score的兼容字段，有索引) 字段查询排名
         stmt = select(
             WencaiStock.stock_code.label('code'),
-            WencaiStock.stock_name,  # Add stock_name
-            StockScoreResult.total_score.label('total_score'),
-            StockScoreResult.ranking
+            WencaiStock.stock_name,
+            StockScoreResult.accumulated_score.label('total_score')
+        ).join(
+            latest_dates_subquery, 
+            WencaiStock.stock_code == latest_dates_subquery.c.code
         ).join(
             StockScoreResult, and_(
-                WencaiStock.stock_code == StockScoreResult.code,
-                StockScoreResult.trade_date == target_date
+                StockScoreResult.code == latest_dates_subquery.c.code,
+                StockScoreResult.trade_date == latest_dates_subquery.c.max_date
             )
         ).order_by(
-            desc(StockScoreResult.total_score)
+            desc('total_score')
         ).limit(limit)
         
         result = await self.db.execute(stmt)
@@ -249,7 +214,7 @@ class RankingService:
         for idx, row in enumerate(rows):
             code = row.code
             total_score = float(row.total_score or 0)
-            ranking = row.ranking if row.ranking else idx + 1
+            ranking = idx + 1
             
             ranking_data.append({
                 "code": code,

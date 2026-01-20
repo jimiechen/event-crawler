@@ -52,6 +52,10 @@
                 </button>
                 <div class="desc">注入 11 只新股及历史K线，触发全量评分。预期: 12 条数据，603601 排名变化。</div>
             </div>
+
+            <div id="daily-simulation-container">
+                <!-- Daily buttons will be injected here -->
+            </div>
         </div>
 
         <div class="log-panel" id="logPanel">
@@ -73,40 +77,122 @@
         async function executeAction(action) {
             let endpoint = '';
             let label = '';
+            let isSSE = false;
             
-            switch(action) {
-                case 'reset':
-                    endpoint = '/api/clear-all';
-                    label = '清空数据';
-                    break;
-                case 'step1':
-                    endpoint = '/api/simulation/step1';
-                    label = 'Step 1 (2025-11-19)';
-                    break;
-                case 'step2':
-                    endpoint = '/api/simulation/step2';
-                    label = 'Step 2 (2025-11-20)';
-                    break;
+            if (action.startsWith('daily_')) {
+                const dateStr = action.replace('daily_', '');
+                endpoint = `/api/simulation/run/${dateStr}`;
+                label = `模拟: ${dateStr}`;
+                isSSE = true;
+            } else {
+                switch(action) {
+                    case 'reset':
+                        endpoint = '/api/clear-all';
+                        label = '清空数据';
+                        isSSE = false;
+                        break;
+                    case 'step1':
+                        endpoint = '/api/simulation/step1';
+                        label = 'Step 1 (2025-11-19)';
+                        isSSE = false; // Step 1 is still normal JSON response
+                        break;
+                    case 'step2':
+                        endpoint = '/api/simulation/step2';
+                        label = 'Step 2 (2025-11-20)';
+                        isSSE = true;
+                        break;
+                }
             }
 
             log(`Starting ${label}...`, 'pending');
             
-            try {
-                const response = await fetch(endpoint, { method: 'POST' });
-                const data = await response.json();
-                
-                if (response.ok) {
-                    log(`✅ ${label} Success: ${data.message}`);
-                    if (data.backend_data) {
-                        log(`   Backend: ${JSON.stringify(data.backend_data)}`);
+            if (!isSSE) {
+                // Use fetch for non-streaming endpoints
+                try {
+                    const response = await fetch(endpoint, { method: 'POST' });
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        log(`✅ ${label} Success: ${data.message || JSON.stringify(data)}`);
+                        if (data.backend_data) {
+                            log(`   Backend: ${JSON.stringify(data.backend_data)}`);
+                        }
+                    } else {
+                        log(`❌ ${label} Failed: ${data.detail || 'Unknown error'}`);
                     }
-                } else {
-                    log(`❌ ${label} Failed: ${data.detail || 'Unknown error'}`);
+                } catch (error) {
+                    log(`❌ ${label} Error: ${error.message}`);
                 }
-            } catch (error) {
-                log(`❌ ${label} Error: ${error.message}`);
+            } else {
+                // SSE for step2 and daily simulations
+                try {
+                    const eventSource = new EventSource(endpoint);
+                    
+                    eventSource.onmessage = function(event) {
+                        try {
+                            const data = JSON.parse(event.data);
+                            
+                            if (data.type === 'info') {
+                                log(`ℹ️ ${data.message}`);
+                            } else if (data.type === 'step') {
+                                log(`🔄 ${data.message}`);
+                            } else if (data.type === 'success') {
+                                log(`✅ ${data.message}`, 'success');
+                                eventSource.close();
+                            } else if (data.type === 'error') {
+                                log(`❌ ${data.message}`, 'error');
+                                eventSource.close();
+                            }
+                        } catch (e) {
+                            console.error('SSE parse error:', e);
+                        }
+                    };
+                    
+                    eventSource.onerror = function(err) {
+                        if (eventSource.readyState === EventSource.CLOSED) {
+                             log(`Stream closed normally.`, 'info');
+                        } else {
+                             log(`⚠️ Stream connection error.`, 'warning');
+                        }
+                        eventSource.close();
+                    };
+                } catch (e) {
+                    log(`❌ ${label} SSE Init Error: ${e.message}`);
+                }
             }
         }
+
+        // Generate daily buttons
+        function generateDailyButtons() {
+            const container = document.getElementById('daily-simulation-container');
+            const startDate = new Date('2025-11-21');
+            const endDate = new Date('2026-01-16');
+            
+            let currentDate = startDate;
+            let index = 4; // Start index for numbering
+            
+            while (currentDate <= endDate) {
+                const dateStr = currentDate.toISOString().split('T')[0];
+                const btnDiv = document.createElement('div');
+                btnDiv.style.marginTop = '15px';
+                
+                // Use backticks correctly for template literal
+                btnDiv.innerHTML = `
+                    <button class="btn btn-primary" onclick="executeAction('daily_${dateStr}')" style="width: 100%; background-color: #8e44ad;">
+                        <span class="btn-icon">📅</span> ${index}. 模拟: ${dateStr}
+                    </button>
+                `;
+                
+                container.appendChild(btnDiv);
+                
+                // Next day
+                currentDate.setDate(currentDate.getDate() + 1);
+                index++;
+            }
+        }
+        
+        // Initialize
+        generateDailyButtons();
     </script>
 </body>
 </html>

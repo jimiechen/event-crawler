@@ -31,6 +31,23 @@ async def simulation_step2(db: AsyncSession = Depends(get_db_session)):
         media_type="text/event-stream"
     )
 
+@router.get("/simulation/run/{date_str}")
+async def run_daily_simulation(date_str: str, db: AsyncSession = Depends(get_db_session)):
+    """
+    Run daily simulation for a specific date (SSE Stream)
+    """
+    from datetime import datetime
+    try:
+        target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return {"error": "Invalid date format. Use YYYY-MM-DD"}
+        
+    service = SimulationService(db)
+    return StreamingResponse(
+        service.run_daily_simulation_stream(target_date),
+        media_type="text/event-stream"
+    )
+
 @router.post("/simulation/step2")
 async def simulation_step2_post(db: AsyncSession = Depends(get_db_session)):
     """

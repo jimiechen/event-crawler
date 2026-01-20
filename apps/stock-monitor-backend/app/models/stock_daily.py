@@ -82,6 +82,7 @@ class StockScoreResult(BaseModel):
         UniqueConstraint("code", "trade_date", name="uk_stock_score_code_date"),
         Index("idx_stock_score_date", "trade_date"),
         Index("idx_stock_score_total", "total_score"),
+        Index("idx_stock_score_date_code", "trade_date", "code"), # Optimization for aggregation
         {"comment": "股票评分结果表"}
     )
 

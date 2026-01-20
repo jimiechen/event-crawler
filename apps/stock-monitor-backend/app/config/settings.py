@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     port: int = Field(default=8000, description="服务器端口")
     workers: int = Field(default=5, description="工作进程数")
     
+    #基础分，问财首次上榜获取250天基础分
+    volumes_num: int = Field(default=250, description="基础分计算所需的天数")
+    
     # Database Configuration
     database_url: str = Field(
         default="mysql+aiomysql://root:12345678@192.168.1.6:3306/stock_monitor_new",
