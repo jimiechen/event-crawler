@@ -81,7 +81,7 @@ class TagRepository(BaseRepository[StockTagInfo]):
         total = total_result.scalar_one()
         
         # Query stocks
-        stmt = select(distinct(WencaiStock.stock_code), WencaiStock.stock_name).join(
+        stmt = select(distinct(WencaiStock.stock_code), WencaiStock.stock_name, StockInfo.volume_anomaly_score).join(
             StockTagRelation, WencaiStock.stock_code == StockTagRelation.stock_code
         ).outerjoin(
             StockInfo, WencaiStock.stock_code == StockInfo.code
@@ -95,7 +95,7 @@ class TagRepository(BaseRepository[StockTagInfo]):
         result = await self.session.execute(stmt)
         rows = result.all()
         
-        stocks = [{"code": row[0], "name": row[1]} for row in rows]
+        stocks = [{"code": row[0], "name": row[1], "score": row[2] if row[2] is not None else 0} for row in rows]
         return stocks, total
 
     async def get_stocks_for_tags(self, tag_ids: List[int]) -> Dict[int, List[dict]]:
@@ -106,7 +106,7 @@ class TagRepository(BaseRepository[StockTagInfo]):
         from app.models.stock import StockInfo, WencaiStock
         from sqlalchemy import or_, distinct
         
-        stmt = select(StockTagRelation.tag_id, WencaiStock.stock_code, WencaiStock.stock_name).join(
+        stmt = select(StockTagRelation.tag_id, WencaiStock.stock_code, WencaiStock.stock_name, StockInfo.volume_anomaly_score).join(
             WencaiStock, StockTagRelation.stock_code == WencaiStock.stock_code
         ).outerjoin(
             StockInfo, StockTagRelation.stock_code == StockInfo.code
@@ -114,7 +114,7 @@ class TagRepository(BaseRepository[StockTagInfo]):
             and_(
                 StockTagRelation.tag_id.in_(tag_ids)
             )
-        ).group_by(StockTagRelation.tag_id, WencaiStock.stock_code, WencaiStock.stock_name)
+        ).group_by(StockTagRelation.tag_id, WencaiStock.stock_code, WencaiStock.stock_name, StockInfo.volume_anomaly_score)
         
         result = await self.session.execute(stmt)
         rows = result.all()
@@ -122,9 +122,9 @@ class TagRepository(BaseRepository[StockTagInfo]):
         # Group by tag_id
         result_map = {tag_id: [] for tag_id in tag_ids}
         for row in rows:
-            tag_id, code, name = row
+            tag_id, code, name, score = row
             if tag_id in result_map:
-                result_map[tag_id].append({"code": code, "name": name})
+                result_map[tag_id].append({"code": code, "name": name, "score": score if score is not None else 0})
                 
         return result_map
 

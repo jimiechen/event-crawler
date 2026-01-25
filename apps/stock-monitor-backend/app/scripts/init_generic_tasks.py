@@ -53,6 +53,16 @@ async def init_tasks():
                 "cron_expression": "0 17 * * 1-5",  # 周一至周五 17:00
                 "description": "每日收盘后进行一次全量复盘抓取",
                 "priority": 7
+            },
+            {
+                "name": "每日全流程仿真",
+                "task_category": "simulation",
+                "api_method": "GET",
+                "api_endpoint": "/api/v1/simulation/run/today",
+                "request_params": {},
+                "cron_expression": "30 17 * * 1-5",  # 周一至周五 17:30
+                "description": "每日盘后执行全流程仿真 (问财抓取 -> 优选 -> 评分 -> 异动分析)",
+                "priority": 6
             }
         ]
         

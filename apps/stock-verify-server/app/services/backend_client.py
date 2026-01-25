@@ -117,6 +117,21 @@ class BackendClient:
                 raise e
 
     @classmethod
+    async def stream_simulation(cls, date_str: str):
+        """
+        调用后端API流式获取仿真日志
+        GET /api/v1/simulation/run/{date}
+        """
+        url = f"{cls.BASE_URL}/simulation/run/{date_str}"
+        logger.info(f"Streaming simulation from {url}")
+        
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream("GET", url) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    yield line + "\n"
+
+    @classmethod
     async def validate_data_counts(cls, codes: list, min_count: int = 250):
         """
         调用后端API验证数据数量

@@ -225,111 +225,24 @@ class SimulationService:
 
     async def run_daily_simulation_stream(self, target_date: date):
         """
-        Generic Daily Simulation: Crawl -> Iterate Stocks -> Unified Init -> Validation
+        Generic Daily Simulation: Proxy to Stock Monitor Backend
         """
         import json
-        import asyncio
+        from datetime import datetime
         
-        def sse_msg(msg_type, content, data=None):
-            payload = {"type": msg_type, "message": content, "data": data, "timestamp": datetime.now().isoformat()}
-            return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-
         try:
-            yield sse_msg("info", f"开始执行每日模拟: {target_date}")
+            # Format date as string
+            date_str = target_date.strftime("%Y-%m-%d")
             
-            # 1. Wencai Crawler
-            logger.info(f"Calling Wencai Crawler for {target_date}")
-            yield sse_msg("step", "正在调用问财爬虫...", {"target_date": str(target_date)})
-            
-            crawler_res = await BackendClient.call_wencai_crawler(target_date.strftime("%Y-%m-%d"))
-            
-            if not crawler_res.get('success'):
-                error_msg = f"Wencai Crawler failed: {crawler_res.get('message')}"
-                yield sse_msg("error", error_msg)
-                raise Exception(error_msg)
-            
-            yield sse_msg("step", f"爬虫执行完成: {crawler_res.get('message')}", crawler_res)
-            
-            # 2. Get Cumulative Top 3 Stocks from ALL batches
-            # User Request: Calculate for ALL stocks that ever appeared in Top 3 (Cumulative)
-            yield sse_msg("step", "正在获取累计优选股票池 (历史每批次前3名)...")
-            
-            # Use Python to filter Top 3 per batch to support all DB types easily
-            # We select all stocks, ordered by batch and id, then pick top 3 for each batch
-            stmt = text("SELECT stock_code, crawl_batch_id FROM wencai_stocks ORDER BY crawl_batch_id, id ASC")
-            result = await self.session.execute(stmt)
-            rows = result.all()
-            
-            batch_counts = {}
-            cumulative_codes = set()
-            
-            for row in rows:
-                code = row[0]
-                b_id = row[1]
+            # Proxy the stream from backend
+            async for line in BackendClient.stream_simulation(date_str):
+                yield line
                 
-                # If batch_id is None, treat as a special batch or ignore? 
-                # Let's treat None as a batch for safety.
-                if b_id not in batch_counts:
-                    batch_counts[b_id] = 0
-                
-                if batch_counts[b_id] < 3:
-                    cumulative_codes.add(code)
-                    batch_counts[b_id] += 1
-            
-            codes = list(cumulative_codes)
-            
-            if codes:
-                yield sse_msg("info", f"获取到 {len(codes)} 只累计优选股票 (每批次前3)，开始统一计算日期 {target_date}...")
-                
-                success_count = 0
-                for i, code in enumerate(codes):
-                    progress = f"[{i+1}/{len(codes)}]"
-                    yield sse_msg("step", f"{progress} 处理股票 {code}...")
-                    
-                    # Call Unified Function
-                    async for log in self._initialize_stock_environment(code, target_date, sse_msg):
-                        yield log
-                    
-                    success_count += 1
-                    # Small delay to yield to event loop and not choke the DB
-                    await asyncio.sleep(0.1)
-                    
-                yield sse_msg("success", f"所有股票处理完成 ({success_count}/{len(codes)})")
-
-                # 3. Validation (Poll until success or timeout)
-                yield sse_msg("step", "正在验证数据完整性 (检查250天数据量)...")
-                max_retries = 30
-                retry_interval = 2
-                validated = False
-                
-                for i in range(max_retries):
-                    yield sse_msg("step", f"验证尝试 {i+1}/{max_retries}...")
-                    try:
-                        val_res = await BackendClient.validate_data_counts(codes, min_count=250)
-                        if val_res.get("status") == "success":
-                            yield sse_msg("success", "所有股票数据完整性验证通过 (>=250天)")
-                            validated = True
-                            break
-                        else:
-                            failures = val_res.get("failures", [])
-                            fail_count = len(failures)
-                            sample = failures[:3]
-                            msg = f"验证未通过: {fail_count} 只股票数据不足 (示例: {sample})"
-                            yield sse_msg("info", msg)
-                    except Exception as e:
-                        yield sse_msg("warning", f"验证请求异常: {str(e)}")
-                    
-                    await asyncio.sleep(retry_interval)
-                
-                if not validated:
-                    yield sse_msg("warning", "数据完整性验证超时，部分股票可能数据不足")
-
-            else:
-                yield sse_msg("warning", "未能获取到任何历史问财股票，跳过处理")
-            
-            yield sse_msg("success", "每日模拟执行完成！")
-            
         except Exception as e:
-            logger.error(f"Daily simulation failed for {target_date}: {e}")
-            yield sse_msg("error", f"执行失败: {str(e)}")
-            return
+            logger.error(f"Daily simulation proxy failed for {target_date}: {e}")
+            payload = {
+                "type": "error", 
+                "message": f"Proxy Error: {str(e)}", 
+                "timestamp": datetime.now().isoformat()
+            }
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
