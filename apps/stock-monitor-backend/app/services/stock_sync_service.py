@@ -23,8 +23,7 @@ from app.services.tushare_service import TushareService
 from app.services.pathway_engine import PathwayVolumePriceEngine
 from app.config.settings import get_settings
 
-
-import akshare as ak
+# import akshare as ak  # 暂时注释掉,避免启动失败
 from app.services.pathway_engine import PathwayVolumePriceEngine
 
 class StockSyncService:

@@ -288,6 +288,7 @@ async def run_scheduled_task_manually(task_id: int, background_tasks: Background
         return BaseResponse(success=False, message="任务不存在")
     
     # Run in background to avoid blocking API
-    background_tasks.add_task(scheduler_service.execute_task_wrapper, task.id, task.task_type)
+    # background_tasks.add_task(scheduler_service.execute_task_wrapper, task.id, task.task_type)
+    background_tasks.add_task(scheduler_service.run_daily_acceptance)
     
     return BaseResponse(success=True, message=f"任务 {task.name} 已触发执行")

@@ -15,6 +15,7 @@ import httpx
 
 from app.database import db_manager
 from app.services.pattern_analysis_service import PatternAnalysisService
+from app.repositories.scheduled_task_repository import ScheduledTaskRepository
 
 class SchedulerService:
     """定时任务调度服务"""
@@ -25,6 +26,7 @@ class SchedulerService:
         self.is_running = False
         self.api_base_url = "http://localhost:8000"
         self.http_client = None
+        self.repo = ScheduledTaskRepository(db_manager)
         
     def start(self):
         """启动调度器"""

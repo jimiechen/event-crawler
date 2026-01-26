@@ -2,7 +2,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, date
 import pandas as pd
-import akshare as ak
+# import akshare as ak  # 暂时注释掉,避免启动失败
 from sqlalchemy import select, delete, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.mysql import insert
