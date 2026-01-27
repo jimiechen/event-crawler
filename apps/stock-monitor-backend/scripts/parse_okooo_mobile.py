@@ -3,7 +3,7 @@ import json
 import re
 import logging
 from typing import Dict, List, Any, Optional
-from collections import defaultdict
+from datetime import datetime
 from bs4 import BeautifulSoup
 from glob import glob
 
@@ -31,305 +31,239 @@ class OkoooParser:
         self.output_dir = output_dir
         ensure_dir(self.output_dir)
 
-    def parse_match_info(self, soup):
-        info = {}
-        # Basic parsing from title or meta if available
-        if soup.title:
-            title = soup.title.string
-            league_match = re.search(r'【(.*?)】', title)
-            if league_match:
-                info['league'] = league_match.group(1)
-        
-        # Parse match nav content for teams and ranks
-        nav = soup.find('div', class_='match-nav-content')
-        if nav:
-            # Home
-            home_div = nav.find('div')
-            if home_div:
-                home_a = home_div.find('a')
-                if home_a: info['home_team'] = home_a.get_text(strip=True)
-                home_span = home_div.find('span', class_='num')
-                if home_span: info['home_rank'] = home_span.get_text(strip=True).strip('[]')
-            
-            # Away
-            away_div = nav.find_all('div')[-1]
-            if away_div:
-                away_a = away_div.find('a')
-                if away_a: info['away_team'] = away_a.get_text(strip=True)
-                away_span = away_div.find('span', class_='num')
-                if away_span: info['away_rank'] = away_span.get_text(strip=True).strip('[]')
-            
-            # Score/Time
-            date_div = nav.find('div', class_='date')
-            if date_div:
-                info['score_text'] = date_div.get_text(strip=True)
-
-        return info
-
-    def parse_history(self, soup) -> Dict[str, Any]:
-        """
-        Parse history page to extract match history and future matches.
-        """
-        history_data = {
-            'home_history': [],
-            'away_history': [],
-            'future_matches': {'home': [], 'away': []},
-            'head_to_head': []
+    def parse_history(self, html_content: str) -> Dict[str, Any]:
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = {
+            "match_info": {},
+            "home_history": [],
+            "away_history": [],
+            "head_to_head": [],
+            "future_matches": {"home": [], "away": []}
         }
         
-        try:
-            # Identify Home/Away Teams
-            match_info = self.parse_match_info(soup)
-            home_team = match_info.get('home_team', '')
-            away_team = match_info.get('away_team', '')
-
-            # Parse Match Tables
-            tables = soup.find_all('section', class_='jsMatchTableBox')
-            for section in tables:
-                section_type = section.get('type') # home or away
+        # Parse Match Header Info
+        nav_content = soup.find('div', class_='match-nav-content')
+        if nav_content:
+            try:
+                home_team_tag = nav_content.find('a', href=re.compile(r'/team/'))
+                away_team_tag = nav_content.find_all('a', href=re.compile(r'/team/'))[-1]
                 
-                rows = section.find_all('tr')
-                parsed_rows = []
-                for row in rows:
-                    if row.get('class') and 'nolink' in row.get('class'):
-                        # History Row
-                        match_date = row.find('p', class_='gray9').get_text(strip=True) if row.find('p', class_='gray9') else ''
-                        league = row.find('p', style=re.compile('width')).get_text(strip=True) if row.find('p', style=re.compile('width')) else ''
-                        
-                        score_cell = row.find('td', class_='team-score')
-                        score = score_cell.get_text(strip=True) if score_cell else ''
-                        
-                        # Determine Opponent
-                        team_l = row.find('div', class_='team-name-l')
-                        team_r = row.find('div', class_='team-name-r')
-                        
-                        l_name = team_l.find('b').get_text(strip=True) if team_l else ''
-                        r_name = team_r.find('b').get_text(strip=True) if team_r else ''
-                        
-                        entry = {
-                            'date': match_date,
-                            'league': league,
-                            'score': score,
-                            'home_team': l_name,
-                            'away_team': r_name
-                        }
-                        
-                        # Post-process opponent
-                        current_team = home_team if section_type == 'home' else away_team
-                        if current_team:
-                            if l_name == current_team:
-                                entry['opponent'] = r_name
-                            else:
-                                entry['opponent'] = l_name
-                        
-                        parsed_rows.append(entry)
+                # Extract League from Title
+                league_match = re.search(r'【(.*?)】', soup.title.string) if soup.title else None
+                league = league_match.group(1) if league_match else ""
 
-                if section_type == 'home':
-                    history_data['home_history'] = parsed_rows
-                elif section_type == 'away':
-                    history_data['away_history'] = parsed_rows
+                data["match_info"] = {
+                    "home_team": home_team_tag.get_text(strip=True) if home_team_tag else "",
+                    "away_team": away_team_tag.get_text(strip=True) if away_team_tag else "",
+                    "score_text": nav_content.find('div', class_='date').get_text(strip=True) if nav_content.find('div', class_='date') else "",
+                    "league": league
+                }
+            except Exception as e:
+                logger.warning(f"Error parsing header: {e}")
 
-            # Parse Future Matches (Usually in sections with titles like "未来赛程")
-            # Note: The provided sample might not have this section explicitly marked with a class, 
-            # so we look for "未来" in titlebox
-            title_boxes = soup.find_all('div', class_='titlebox')
-            for box in title_boxes:
-                if '未来' in box.get_text():
-                    section = box.find_parent('section')
-                    if section:
-                        rows = section.find_all('tr')
-                        future_rows = []
-                        for row in rows:
-                            cols = row.find_all('td')
-                            if len(cols) >= 3:
-                                date = cols[0].get_text(strip=True)
-                                event = cols[1].get_text(strip=True) if len(cols) > 1 else ''
-                                # Home/Away logic for future matches is tricky without explicit columns
-                                # Assuming col 2 is opponent
-                                opponent = cols[2].get_text(strip=True) if len(cols) > 2 else ''
-                                
-                                future_rows.append({
-                                    'date': date,
-                                    'event': event,
-                                    'opponent': opponent
-                                })
-                        
-                        if home_team and home_team in box.get_text():
-                             history_data['future_matches']['home'] = future_rows
-                        elif away_team and away_team in box.get_text():
-                             history_data['future_matches']['away'] = future_rows
-
-        except Exception as e:
-            logger.error(f"Error parsing history: {str(e)}")
+        # Helper to parse table rows
+        def parse_table(section_type: str) -> List[Dict[str, Any]]:
+            rows_data = []
+            section = soup.find('section', attrs={'type': section_type})
+            if not section:
+                return rows_data
             
-        return history_data
-
-    def parse_form(self, soup):
-        """
-        Parse form (lineups and injuries).
-        """
-        form_data = {
-            'lineups': {'home': [], 'away': []},
-            'injuries': {'home': [], 'away': []},
-        }
-        
-        try:
-            # Parse Lineups (.shoufa)
-            shoufa_div = soup.find('div', class_='shoufa')
-            if shoufa_div:
-                # Iterate items
-                items = shoufa_div.find_all('div', class_='item')
-                for item in items:
-                    if 'itemtitle' in item.get('class', []): continue
+            # Identify "Subject Team" (Home or Away) for comparison
+            # section_type "home" means Home Team's history, so Subject is Home Team.
+            # section_type "away" means Away Team's history, so Subject is Away Team.
+            subject_team_name = data["match_info"].get("home_team") if section_type == "home" else data["match_info"].get("away_team")
+            
+            rows = section.select('table.matchtable tr')
+            for row in rows:
+                try:
+                    # Skip if not a data row (some might be headers or hidden)
+                    if not row.get('data-matchid'):
+                        continue
+                        
+                    cells = row.find_all('td')
+                    if len(cells) < 5:
+                        continue
+                        
+                    # Date & League
+                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
+                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
                     
-                    # Parse Left (Home)
-                    list_l = item.find('div', class_='list-l')
-                    if list_l:
-                        name_div = list_l.find('div', class_='name')
-                        if name_div:
-                            name = name_div.find('a').get_text(strip=True) if name_div.find('a') else name_div.get_text(strip=True)
-                            num = list_l.find('div', class_='num').get_text(strip=True) if list_l.find('div', class_='num') else ''
-                            form_data['lineups']['home'].append({'name': name, 'number': num})
+                    # Score
+                    score_tag = row.find('a', href=re.compile(r'history\.php'))
+                    score = score_tag.get_text(strip=True) if score_tag else ""
+                    
+                    # Result (Win/Draw/Loss)
+                    result = cells[4].get_text(strip=True)
 
-                    # Parse Right (Away)
-                    list_r = item.find('div', class_='list-r')
-                    if list_r:
-                        name_div = list_r.find('div', class_='name')
-                        if name_div:
-                            name = name_div.find('a').get_text(strip=True) if name_div.find('a') else name_div.get_text(strip=True)
-                            num = list_r.find('div', class_='num').get_text(strip=True) if list_r.find('div', class_='num') else ''
-                            form_data['lineups']['away'].append({'name': name, 'number': num})
+                    # Opponent & Rank
+                    # Left Team
+                    left_team_div = cells[1].find('div', class_='team-name-l')
+                    left_team_name = left_team_div.find('b').get_text(strip=True)
+                    left_team_rank_tag = left_team_div.find_all('i')[-1] if left_team_div.find_all('i') else None
+                    left_team_rank = left_team_rank_tag.get_text(strip=True) if left_team_rank_tag else ""
 
-            # Parse Injuries (.shangting)
-            shangting_div = soup.find('div', class_='shangting')
-            if shangting_div:
-                # Check for "No Data"
-                if shangting_div.find(class_='match-data-no'):
-                    form_data['injuries_note'] = "No Data"
-                else:
-                    # Implement logic if data exists (similar structure to lineups usually)
+                    # Right Team
+                    right_team_div = cells[3].find('div', class_='team-name-r')
+                    right_team_name = right_team_div.find('b').get_text(strip=True)
+                    right_team_rank_tag = right_team_div.find_all('i')[0] if right_team_div.find_all('i') else None
+                    right_team_rank = right_team_rank_tag.get_text(strip=True) if right_team_rank_tag else ""
+
+                    if left_team_name == subject_team_name:
+                        opponent = right_team_name
+                        opponent_rank = right_team_rank
+                    else:
+                        opponent = left_team_name
+                        opponent_rank = left_team_rank
+                    
+                    rows_data.append({
+                        "match_id": row.get('data-matchid'),
+                        "league": league,
+                        "date": date_str,
+                        "score": score,
+                        "result": result,
+                        "opponent": opponent,
+                        "opponent_rank": opponent_rank
+                    })
+                except Exception as e:
+                    logger.warning(f"Error parsing row in {section_type}: {e}")
+            return rows_data
+
+        # Helper for Future Matches
+        def parse_future_table(keyword: str) -> List[Dict[str, Any]]:
+            rows_data = []
+            sections = soup.find_all('section', class_='matchtabbox')
+            target_section = None
+            for sec in sections:
+                title_div = sec.find('div', class_='titlebox')
+                if title_div:
+                    span = title_div.find('span')
+                    if span and keyword in span.get_text():
+                        target_section = sec
+                        break
+            
+            if not target_section:
+                return rows_data
+                
+            rows = target_section.select('table.matchtable tr')
+            for row in rows:
+                try:
+                    if not row.get('data-matchid'): continue
+                    cells = row.find_all('td')
+                    if len(cells) < 5: continue
+                    
+                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
+                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
+                    
+                    left_team = cells[1].get_text(strip=True)
+                    right_team = cells[3].get_text(strip=True)
+                    interval = cells[4].get_text(strip=True)
+                    
+                    rows_data.append({
+                        "league": league,
+                        "date": date_str,
+                        "home_team": left_team,
+                        "away_team": right_team,
+                        "interval": interval
+                    })
+                except Exception:
                     pass
+            return rows_data
 
-        except Exception as e:
-            logger.error(f"Error parsing form: {str(e)}")
-            
-        return form_data
-
-    def parse_game(self, soup):
-        """
-        Parse game (standings/points).
-        """
-        game_data = {
-            'recent_6_match_points': []
-        }
+        data["home_history"] = parse_table("home")
+        data["away_history"] = parse_table("away")
+        data["head_to_head"] = parse_table("vs")
         
-        try:
-            # Look for table inside .sai-table
-            tables = soup.find_all('table', class_='table')
-            for table in tables:
-                headers = [th.get_text(strip=True) for th in table.find_all('th')]
-                if '排名' in headers and '积分' in headers:
-                    rows = table.find_all('tr')[1:] # Skip header
-                    for row in rows:
-                        cols = row.find_all('td')
-                        if len(cols) >= 9:
-                            game_data['recent_6_match_points'].append({
-                                'rank': cols[0].get_text(strip=True),
-                                'team': cols[1].get_text(strip=True),
-                                'matches': cols[2].get_text(strip=True),
-                                'won': cols[3].get_text(strip=True),
-                                'draw': cols[4].get_text(strip=True),
-                                'lost': cols[5].get_text(strip=True),
-                                'goals': cols[6].get_text(strip=True),
-                                'miss': cols[7].get_text(strip=True),
-                                'points': cols[8].get_text(strip=True)
-                            })
-        except Exception as e:
-            logger.error(f"Error parsing game: {str(e)}")
-            
-        return game_data
+        # Future matches
+        # The text is usually "HomeTeamName未来三场比赛"
+        # We can search for "未来三场" and check if it's home or away based on team name
+        # Strategy: Find all sections with "未来三场", assign first to Home, second to Away (standard Okooo layout)
+        
+        future_sections = []
+        sections = soup.find_all('section', class_='matchtabbox')
+        for sec in sections:
+            title_div = sec.find('div', class_='titlebox')
+            if title_div:
+                span = title_div.find('span')
+                if span and "未来三场" in span.get_text():
+                    future_sections.append(sec)
+        
+        if len(future_sections) >= 1:
+            # Home (First section)
+            rows = future_sections[0].select('table.matchtable tr')
+            for row in rows:
+                try:
+                    if not row.get('data-matchid'): continue
+                    cells = row.find_all('td')
+                    if len(cells) < 5: continue
+                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
+                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
+                    left_team = cells[1].get_text(strip=True)
+                    right_team = cells[3].get_text(strip=True)
+                    interval = cells[4].get_text(strip=True)
+                    data["future_matches"]["home"].append({
+                        "league": league,
+                        "date": date_str,
+                        "home_team": left_team,
+                        "away_team": right_team,
+                        "interval": interval
+                    })
+                except: pass
+                
+        if len(future_sections) >= 2:
+            # Away (Second section)
+            rows = future_sections[1].select('table.matchtable tr')
+            for row in rows:
+                try:
+                    if not row.get('data-matchid'): continue
+                    cells = row.find_all('td')
+                    if len(cells) < 5: continue
+                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
+                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
+                    left_team = cells[1].get_text(strip=True)
+                    right_team = cells[3].get_text(strip=True)
+                    interval = cells[4].get_text(strip=True)
+                    data["future_matches"]["away"].append({
+                        "league": league,
+                        "date": date_str,
+                        "home_team": left_team,
+                        "away_team": right_team,
+                        "interval": interval
+                    })
+                except: pass
 
-    def parse_exchanges(self, soup):
-        """
-        Parse exchanges data.
-        """
-        exchange_data = {'five_factors': {}}
-        try:
-            exchange_box = soup.find_all('div', class_='exchange-box')
-            for box in exchange_box:
-                title = box.find('div', class_='exchange-title')
-                if title and '五要素' in title.get_text():
-                    table = box.find('table', class_='exchange-table')
-                    if table:
-                        rows = table.find_all('tr')
-                        for row in rows:
-                            cols = row.find_all('td')
-                            if len(cols) >= 4 and '交锋' in cols[0].get_text():
-                                exchange_data['five_factors']['head_to_head'] = {
-                                    'home_win_prob': cols[1].get_text(strip=True),
-                                    'draw_prob': cols[2].get_text(strip=True),
-                                    'away_win_prob': cols[3].get_text(strip=True)
-                                }
-        except Exception as e:
-            logger.error(f"Error parsing exchanges: {str(e)}")
-        return exchange_data
+        return data
 
-    def parse_odds_change(self, soup):
-        """
-        Parse odds change history.
-        """
-        odds_changes = []
-        try:
-            change_table = soup.find('table', class_='changeTable')
-            if change_table:
-                rows = change_table.find_all('tr')
-                for row in rows:
-                    time_td = row.find('td', class_='timetd')
-                    if time_td:
-                        time_val = time_td.get('time')
-                        odds_td = row.find('td')
-                        odds_spans = odds_td.find_all('span')
-                        if len(odds_spans) >= 3:
-                            odds_changes.append({
-                                'time': time_val,
-                                'home_win': odds_spans[0].get_text(strip=True),
-                                'draw': odds_spans[1].get_text(strip=True),
-                                'away_win': odds_spans[2].get_text(strip=True)
-                            })
-        except Exception as e:
-            logger.error(f"Error parsing odds change: {str(e)}")
-        return odds_changes
-
-    def parse_handicap(self, soup) -> List[Dict[str, Any]]:
+    def parse_handicap(self, html_content: str) -> List[Dict[str, Any]]:
+        soup = BeautifulSoup(html_content, 'lxml')
         data = []
-        table = soup.find('section', id='pankou')
-        if not table: return data
         
+        table = soup.find('section', id='pankou')
+        if not table:
+            return data
+            
         rows = table.select('table.matchtable tbody tr')
         for row in rows:
             try:
                 cells = row.find_all('td')
-                if len(cells) < 4: continue
+                if len(cells) < 4:
+                    continue
                 
                 company = cells[0].get_text(strip=True).replace('定制', '').replace('取消排序', '')
                 
-                # Helper to safely get text
-                def get_text(elem, attr_type):
-                    found = elem.find(['span', 'em'], attrs={'type': attr_type})
-                    return found.get_text(strip=True) if found else ""
-
+                # Initial Odds
                 init_cell = cells[1]
                 init_odds = {
-                    "home": get_text(init_cell, 'zhu'),
-                    "pan": get_text(init_cell, 'chu'),
-                    "away": get_text(init_cell, 'ke')
+                    "home": init_cell.find('span', attrs={'type': 'zhu'}).get_text(strip=True) if init_cell.find('span', attrs={'type': 'zhu'}) else "",
+                    "pan": init_cell.find('em', attrs={'type': 'chu'}).get_text(strip=True) if init_cell.find('em', attrs={'type': 'chu'}) else "",
+                    "away": init_cell.find('span', attrs={'type': 'ke'}).get_text(strip=True) if init_cell.find('span', attrs={'type': 'ke'}) else ""
                 }
                 
+                # Latest Odds
                 curr_cell = cells[2]
                 curr_odds = {
-                    "home": get_text(curr_cell, 'xinzhu'),
-                    "pan": get_text(curr_cell, 'xin'),
-                    "away": get_text(curr_cell, 'xinke')
+                    "home": curr_cell.find('span', attrs={'type': 'xinzhu'}).get_text(strip=True) if curr_cell.find('span', attrs={'type': 'xinzhu'}) else "",
+                    "pan": curr_cell.find('em', attrs={'type': 'xin'}).get_text(strip=True) if curr_cell.find('em', attrs={'type': 'xin'}) else "",
+                    "away": curr_cell.find('span', attrs={'type': 'xinke'}).get_text(strip=True) if curr_cell.find('span', attrs={'type': 'xinke'}) else ""
                 }
                 
                 data.append({
@@ -339,95 +273,473 @@ class OkoooParser:
                 })
             except Exception as e:
                 logger.warning(f"Error parsing handicap row: {e}")
+                
+        return data
+
+    def parse_odds(self, html_content: str) -> List[Dict[str, Any]]:
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = []
+        
+        table = soup.find('section', id='Odds')
+        if not table:
+            return data
+            
+        rows = table.select('table.matchtable tbody tr')
+        for row in rows:
+            try:
+                cells = row.find_all('td')
+                if len(cells) < 4:
+                    continue
+                    
+                company = cells[0].get_text(strip=True)
+                
+                # Initial Odds
+                init_cell = cells[1]
+                init_odds = {
+                    "win": init_cell.find('span', attrs={'type': 'sheng'}).get_text(strip=True) if init_cell.find('span', attrs={'type': 'sheng'}) else "",
+                    "draw": init_cell.find('span', attrs={'type': 'ping'}).get_text(strip=True) if init_cell.find('span', attrs={'type': 'ping'}) else "",
+                    "loss": init_cell.find('span', attrs={'type': 'fu'}).get_text(strip=True) if init_cell.find('span', attrs={'type': 'fu'}) else ""
+                }
+                
+                # Latest Odds
+                curr_cell = cells[2]
+                curr_odds = {
+                    "win": curr_cell.find('span', attrs={'type': 'xinsheng'}).get_text(strip=True) if curr_cell.find('span', attrs={'type': 'xinsheng'}) else "",
+                    "draw": curr_cell.find('span', attrs={'type': 'xinping'}).get_text(strip=True) if curr_cell.find('span', attrs={'type': 'xinping'}) else "",
+                    "loss": curr_cell.find('span', attrs={'type': 'xinfu'}).get_text(strip=True) if curr_cell.find('span', attrs={'type': 'xinfu'}) else ""
+                }
+                
+                data.append({
+                    "company": company,
+                    "initial": init_odds,
+                    "latest": curr_odds
+                })
+            except Exception as e:
+                logger.warning(f"Error parsing odds row: {e}")
+                
+        return data
+
+    def parse_form(self, html_content: str) -> Dict[str, Any]:
+        """
+        Parse form (lineup/technical/strength) data.
+        """
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = {
+            "overview": {},
+            "technical_comparison": [],
+            "strength_comparison": [],
+            "lineup_comparison": [],
+            "expected_injuries": {"home": [], "away": []}
+        }
+        
+        try:
+            # 1. Overview (Gailai)
+            gailai = soup.find('div', class_='gailai')
+            if gailai:
+                lists = gailai.find_all('div', class_='list')
+                if len(lists) >= 3:
+                    # Value
+                    val_p = lists[0].find_all('p')
+                    if len(val_p) >= 2:
+                        home_val = val_p[0].get_text(strip=True)
+                        away_val = val_p[1].get_text(strip=True)
+                        data["overview"]["total_value"] = f"home: {home_val}, away: {away_val}"
+                    
+                    # Injury
+                    inj_p = lists[1].find_all('p')
+                    if len(inj_p) >= 2:
+                        home_inj = inj_p[0].get_text(strip=True)
+                        away_inj = inj_p[1].get_text(strip=True)
+                        data["overview"]["injury_value"] = f"home: {home_inj}, away: {away_inj}"
+
+                    # Age
+                    age_p = lists[2].find_all('p')
+                    if len(age_p) >= 2:
+                        home_age = age_p[0].get_text(strip=True)
+                        away_age = age_p[1].get_text(strip=True)
+                        data["overview"]["average_age"] = f"home: {home_age}, away: {away_age}"
+                    
+                    # Height (if available)
+                    if len(lists) > 3:
+                        height_p = lists[3].find_all('p')
+                        if len(height_p) >= 2:
+                            home_height = height_p[0].get_text(strip=True)
+                            away_height = height_p[1].get_text(strip=True)
+                            data["overview"]["average_height"] = f"home: {home_height}, away: {away_height}"
+
+            # 2. Technical Comparison (Jishu)
+            jishu = soup.find('div', class_='jishu')
+            if jishu:
+                lists = jishu.find_all('div', class_='list')
+                # First list is header, skip it
+                for item in lists[1:]:
+                    ps = item.find_all('p')
+                    span = item.find('span')
+                    if len(ps) >= 4 and span:
+                        label = span.get_text(strip=True)
+                        home_all = ps[0].get_text(strip=True)
+                        home_home = ps[1].get_text(strip=True)
+                        away_away = ps[2].get_text(strip=True)
+                        away_all = ps[3].get_text(strip=True)
+                        data["technical_comparison"].append({
+                            "label": label,
+                            "home_all": home_all,
+                            "home_home": home_home,
+                            "away_away": away_away,
+                            "away_all": away_all
+                        })
+
+            # 3. Strength Comparison (Shili)
+            shili = soup.find('div', class_='shili')
+            if shili:
+                lists = shili.find_all('div', class_='list')
+                # Skip header
+                for item in lists[1:]:
+                    center = item.find('div', class_='center')
+                    if not center: continue
+                    position = center.get_text(strip=True)
+                    
+                    price_l = item.find('div', class_='price-l')
+                    price_r = item.find('div', class_='price-r')
+                    xq_l = item.find('div', class_='xq-l')
+                    xq_r = item.find('div', class_='xq-r')
+                    
+                    data["strength_comparison"].append({
+                        "position": position,
+                        "home_price": price_l.get_text(strip=True) if price_l else "",
+                        "away_price": price_r.get_text(strip=True) if price_r else "",
+                        "home_avg": xq_l.get_text(strip=True) if xq_l else "",
+                        "away_avg": xq_r.get_text(strip=True) if xq_r else ""
+                    })
+
+            # 4. Starting Lineup Comparison (Shoufa)
+            shoufa = soup.find('div', class_='shoufa')
+            if shoufa:
+                items = shoufa.find_all('div', class_='item')
+                # Skip header (class itemtitle)
+                for item in items:
+                    if 'itemtitle' in item.get('class', []):
+                        continue
+                    
+                    # Left (Home)
+                    list_l = item.find('div', class_='list-l')
+                    home_player = {}
+                    if list_l:
+                        name_div = list_l.find('div', class_='name')
+                        if name_div:
+                            # Extract name, price, id
+                            a_tag = name_div.find('a')
+                            i_tag = name_div.find('i')
+                            if a_tag:
+                                home_player['name'] = a_tag.get_text(strip=True)
+                                home_player['id'] = a_tag.get('href', '').split('/')[-2] if a_tag.get('href') else ""
+                            
+                            if i_tag:
+                                home_player['price'] = i_tag.get_text(strip=True)
+                            
+                            # Position is text between a tag (inside em) and i tag?
+                            # Structure: <em><a>Name</a></em>Position<i>Price</i>
+                            # Use get_text and remove name/price to find position?
+                            full_text = name_div.get_text(strip=True)
+                            name_text = home_player.get('name', '')
+                            price_text = home_player.get('price', '')
+                            # Simple clean up
+                            position_text = full_text.replace(name_text, '').replace(price_text, '').strip()
+                            home_player['position'] = position_text
+
+                        num_div = list_l.find('div', class_='num')
+                        if num_div:
+                            home_player['number'] = num_div.get_text(strip=True)
+                        
+                        zg_div = list_l.find('div', class_='zg')
+                        if zg_div:
+                            home_player['assists'] = zg_div.get_text(strip=True)
+
+                        jq_div = list_l.find('div', class_='jq')
+                        if jq_div:
+                            home_player['goals'] = jq_div.get_text(strip=True)
+
+                    # Right (Away)
+                    list_r = item.find('div', class_='list-r')
+                    away_player = {}
+                    if list_r:
+                        name_div = list_r.find('div', class_='name')
+                        if name_div:
+                            a_tag = name_div.find('a')
+                            i_tag = name_div.find('i')
+                            if a_tag:
+                                away_player['name'] = a_tag.get_text(strip=True)
+                                away_player['id'] = a_tag.get('href', '').split('/')[-2] if a_tag.get('href') else ""
+                            
+                            if i_tag:
+                                away_player['price'] = i_tag.get_text(strip=True)
+                            
+                            full_text = name_div.get_text(strip=True)
+                            name_text = away_player.get('name', '')
+                            price_text = away_player.get('price', '')
+                            position_text = full_text.replace(name_text, '').replace(price_text, '').strip()
+                            away_player['position'] = position_text
+
+                        num_div = list_r.find('div', class_='num')
+                        if num_div:
+                            away_player['number'] = num_div.get_text(strip=True)
+                        
+                        zg_div = list_r.find('div', class_='zg')
+                        if zg_div:
+                            away_player['assists'] = zg_div.get_text(strip=True)
+
+                        jq_div = list_r.find('div', class_='jq')
+                        if jq_div:
+                            away_player['goals'] = jq_div.get_text(strip=True)
+                    
+                    data["lineup_comparison"].append({
+                        "home": home_player,
+                        "away": away_player
+                    })
+
+            # 5. Expected Injuries (Shangting)
+            shangting_divs = soup.find_all('div', class_='shangting')
+            if len(shangting_divs) >= 2:
+                # Home
+                home_shangting = shangting_divs[0]
+                home_items = home_shangting.find_all('div', class_='item')
+                for item in home_items:
+                    if 'itemtitle' in item.get('class', []): continue
+                    # Parse item
+                    # Based on structure, it might have .name, .price, .list
+                    # But sample said "No data". I'll implement robust check.
+                    # If structure is like lineup items:
+                    # <div class="item"><div class="name">...</div>...</div>
+                    # Web reference #2:
+                    # <div class="item"><div class="name">Name</div><div class="price">Val</div>...</div>
+                    player = {}
+                    name_div = item.find('div', class_='name')
+                    if name_div: player['name'] = name_div.get_text(strip=True)
+                    price_div = item.find('div', class_='price')
+                    if price_div: player['price'] = price_div.get_text(strip=True)
+                    
+                    # Status/Record
+                    list_div = item.find('div', class_='list')
+                    if list_div:
+                        player['status'] = list_div.get_text(strip=True)
+                    
+                    if player:
+                        data["expected_injuries"]["home"].append(player)
+
+                # Away
+                away_shangting = shangting_divs[1]
+                away_items = away_shangting.find_all('div', class_='item')
+                for item in away_items:
+                    if 'itemtitle' in item.get('class', []): continue
+                    player = {}
+                    name_div = item.find('div', class_='name')
+                    if name_div: player['name'] = name_div.get_text(strip=True)
+                    price_div = item.find('div', class_='price')
+                    if price_div: player['price'] = price_div.get_text(strip=True)
+                    list_div = item.find('div', class_='list')
+                    if list_div: player['status'] = list_div.get_text(strip=True)
+                    if player:
+                        data["expected_injuries"]["away"].append(player)
+
+        except Exception as e:
+            logger.warning(f"Error parsing form data: {e}")
+        
+        return data
+
+    def parse_game(self, html_content: str, home_team: str, away_team: str) -> Dict[str, Any]:
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = {
+            "points_table": []
+        }
+        
+        try:
+            # Only extracting "Latest" (Total) points for now as 6-match is not in the DOM
+            table = soup.find('table', class_='table')
+            if table:
+                rows = table.find_all('tr')
+                for row in rows:
+                    cells = row.find_all('td')
+                    if len(cells) < 9:
+                        continue
+                    
+                    team_name = cells[1].get_text(strip=True)
+                    
+                    # Check if row belongs to home or away team
+                    # If names are not provided, we might skip filtering or return all?
+                    # User requested "only 2 teams data".
+                    if home_team and away_team:
+                        if home_team not in team_name and away_team not in team_name:
+                            continue
+                    
+                    item = {
+                        "rank": cells[0].get_text(strip=True),
+                        "team": team_name,
+                        "played": cells[2].get_text(strip=True),
+                        "won": cells[3].get_text(strip=True),
+                        "drawn": cells[4].get_text(strip=True),
+                        "lost": cells[5].get_text(strip=True),
+                        "goals_for": cells[6].get_text(strip=True),
+                        "goals_against": cells[7].get_text(strip=True),
+                        "points": cells[8].get_text(strip=True)
+                    }
+                    data["points_table"].append(item)
+        except Exception as e:
+            logger.warning(f"Error parsing game data: {e}")
+            
+        return data
+
+    def parse_exchanges(self, html_content: str) -> Dict[str, Any]:
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = {
+            "jczq_save": [],
+            "jczq_popularity": [],
+            "betfair_transaction": [],
+            "transaction_distribution": [],
+            "five_factors": []
+        }
+        
+        def parse_exchange_table(section_title_keyword, keys):
+            try:
+                # Find section by title
+                titles = soup.find_all('div', class_='exchange-title')
+                target_section = None
+                for t in titles:
+                    if section_title_keyword in t.get_text():
+                        target_section = t.find_parent('section')
+                        break
+                
+                if not target_section:
+                    return []
+                    
+                rows_data = []
+                table = target_section.find('table', class_='exchange-table')
+                if table:
+                    rows = table.find_all('tr')
+                    # Skip header
+                    for row in rows[1:]:
+                        cells = row.find_all('td')
+                        if not cells: continue
+                        
+                        item = {}
+                        # Mapping logic based on keys list
+                        # First cell is usually Row Label (Win/Draw/Loss) or Factor Name
+                        item[keys[0]] = cells[0].get_text(strip=True)
+                        
+                        for i, key in enumerate(keys[1:], 1):
+                            if i < len(cells):
+                                item[key] = cells[i].get_text(strip=True)
+                        
+                        rows_data.append(item)
+                return rows_data
+            except Exception as e:
+                logger.warning(f"Error parsing exchange table {section_title_keyword}: {e}")
+                return []
+
+        # 1. Jczq Save (竞足保存盈亏)
+        data["jczq_save"] = parse_exchange_table("竞足保存盈亏", ["result", "index", "save_amount", "profit", "hot_cold"])
+
+        # 2. Jczq Popularity (竞足人气盈亏)
+        data["jczq_popularity"] = parse_exchange_table("竞足人气盈亏", ["result", "index", "popularity", "profit"])
+
+        # 3. Betfair Transaction (必发交易盈亏)
+        data["betfair_transaction"] = parse_exchange_table("必发交易盈亏", ["result", "index", "transaction_amount", "profit", "hot_cold"])
+
+        # 4. Transaction Distribution (交易分布对比)
+        data["transaction_distribution"] = parse_exchange_table("交易分布对比", ["result", "odds_99", "betfair", "jczq_order", "jczq_pop"])
+
+        # 5. Five Factors (五要素)
+        data["five_factors"] = parse_exchange_table("五要素", ["factor", "home_win", "draw", "home_loss", "suggestion"])
+        
         return data
 
     def process_all(self):
-        """
-        Process all HTML files in the data directory.
-        """
-        logger.info("Starting batch processing...")
-        match_files = defaultdict(dict)
+        # Find all files
+        files = glob(os.path.join(self.data_dir, "*.html"))
         
-        for root, dirs, files in os.walk(self.data_dir):
-            for file in files:
-                if not file.endswith('.html'): continue
-                
-                parts = file.replace('.html', '').split('_')
-                
-                if len(parts) == 1 and parts[0].isdigit():
-                    mid = parts[0]
-                    match_files[mid]['base'] = os.path.join(root, file)
-                elif len(parts) >= 2:
-                    type_name = parts[0]
-                    mid = parts[1]
-                    if type_name == 'odds' and len(parts) == 4 and parts[1] == 'change':
-                         # odds_change_MID_PID
-                         mid = parts[2]
-                         pid = parts[3]
-                         if 'odds_change' not in match_files[mid]: match_files[mid]['odds_change'] = []
-                         match_files[mid]['odds_change'].append(os.path.join(root, file))
-                    else:
-                        match_files[mid][type_name] = os.path.join(root, file)
-
-        for mid, files in match_files.items():
-            logger.info(f"Processing Match ID: {mid}")
-            match_data = {}
+        # Group by Match ID
+        # Filename format: type_matchid_timestamp.html or type_matchid.html
+        matches = {}
+        for f in files:
+            basename = os.path.basename(f)
+            parts = basename.split('_')
+            if len(parts) < 2:
+                continue
             
-            # Base/Info
-            if 'base' in files:
-                with open(files['base'], 'r', encoding='utf-8') as f:
-                    soup = BeautifulSoup(f.read(), 'html.parser')
-                    match_data['match_info'] = self.parse_match_info(soup)
-                    match_data['handicap'] = self.parse_handicap(soup)
+            page_type = parts[0] # history, handicap, odds, form, game, exchanges
+            # handle cases where match_id might be followed by timestamp or .html
+            match_id_part = parts[1]
+            match_id = match_id_part.split('.')[0]
+            
+            if match_id not in matches:
+                matches[match_id] = {}
+            
+            # Keep the latest file if multiple exist for same type/id?
+            # Or just add to list. Assuming unique per type for now or just overwriting.
+            matches[match_id][page_type] = f
 
-            # History
-            if 'history' in files:
-                with open(files['history'], 'r', encoding='utf-8') as f:
-                    soup = BeautifulSoup(f.read(), 'html.parser')
-                    match_data.update(self.parse_history(soup))
-
-            # Form
-            if 'form' in files:
-                with open(files['form'], 'r', encoding='utf-8') as f:
-                    soup = BeautifulSoup(f.read(), 'html.parser')
-                    match_data['form'] = self.parse_form(soup)
-
-            # Game
-            if 'game' in files or 'game_recent' in files:
-                game_file = files.get('game_recent', files.get('game'))
-                if game_file:
-                    with open(game_file, 'r', encoding='utf-8') as f:
-                        soup = BeautifulSoup(f.read(), 'html.parser')
-                        match_data['game'] = self.parse_game(soup)
-
-            # Exchanges
-            if 'exchanges' in files:
-                with open(files['exchanges'], 'r', encoding='utf-8') as f:
-                    soup = BeautifulSoup(f.read(), 'html.parser')
-                    match_data['exchanges'] = self.parse_exchanges(soup)
-
-            # Odds Changes
-            if 'odds_change' in files:
-                match_data['odds_changes'] = []
-                for odds_file in files['odds_change']:
-                    with open(odds_file, 'r', encoding='utf-8') as f:
-                        soup = BeautifulSoup(f.read(), 'html.parser')
-                        filename = os.path.basename(odds_file)
-                        pid_match = re.search(r'odds_change_\d+_(\d+)\.html', filename)
-                        pid = pid_match.group(1) if pid_match else "unknown"
+        logger.info(f"Found {len(matches)} matches to process.")
+        
+        success_count = 0
+        fail_count = 0
+        
+        for match_id, files_map in matches.items():
+            try:
+                match_data = {"match_id": match_id}
+                
+                # Parse History first to get basic info (including team names)
+                if "history" in files_map:
+                    with open(files_map["history"], 'r', encoding='utf-8') as f:
+                        match_data.update(self.parse_history(f.read()))
+                
+                # Parse Handicap
+                if "handicap" in files_map:
+                    with open(files_map["handicap"], 'r', encoding='utf-8') as f:
+                        match_data["handicap"] = self.parse_handicap(f.read())
                         
-                        data = self.parse_odds_change(soup)
-                        match_data['odds_changes'].append({
-                            'company_id': pid,
-                            'changes': data
-                        })
+                # Parse Odds
+                if "odds" in files_map:
+                    with open(files_map["odds"], 'r', encoding='utf-8') as f:
+                        match_data["euro_odds"] = self.parse_odds(f.read())
+                
+                # Parse Form
+                if "form" in files_map:
+                    with open(files_map["form"], 'r', encoding='utf-8') as f:
+                        match_data["form_analysis"] = self.parse_form(f.read())
+                        
+                # Parse Game (Points)
+                # Requires home/away team names for filtering
+                if "game" in files_map:
+                    home_team = match_data.get("match_info", {}).get("home_team", "")
+                    away_team = match_data.get("match_info", {}).get("away_team", "")
+                    with open(files_map["game"], 'r', encoding='utf-8') as f:
+                        match_data["game_points"] = self.parse_game(f.read(), home_team, away_team)
 
-            # Save
-            output_file = os.path.join(self.output_dir, f"{mid}.json")
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(match_data, f, ensure_ascii=False, indent=2)
-            logger.info(f"Saved data to {output_file}")
+                # Parse Game Recent (6-match Points)
+                if "game_recent" in files_map:
+                    home_team = match_data.get("match_info", {}).get("home_team", "")
+                    away_team = match_data.get("match_info", {}).get("away_team", "")
+                    with open(files_map["game_recent"], 'r', encoding='utf-8') as f:
+                        match_data["game_points_recent"] = self.parse_game(f.read(), home_team, away_team)
+                        
+                # Parse Exchanges
+                if "exchanges" in files_map:
+                    with open(files_map["exchanges"], 'r', encoding='utf-8') as f:
+                        match_data["exchanges_data"] = self.parse_exchanges(f.read())
+                
+                # Save to JSON
+                output_file = os.path.join(self.output_dir, f"{match_id}.json")
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    json.dump(match_data, f, ensure_ascii=False, indent=2)
+                
+                success_count += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to process match {match_id}: {e}")
+                fail_count += 1
+                
+        logger.info(f"Processing complete. Success: {success_count}, Failed: {fail_count}")
+        return success_count, fail_count
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     parser = OkoooParser(DATA_DIR, OUTPUT_DIR)
     parser.process_all()

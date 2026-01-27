@@ -23,8 +23,7 @@ logger = logging.getLogger("SampleFetch")
 class SampleFetcher:
     def __init__(self):
         self.base_url = "https://m.okooo.com"
-        # Use absolute path for data directory
-        self.output_dir = "/Users/mac/StudioProjects/2026/open-citycloud-workspace/data/okooo/mobile_samples"
+        self.output_dir = os.path.join(os.getcwd(), "data", "okooo", "mobile_samples")
         os.makedirs(self.output_dir, exist_ok=True)
         
     async def create_context(self, p):
@@ -109,25 +108,32 @@ class SampleFetcher:
         finally:
             await page.close()
 
-    async def main(self):
+    async def run(self):
         async with async_playwright() as p:
             context, browser = await self.create_context(p)
             
-            # Additional sample page for odds change
-            urls = {
-                "form_1314249": "https://m.okooo.com/match/form.php?MatchID=1314249&from=%2Fjczq%2F",
-                "game_1314249": "https://m.okooo.com/match/game.php?MatchID=1314249&from=%2Fjczq%2F",
-                "exchanges_1314249": "https://m.okooo.com/match/exchanges.php?MatchID=1314249&from=%2Fjczq%2F",
-                "odds_change_1314249_82": "https://m.okooo.com/match/change.php?mid=1314249&pid=82&Type=Odds&c=6"
-            }
+            match_id = "1314249"
+            targets = [
+                {
+                    "name": f"form_{match_id}",
+                    "url": f"https://m.okooo.com/match/form.php?MatchID={match_id}&from=%2Fjczq%2F"
+                },
+                {
+                    "name": f"game_{match_id}",
+                    "url": f"https://m.okooo.com/match/game.php?MatchID={match_id}&from=%2Fjczq%2F"
+                },
+                {
+                    "name": f"exchanges_{match_id}",
+                    "url": f"https://m.okooo.com/match/exchanges.php?MatchID={match_id}&from=%2Fjczq%2F"
+                }
+            ]
             
-            for name, url in urls.items():
-                await self.fetch_url(context, url, name)
-                # Random delay between requests
-                await asyncio.sleep(random.uniform(2, 5))
-                
+            for target in targets:
+                await self.fetch_url(context, target['url'], target['name'])
+                await asyncio.sleep(2)
+            
             await browser.close()
 
 if __name__ == "__main__":
     fetcher = SampleFetcher()
-    asyncio.run(fetcher.main())
+    asyncio.run(fetcher.run())
