@@ -613,6 +613,116 @@ class OkoooParser:
         
         return data
 
+    def parse_odds_change(self, html_content: str) -> List[Dict[str, Any]]:
+        """
+        Parse odds change history (e.g. for Bifa/Betfair).
+        Structure: Win | Draw | Loss | Time
+        HTML Structure: table.changeTable -> tr -> td[0] (3 spans) | td[1] (Time)
+        """
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = []
+        try:
+            # Look for the change table
+            table = soup.find('table', class_='changeTable')
+            if not table:
+                # Fallback: sometimes it might be just matchtable? But checking html shows changeTable.
+                table = soup.find('table', class_='matchtable')
+                
+            if not table:
+                return data
+
+            rows = table.find_all('tr')
+            for row in rows:
+                cells = row.find_all('td')
+                if len(cells) < 2:
+                    continue
+
+                # First cell contains the odds values in spans
+                # <td><span>1.26</span><span class="fontblue">7.60</span><span>12.00</span></td>
+                odds_cell = cells[0]
+                odds_spans = odds_cell.find_all('span')
+                
+                # We expect at least 3 spans for Win, Draw, Loss
+                if len(odds_spans) < 3:
+                    continue
+                
+                win = odds_spans[0].get_text(strip=True)
+                draw = odds_spans[1].get_text(strip=True)
+                loss = odds_spans[2].get_text(strip=True)
+                
+                # Second cell contains time
+                # <td class="timetd jsChangeContent" time="01-27 01:28">赛前2分钟</td>
+                time_cell = cells[1]
+                time_str = time_cell.get_text(strip=True)
+
+                # Basic validation: check if odds are numeric (allowing for '.' and empty strings)
+                # Note: values can be empty or "-" sometimes
+                if not (win or draw or loss):
+                    continue
+
+                data.append({
+                    "win": win,
+                    "draw": draw,
+                    "loss": loss,
+                    "time": time_str
+                })
+        except Exception as e:
+            logger.warning(f"Error parsing odds change: {e}")
+        return data
+
+    def parse_handicap_change(self, html_content: str) -> List[Dict[str, Any]]:
+        """
+        Parse handicap change history (e.g. for Macao).
+        Structure: Home | Handicap | Away | Time
+        HTML Structure: table.changeTable -> tr -> td[0] (3 spans) | td[1] (Time)
+        """
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = []
+        try:
+            # Look for the change table
+            table = soup.find('table', class_='changeTable')
+            if not table:
+                table = soup.find('table', class_='matchtable')
+            
+            if not table:
+                return data
+
+            rows = table.find_all('tr')
+            for row in rows:
+                cells = row.find_all('td')
+                if len(cells) < 2:
+                    continue
+
+                # First cell contains the handicap values in spans
+                # <td><span class="fontblue">1.62</span><span>球半</span><span class="fontred2">2.16</span></td>
+                handicap_cell = cells[0]
+                spans = handicap_cell.find_all('span')
+                
+                if len(spans) < 3:
+                    continue
+                
+                home_water = spans[0].get_text(strip=True)
+                handicap = spans[1].get_text(strip=True)
+                away_water = spans[2].get_text(strip=True)
+                
+                # Second cell contains time
+                time_cell = cells[1]
+                time_str = time_cell.get_text(strip=True)
+
+                if not (home_water or handicap or away_water):
+                    continue
+
+                data.append({
+                    "home_water": home_water,
+                    "handicap": handicap,
+                    "away_water": away_water,
+                    "time": time_str
+                })
+        except Exception as e:
+            logger.warning(f"Error parsing handicap change: {e}")
+        return data
+
+
     def process_all(self):
         # Find all files
         files = glob(os.path.join(self.data_dir, "*.html"))
