@@ -129,22 +129,12 @@ class OkoooParser:
             return rows_data
 
         # Helper for Future Matches
-        def parse_future_table(keyword: str) -> List[Dict[str, Any]]:
+        def parse_future_section(section) -> List[Dict[str, Any]]:
             rows_data = []
-            sections = soup.find_all('section', class_='matchtabbox')
-            target_section = None
-            for sec in sections:
-                title_div = sec.find('div', class_='titlebox')
-                if title_div:
-                    span = title_div.find('span')
-                    if span and keyword in span.get_text():
-                        target_section = sec
-                        break
-            
-            if not target_section:
+            if not section:
                 return rows_data
                 
-            rows = target_section.select('table.matchtable tr')
+            rows = section.select('table.matchtable tr')
             for row in rows:
                 try:
                     if not row.get('data-matchid'): continue
@@ -174,62 +164,33 @@ class OkoooParser:
         data["head_to_head"] = parse_table("vs")
         
         # Future matches
-        # The text is usually "HomeTeamName未来三场比赛"
-        # We can search for "未来三场" and check if it's home or away based on team name
-        # Strategy: Find all sections with "未来三场", assign first to Home, second to Away (standard Okooo layout)
+        # Strategy: Find all sections with "未来三场"
         
         future_sections = []
         sections = soup.find_all('section', class_='matchtabbox')
         for sec in sections:
             title_div = sec.find('div', class_='titlebox')
             if title_div:
-                span = title_div.find('span')
-                if span and "未来三场" in span.get_text():
-                    future_sections.append(sec)
+                # Check all spans
+                spans = title_div.find_all('span')
+                found_future = False
+                for s in spans:
+                    text = s.get_text(strip=True)
+                    if "未来三场" in text:
+                        future_sections.append(sec)
+                        found_future = True
+                        break
+                
+                # If not found in spans, check the whole div text
+                if not found_future:
+                     if "未来三场" in title_div.get_text(strip=True):
+                          future_sections.append(sec)
         
         if len(future_sections) >= 1:
-            # Home (First section)
-            rows = future_sections[0].select('table.matchtable tr')
-            for row in rows:
-                try:
-                    if not row.get('data-matchid'): continue
-                    cells = row.find_all('td')
-                    if len(cells) < 5: continue
-                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
-                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
-                    left_team = cells[1].get_text(strip=True)
-                    right_team = cells[3].get_text(strip=True)
-                    interval = cells[4].get_text(strip=True)
-                    data["future_matches"]["home"].append({
-                        "league": league,
-                        "date": date_str,
-                        "home_team": left_team,
-                        "away_team": right_team,
-                        "interval": interval
-                    })
-                except: pass
+            data["future_matches"]["home"] = parse_future_section(future_sections[0])
                 
         if len(future_sections) >= 2:
-            # Away (Second section)
-            rows = future_sections[1].select('table.matchtable tr')
-            for row in rows:
-                try:
-                    if not row.get('data-matchid'): continue
-                    cells = row.find_all('td')
-                    if len(cells) < 5: continue
-                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
-                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
-                    left_team = cells[1].get_text(strip=True)
-                    right_team = cells[3].get_text(strip=True)
-                    interval = cells[4].get_text(strip=True)
-                    data["future_matches"]["away"].append({
-                        "league": league,
-                        "date": date_str,
-                        "home_team": left_team,
-                        "away_team": right_team,
-                        "interval": interval
-                    })
-                except: pass
+            data["future_matches"]["away"] = parse_future_section(future_sections[1])
 
         return data
 
@@ -658,6 +619,7 @@ class OkoooParser:
         
         # Group by Match ID
         # Filename format: type_matchid_timestamp.html or type_matchid.html
+        # Special case: game_recent_matchid.html
         matches = {}
         for f in files:
             basename = os.path.basename(f)
@@ -665,16 +627,20 @@ class OkoooParser:
             if len(parts) < 2:
                 continue
             
-            page_type = parts[0] # history, handicap, odds, form, game, exchanges
-            # handle cases where match_id might be followed by timestamp or .html
-            match_id_part = parts[1]
+            page_type = parts[0]
+            
+            # Handle game_recent
+            if page_type == "game" and len(parts) > 2 and parts[1] == "recent":
+                page_type = "gamerecent"
+                match_id_part = parts[2]
+            else:
+                match_id_part = parts[1]
+                
             match_id = match_id_part.split('.')[0]
             
             if match_id not in matches:
                 matches[match_id] = {}
             
-            # Keep the latest file if multiple exist for same type/id?
-            # Or just add to list. Assuming unique per type for now or just overwriting.
             matches[match_id][page_type] = f
 
         logger.info(f"Found {len(matches)} matches to process.")
@@ -715,16 +681,23 @@ class OkoooParser:
                         match_data["game_points"] = self.parse_game(f.read(), home_team, away_team)
 
                 # Parse Game Recent (6-match Points)
-                if "game_recent" in files_map:
+                if "gamerecent" in files_map:
                     home_team = match_data.get("match_info", {}).get("home_team", "")
                     away_team = match_data.get("match_info", {}).get("away_team", "")
-                    with open(files_map["game_recent"], 'r', encoding='utf-8') as f:
+                    with open(files_map["gamerecent"], 'r', encoding='utf-8') as f:
                         match_data["game_points_recent"] = self.parse_game(f.read(), home_team, away_team)
-                        
+
+                # Parse Game Points (Complete)
+                if "game" in files_map:
+                    home_team = match_data.get("match_info", {}).get("home_team", "")
+                    away_team = match_data.get("match_info", {}).get("away_team", "")
+                    with open(files_map["game"], 'r', encoding='utf-8') as f:
+                        match_data["game_points_total"] = self.parse_game(f.read(), home_team, away_team)
+
                 # Parse Exchanges
                 if "exchanges" in files_map:
                     with open(files_map["exchanges"], 'r', encoding='utf-8') as f:
-                        match_data["exchanges_data"] = self.parse_exchanges(f.read())
+                        match_data["exchanges"] = self.parse_exchanges(f.read())
                 
                 # Save to JSON
                 output_file = os.path.join(self.output_dir, f"{match_id}.json")
