@@ -85,6 +85,13 @@ try:
 except ImportError:
     logger.warning("未找到定时任务控制器，跳过注册")
 
+# 注册作业控制器 (JobController)
+try:
+    from . import job_controller
+    app.include_router(job_controller.router)
+except ImportError as e:
+    logger.warning(f"未找到作业控制器，跳过注册: {e}")
+
 # 注册测试工具控制器
 try:
     from . import test_tool_controller
@@ -112,6 +119,13 @@ try:
     app.include_router(ranking_controller.router)
 except ImportError as e:
     logger.warning(f"未找到排名控制器，跳过注册: {e}")
+
+# 注册测试页面控制器
+try:
+    from . import test_page_controller
+    app.include_router(test_page_controller.router)
+except ImportError as e:
+    logger.warning(f"未找到测试页面控制器，跳过注册: {e}")
 
 # 注册MCP控制器
 # try:

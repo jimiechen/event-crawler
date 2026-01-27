@@ -22,6 +22,7 @@ class TestPage(Base):
     platform = Column(String(50), nullable=False, comment="平台标识")
     description = Column(Text, nullable=True, comment="页面描述")
     is_active = Column(Boolean, default=True, comment="是否启用")
+    parent_id = Column(Integer, nullable=True, default=None, comment="父页面ID")
     created_at = Column(DateTime, default=datetime.now, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
     test_results = Column(JSON, nullable=True, comment="测试结果")

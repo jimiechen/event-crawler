@@ -36,59 +36,8 @@ class SchedulerService:
             
         logger.info("Starting scheduler...")
         
-        # 1. 盘后积分更新（15:30）
-        self.scheduler.add_job(
-            self.run_post_market_update,
-            CronTrigger(hour=15, minute=30),
-            id="post_market_update",
-            name="盘后积分更新",
-            replace_existing=True
-        )
-        
-        # 2. 每日验收测试（16:00）
-        self.scheduler.add_job(
-            self.run_daily_acceptance,
-            CronTrigger(hour=16, minute=0),
-            id="daily_acceptance",
-            name="每日验收测试",
-            replace_existing=True
-        )
-        
-        # 3. 盘中实时监控检查（14:00-15:00，每5分钟）
-        self.scheduler.add_job(
-            self.run_realtime_monitor_check,
-            CronTrigger(day_of_week='mon-fri', hour='14', minute='*/5'),
-            id="realtime_monitor",
-            name="盘中实时监控检查",
-            replace_existing=True
-        )
-        
-        # 4. 【新增】每日问财爬虫（16:30）
-        self.scheduler.add_job(
-            self.run_wencai_daily_crawler,
-            CronTrigger(hour=16, minute=30),
-            id="wencai_daily_crawler",
-            name="每日问财爬虫",
-            replace_existing=True
-        )
-
-        # 5. 【新增】问财数据同步与评分（17:00）
-        self.scheduler.add_job(
-            self.run_wencai_data_sync,
-            CronTrigger(hour=17, minute=0),
-            id="wencai_data_sync",
-            name="问财数据同步与评分",
-            replace_existing=True
-        )
-
-        # 6. 【新增】每日AI复盘 (15:40) - 在盘后数据更新后
-        self.scheduler.add_job(
-            self.run_daily_ai_review,
-            CronTrigger(hour=15, minute=40),
-            id="daily_ai_review",
-            name="每日AI复盘",
-            replace_existing=True
-        )
+        # 移除硬编码任务，改由 Generic Task 管理
+        # 所有任务已迁移至 Generic Task 系统，通过 API 端点触发
         
         self.scheduler.start()
         self.is_running = True

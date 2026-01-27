@@ -23,6 +23,7 @@ class TestPageCreateModel(BaseModel):
     url: str = Field(..., description="测试页面URL")
     platform: str = Field(..., description="平台标识")
     description: Optional[str] = Field(None, description="页面描述")
+    parent_id: Optional[int] = Field(None, description="父页面ID")
 
 
 class TestPageUpdateModel(BaseModel):
@@ -31,6 +32,7 @@ class TestPageUpdateModel(BaseModel):
     url: Optional[str] = Field(None, description="测试页面URL")
     description: Optional[str] = Field(None, description="页面描述")
     is_active: Optional[bool] = Field(None, description="是否启用")
+    parent_id: Optional[int] = Field(None, description="父页面ID")
 
 
 class TestRunModel(BaseModel):
@@ -62,6 +64,7 @@ async def get_test_pages(db: AsyncSession = Depends(get_db_session)):
                     "platform": tp.platform,
                     "description": tp.description,
                     "is_active": tp.is_active,
+                    "parent_id": tp.parent_id,
                     "created_at": tp.created_at.isoformat() if tp.created_at else None,
                     "updated_at": tp.updated_at.isoformat() if tp.updated_at else None,
                     "test_results": tp.test_results
@@ -83,7 +86,8 @@ async def create_test_page(data: TestPageCreateModel, db: AsyncSession = Depends
             name=data.name,
             url=data.url,
             platform=data.platform,
-            description=data.description
+            description=data.description,
+            parent_id=data.parent_id
         )
         db.add(test_page)
         await db.commit()
@@ -128,6 +132,8 @@ async def update_test_page(
             test_page.description = data.description
         if data.is_active is not None:
             test_page.is_active = data.is_active
+        if data.parent_id is not None:
+            test_page.parent_id = data.parent_id
         
         test_page.updated_at = datetime.now()
         await db.commit()
@@ -163,6 +169,34 @@ async def delete_test_page(page_id: int, db: AsyncSession = Depends(get_db_sessi
         return BaseResponse(
             success=True,
             message="Test page deleted successfully"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        await db.rollback()
+        return BaseResponse(success=False, message=str(e))
+
+
+@router.delete("/results/{result_id}", response_model=BaseResponse)
+async def delete_test_result(result_id: int, db: AsyncSession = Depends(get_db_session)):
+    """
+    删除测试结果
+    """
+    try:
+        from sqlalchemy import select
+        stmt = select(TestResult).where(TestResult.id == result_id)
+        result = await db.execute(stmt)
+        test_result = result.scalar_one_or_none()
+        
+        if not test_result:
+            raise HTTPException(status_code=404, detail="Test result not found")
+        
+        await db.delete(test_result)
+        await db.commit()
+        
+        return BaseResponse(
+            success=True,
+            message="Test result deleted successfully"
         )
     except HTTPException:
         raise
@@ -333,17 +367,22 @@ async def run_crawler_test(test_page: TestPage, db: AsyncSession) -> Dict[str, A
     运行爬虫测试
     """
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         from app.services.crawler_service import CrawlerService
         service = CrawlerService(db)
         
         # 根据平台选择对应的爬虫
         crawler_map = {
             "tonghuashun": service.crawler_map.get("tonghuashun"),
-            "wencai": service.crawler_map.get("wencai")
+            "wencai": service.crawler_map.get("wencai"),
+            "okooo": service.crawler_map.get("okooo")
         }
         
         crawler_cls = crawler_map.get(test_page.platform)
         if not crawler_cls:
+            logger.error(f"Platform {test_page.platform} not supported")
             return {
                 "status": "failed",
                 "message": f"Platform {test_page.platform} not supported",
@@ -352,6 +391,8 @@ async def run_crawler_test(test_page: TestPage, db: AsyncSession) -> Dict[str, A
         
         # 实例化爬虫并运行
         crawler = crawler_cls(db)
+        
+        logger.info(f"Starting crawler test for platform {test_page.platform} with URL {test_page.url}")
         
         if test_page.platform == "tonghuashun":
             result = await crawler.crawl()
@@ -377,19 +418,32 @@ async def run_crawler_test(test_page: TestPage, db: AsyncSession) -> Dict[str, A
             query = f"{query_date}成交量是{prev_date_str}成交量的2.9倍以上，非北交，非创业板，非科创版，非ST，概念，行业，{prev_date_str}和{query_date}涨幅低于13%，收盘价低于25"
             
             result = await crawler.fetch_and_parse(query)
+        elif test_page.platform == "okooo":
+            # 执行澳客爬虫测试
+            result = await crawler.fetch_and_parse(debug_url=test_page.url)
         else:
+            logger.error(f"Platform {test_page.platform} not supported")
             return {
                 "status": "failed",
                 "message": f"Platform {test_page.platform} not supported",
                 "data": None
             }
         
+        logger.info(f"Crawler test completed for platform {test_page.platform}, result: {result}")
+        
+        # 根据爬虫返回的实际状态设置测试结果
+        crawler_status = result.get("status", "failed")
+        message = result.get("message", "Crawler test completed")
+        
         return {
-            "status": "success",
-            "message": "Crawler test completed",
+            "status": crawler_status,
+            "message": message,
             "data": result
         }
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Crawler test failed for platform {test_page.platform}: {str(e)}")
         return {
             "status": "failed",
             "message": str(e),

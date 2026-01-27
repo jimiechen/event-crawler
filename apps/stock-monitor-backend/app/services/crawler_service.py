@@ -17,9 +17,9 @@ try:
     from playwright_crawler.douyin_crawler import DouyinCrawler
     from playwright_crawler.xiaohongshu_crawler import XiaohongshuCrawler
     from playwright_crawler.bilibili_crawler import BilibiliCrawler
-    from playwright_crawler.okooo_crawler import OkoooCrawler
     from app.crawler.realhead_crawler import RealheadCrawler
     from app.crawler.wencai_crawler import WencaiCrawler
+    from app.crawler.okooo_crawler import OkoooCrawler
 except ImportError as e:
     logger.error(f"Failed to import crawler modules: {e}")
     # Define dummy classes to avoid crashing if module is missing during development
@@ -83,11 +83,14 @@ class CrawlerService:
             
             try:
                 # Instantiate crawler
-                # Note: Config is loaded from default path in CrawlerBase. 
-                # We might need to ensure the config file exists or is accessible.
-                # Assuming the backend runs in a place where it can find the config or we might need to patch it.
-                # For now, let's try instantiation.
-                crawler = crawler_cls()
+                # Note: Local crawlers (RealheadCrawler, WencaiCrawler, OkoooCrawler) need db parameter
+                # External crawlers might need config path
+                # Try with db parameter first (for local crawlers)
+                try:
+                    crawler = crawler_cls(self.session)
+                except TypeError:
+                    # If that fails, try without parameters (for external crawlers)
+                    crawler = crawler_cls()
                 
                 # Override backend_url if needed (assuming localhost:8000 for self-reporting)
                 crawler.backend_url = "http://localhost:8000"

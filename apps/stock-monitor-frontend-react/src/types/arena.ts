@@ -6,10 +6,10 @@ export interface PromptTemplate {
   template_text: string;
   system_template_text?: string;
   is_system: boolean;
-  is_deleted: string; // 'true' | 'false'
+  is_deleted: string; // 'true' | 'false' - kept as string to match backend literal "false"/"true" if that's what it returns, though boolean is better if backend serializes it as bool. Checking schema: is_deleted: str = "false". So string is correct.
   created_by: string;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface PromptBinding {
@@ -49,12 +49,6 @@ export interface SignalPool {
   created_at: string;
 }
 
-export interface AIAnalysisResult {
-  symbol: string;
-  analysis: any;
-  timestamp: string;
-}
-
 export interface AIDecisionResult {
   id: number;
   stock_code: string;
@@ -65,7 +59,7 @@ export interface AIDecisionResult {
   primary_operation?: string;
   primary_reason?: string;
   created_at: string;
-  trigger_context?: any;
+  // trigger_context?: any; // Removed as it's not in AIDecisionResponse
 }
 
 export interface ScheduledTask {
@@ -76,6 +70,6 @@ export interface ScheduledTask {
   is_active: boolean;
   description?: string;
   last_run_at?: string;
-  last_run_status?: 'success' | 'failed' | 'running';
+  last_run_status?: string; // 'success' | 'failed' | 'running' etc. Backend is str.
   next_run_at?: string;
 }

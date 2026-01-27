@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type { PromptTemplate, SignalDefinition, SignalPool, AIDecisionResult, PromptBinding, TradingAccount, ScheduledTask } from '@/types/arena';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+// Updated to match backend prefix /api/v1
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -12,10 +13,12 @@ export const api = axios.create({
 
 export const arenaApi = {
   // Prompts
-  getPrompts: () => api.get<{templates: PromptTemplate[], bindings: PromptBinding[]}>('/arena/prompts'),
+  // Backend returns List[PromptTemplateResponse]
+  getPrompts: () => api.get<PromptTemplate[]>('/arena/prompts'),
   createPrompt: (data: Partial<PromptTemplate>) => api.post<PromptTemplate>('/arena/prompts', data),
   updatePrompt: (id: number, data: Partial<PromptTemplate>) => api.put<PromptTemplate>(`/arena/prompts/${id}`, data),
   deletePrompt: (id: number) => api.delete(`/arena/prompts/${id}`),
+  // Copy and Bindings are not yet implemented in backend, mocking or keeping for future
   copyPrompt: (id: number, data: { newName?: string, createdBy: string }) => api.post<PromptTemplate>(`/arena/prompts/${id}/copy`, data),
 
   // Bindings
@@ -23,13 +26,15 @@ export const arenaApi = {
   deleteBinding: (id: number) => api.delete(`/arena/prompts/bindings/${id}`),
 
   // Accounts
+  // Not implemented in backend yet, will be mocked
   getAccounts: () => api.get<TradingAccount[]>('/arena/accounts'),
 
   // Signals
-  getSignals: () => api.get<{signals: SignalDefinition[], pools: SignalPool[]}>('/arena/signals'),
-  createSignal: (data: Partial<SignalDefinition>) => api.post<SignalDefinition>('/arena/signals/definitions', data),
-  updateSignal: (id: number, data: Partial<SignalDefinition>) => api.put<SignalDefinition>(`/arena/signals/definitions/${id}`, data),
-  deleteSignal: (id: number) => api.delete(`/arena/signals/definitions/${id}`),
+  // Split into signals and pools as per backend implementation
+  getSignals: () => api.get<SignalDefinition[]>('/arena/signals'),
+  createSignal: (data: Partial<SignalDefinition>) => api.post<SignalDefinition>('/arena/signals', data), // Backend uses /signals, not /signals/definitions
+  updateSignal: (id: number, data: Partial<SignalDefinition>) => api.put<SignalDefinition>(`/arena/signals/${id}`, data),
+  deleteSignal: (id: number) => api.delete(`/arena/signals/${id}`),
   
   // Signal Pools
   getSignalPools: () => api.get<SignalPool[]>('/arena/signal-pools'),
@@ -42,21 +47,22 @@ export const arenaApi = {
 };
 
 export const schedulerApi = {
-    getTasks: () => api.get<{success: boolean, data: ScheduledTask[]}>('/v1/timed-task/scheduled/list'),
+    // Backend: /api/v1/timed-task/scheduled/list -> returns BaseResponse { success: true, data: [] }
+    getTasks: () => api.get<{success: boolean, data: ScheduledTask[]}>('/timed-task/scheduled/list'),
 };
 
 // Adapters for PromptManager
 export const getPromptTemplates = async () => {
+    // Frontend expects { templates: [], bindings: [] } but backend only returns templates.
+    // We synthesize the structure here for frontend compatibility until bindings are implemented.
     const res = await arenaApi.getPrompts();
-    return res.data;
+    return {
+        templates: res.data,
+        bindings: [] as PromptBinding[] // Mock empty bindings
+    };
 };
+
 export const updatePromptTemplate = async (key: string, data: any) => {
-    // Note: API uses ID, but UI might pass key. Assuming we can find ID or API supports key.
-    // For now, if key is passed but we need ID, this might fail. 
-    // But PromptManager passes selectedTemplate.key. 
-    // Let's assume we change PromptManager to pass ID or we handle it.
-    // Actually PromptManager calls updatePromptTemplate(selectedTemplate.key, ...)
-    // We should probably change PromptManager to use ID.
     throw new Error("Use updatePromptTemplateById");
 };
 export const updatePromptTemplateById = async (id: number, data: any) => {
@@ -75,8 +81,16 @@ export const getVariablesReference = async (lang: string) => ({ content: "Variab
 
 // Adapters for SignalManager
 export const fetchSignals = async () => {
-    const res = await arenaApi.getSignals();
-    return res.data;
+    // Parallel fetch for signals and pools
+    const [signalsRes, poolsRes] = await Promise.all([
+        arenaApi.getSignals(),
+        arenaApi.getSignalPools()
+    ]);
+    
+    return {
+        signals: signalsRes.data,
+        pools: poolsRes.data
+    };
 };
 export const createSignal = async (data: any) => (await arenaApi.createSignal(data)).data;
 export const updateSignal = async (id: number, data: any) => (await arenaApi.updateSignal(id, data)).data;
