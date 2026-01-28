@@ -162,6 +162,9 @@ class TrapDetector:
         warnings = []
         score = 0.0
         
+        if not self.handicap_companies:
+            return TrapType.NO_TRAP, 0.0, [], ["无法获取亚盘数据进行盘口分析"]
+        
         avg_initial = sum(c.initial_pan for c in self.handicap_companies) / len(self.handicap_companies)
         avg_latest = sum(c.latest_pan for c in self.handicap_companies) / len(self.handicap_companies)
         
@@ -171,13 +174,13 @@ class TrapDetector:
             for company in self.handicap_companies:
                 if company.latest_pan - company.initial_pan > 0.5:
                     score = max(score, 55)
-                    reasons.append(f"{company_name}大幅升盘{company.latest_pan - company.initial_pan:.2f}球，需警惕诱盘")
+                    reasons.append(f"{company.company}大幅升盘{company.latest_pan - company.initial_pan:.2f}球，需警惕诱盘")
         
         if pan_movement < -0.25:
             for company in self.handicap_companies:
                 if company.initial_pan - company.latest_pan > 0.25:
                     score = max(score, 45)
-                    warnings.append(f"{company_name}降盘幅度异常，可能对主队信心不足")
+                    warnings.append(f"{company.company}降盘幅度异常，可能对主队信心不足")
         
         home_waters = [c.latest_home for c in self.handicap_companies if c.latest_home > 0]
         away_waters = [c.latest_away for c in self.handicap_companies if c.latest_away > 0]

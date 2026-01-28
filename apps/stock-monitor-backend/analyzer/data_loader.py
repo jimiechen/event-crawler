@@ -221,7 +221,11 @@ class DataLoader:
     
     def _parse_handicap(self):
         """解析亚盘数据"""
-        for company_data in self.raw_data.get('handicap', []):
+        handicap_data = self.raw_data.get('handicap', [])
+        if not handicap_data:
+            return
+        
+        for company_data in handicap_data:
             initial = company_data.get('initial', {})
             latest = company_data.get('latest', {})
             
@@ -238,7 +242,11 @@ class DataLoader:
     
     def _parse_euro_odds(self):
         """解析欧赔数据"""
-        for company_data in self.raw_data.get('euro_odds', []):
+        euro_data = self.raw_data.get('euro_odds', [])
+        if not euro_data:
+            return
+        
+        for company_data in euro_data:
             initial = company_data.get('initial', {})
             latest = company_data.get('latest', {})
             
