@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 from typing import Optional
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from app.services.okooo_service import okooo_service
+from app.services.sse_service import sse_service
 from app.api.schemas import BaseResponse
 
 router = APIRouter(prefix="/api/v1/okooo", tags=["Okooo竞彩"])
@@ -29,10 +30,11 @@ class CrawlIdsRequest(BaseModel):
     match_ids: list[str] = Field(..., description="比赛ID列表")
     headless: bool = Field(True, description="是否使用无头模式")
     use_cache: bool = Field(False, description="是否使用会话缓存")
+    force: bool = Field(False, description="是否强制爬取（忽略去重）")
 
 @router.post("/start_ids", summary="启动Okooo指定ID爬虫", response_model=BaseResponse)
 async def start_crawl_ids(request: CrawlIdsRequest):
-    success = await okooo_service.start_crawl_ids(request.match_ids, request.headless, request.use_cache)
+    success = await okooo_service.start_crawl_ids(request.match_ids, request.headless, request.use_cache, request.force)
     if success:
         return BaseResponse(success=True, message="指定ID爬虫任务已启动")
     else:
@@ -70,7 +72,9 @@ async def stop_crawl():
     await okooo_service.stop_crawl()
     return BaseResponse(success=True, message="停止指令已发送")
 
-@router.get("/status", summary="获取Okooo爬虫状态", response_model=BaseResponse)
-async def get_status():
-    status = await okooo_service.get_status()
-    return BaseResponse(success=True, data=status)
+@router.get("/status", summary="获取Okooo爬虫实时状态(SSE)", description="Server-Sent Events 实时日志流")
+async def get_status(request: Request):
+    """
+    获取Okooo爬虫实时状态日志 (SSE模式)
+    """
+    return await sse_service.subscribe(request)

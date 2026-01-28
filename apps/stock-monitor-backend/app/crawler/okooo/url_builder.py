@@ -12,6 +12,10 @@ class OkoooPageType(Enum):
     MOBILE_HISTORY = "mobile_history" # 手机版历史战绩页
     MOBILE_ODDS = "mobile_odds"       # 手机版欧指页
     MOBILE_HANDICAP = "mobile_handicap" # 手机版亚指页
+    MOBILE_EXCHANGES = "mobile_exchanges" # 手机版盈亏页
+    MOBILE_FORM = "mobile_form"       # 手机版阵容页
+    MOBILE_GAME = "mobile_game"       # 手机版积分页
+    MOBILE_CHANGE = "mobile_change"   # 手机版指数变化页
     EXCHANGES = "exchanges"        # 欧赔页面（百家欧赔）
     AH = "ah"                      # 亚盘页面（亚盘对比）
     ANALYSIS = "analysis"          # 数据分析页
@@ -22,7 +26,7 @@ class OkoooUrlBuilder:
     负责生成各类Okooo页面的URL
     """
     
-    BASE_URL = "https://www.okooo.com"
+    BASE_URL = "https://m.okooo.com"
     
     @classmethod
     def build_match_url(cls, match_id: str, page_type: OkoooPageType = OkoooPageType.MATCH_DETAIL) -> str:

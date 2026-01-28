@@ -34,7 +34,7 @@
                 </button>
                 <button @click="currentTab = 'okooo'" 
                     :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'okooo' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
-                    Okooo竞彩
+                    Okooo
                 </button>
             </nav>
         </div>
@@ -297,7 +297,7 @@
             <!-- Top: Match List & Controls -->
             <div class="bg-white p-6 rounded-lg shadow flex flex-col flex-none max-h-[50%]">
                 <div class="flex justify-between items-center mb-4 flex-none">
-                    <h2 class="text-xl font-bold text-gray-800">Okooo竞彩比赛列表</h2>
+                    <h2 class="text-xl font-bold text-gray-800">比赛列表</h2>
                     <div class="flex gap-4 items-center">
                         <!-- Date Filter -->
                         <div class="flex items-center">
@@ -316,6 +316,10 @@
                         <label class="inline-flex items-center cursor-pointer">
                             <input type="checkbox" v-model="okoooConfig.useCache" class="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
                             <span class="ml-2 text-gray-700 text-sm font-medium">使用缓存</span>
+                        </label>
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input type="checkbox" v-model="okoooConfig.force" class="form-checkbox h-5 w-5 text-red-600 rounded border-gray-300 focus:ring-red-500">
+                            <span class="ml-2 text-gray-700 text-sm font-medium">强制爬取</span>
                         </label>
                         <div class="h-6 w-px bg-gray-300 mx-2"></div>
                         <button @click="fetchOkoooMatches" :disabled="okoooStatus.isRunning" 
@@ -530,7 +534,8 @@
                 const availableDates = ref([]); // Available dates from DB
                 const okoooConfig = ref({
                     headless: false, // Default to headed as requested
-                    useCache: true   // Default to use cache as requested
+                    useCache: true,   // Default to use cache as requested
+                    force: false
                 });
                 const okoooForm = ref({
                     startId: 1143895,
@@ -1039,7 +1044,8 @@
                         const response = await axios.post('/api/v1/okooo/start_ids', {
                             match_ids: selectedOkoooMatches.value,
                             headless: okoooConfig.value.headless,
-                            use_cache: okoooConfig.value.useCache
+                            use_cache: okoooConfig.value.useCache,
+                            force: okoooConfig.value.force
                         });
                         if (response.data.success) {
                             okoooStatus.value.isRunning = true;
@@ -1059,7 +1065,8 @@
                         const response = await axios.post('/api/v1/okooo/start_ids', {
                             match_ids: [match.match_id],
                             headless: okoooConfig.value.headless,
-                            use_cache: okoooConfig.value.useCache
+                            use_cache: okoooConfig.value.useCache,
+                            force: okoooConfig.value.force
                         });
                         if (response.data.success) {
                             okoooStatus.value.isRunning = true;

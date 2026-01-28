@@ -197,8 +197,15 @@ class OkoooParser:
                 if time_elem:
                     match_time = time_elem.get_text(strip=True)
 
+                # Match No (序号)
+                match_no = ""
+                no_elem = item.find(class_=re.compile(r'match-no|no|xuhao|paiming'))
+                if no_elem:
+                    match_no = no_elem.get_text(strip=True)
+
                 matches.append({
                     "match_id": match_id,
+                    "match_no": match_no,
                     "league": league,
                     "home_team": home_team,
                     "away_team": away_team,
@@ -345,7 +352,9 @@ class OkoooParser:
                         "score": score,
                         "result": result,
                         "opponent": opponent,
-                        "opponent_rank": opponent_rank
+                        "opponent_rank": opponent_rank,
+                        "handicap": [],  # Added to match sample
+                        "euro_odds": []  # Added to match sample
                     })
                 except Exception as e:
                     logger.warning(f"Error parsing row in {section_type}: {e}")
@@ -412,6 +421,76 @@ class OkoooParser:
             data["future_matches"]["away"] = parse_future_section(future_sections[1])
 
         return data
+
+    @staticmethod
+    def parse_mobile_odds(html_content: str) -> Dict[str, Any]:
+        """
+        解析手机版欧指页面
+        返回: {"euro_odds": [...]}
+        """
+        soup = BeautifulSoup(html_content, 'lxml')
+        odds_list = []
+        
+        # 查找赔率表格/列表
+        # 通常结构: .params-body -> .item or table rows
+        # 尝试查找包含公司名称的行
+        
+        # 1. Try finding specific odds containers
+        items = soup.find_all('div', class_=re.compile(r'data-item|params-body|odds-item'))
+        
+        if not items:
+            # Fallback to table rows
+            items = soup.find_all('tr')
+            
+        for item in items:
+            try:
+                # Extract Company Name
+                company = ""
+                comp_elem = item.find(class_=re.compile(r'company|name|gs'))
+                if not comp_elem:
+                    # Try first cell/div
+                    children = list(item.find_all(['td', 'div'], recursive=False))
+                    if children:
+                        comp_elem = children[0]
+                
+                if comp_elem:
+                    company = comp_elem.get_text(strip=True)
+                    
+                if not company: continue
+                
+                # Extract Odds (Initial and Latest)
+                # Usually numbers are in spans or divs with specific classes like 'win', 'draw', 'lost'
+                # Or simply in sequence
+                
+                nums = item.find_all(string=re.compile(r'^\d+\.\d+$'))
+                # Filter out valid float strings
+                odds_values = [s.strip() for s in nums if len(s.strip()) < 10]
+                
+                if len(odds_values) >= 6:
+                    # Assume order: Initial Win, Draw, Loss, Latest Win, Draw, Loss (or vice versa)
+                    # Often displayed as: [Init W D L] [Latest W D L]
+                    # Or Latest first. Let's assume standard Okooo: Initial -> Latest
+                    
+                    initial = {
+                        "win": odds_values[0],
+                        "draw": odds_values[1],
+                        "loss": odds_values[2]
+                    }
+                    latest = {
+                        "win": odds_values[3],
+                        "draw": odds_values[4],
+                        "loss": odds_values[5]
+                    }
+                    
+                    odds_list.append({
+                        "company": company,
+                        "initial": initial,
+                        "latest": latest
+                    })
+            except Exception:
+                continue
+                
+        return {"euro_odds": odds_list}
 
     @staticmethod
     def parse_mobile_history(html_content: str) -> Dict[str, Any]:
@@ -536,7 +615,9 @@ class OkoooParser:
                         "score": score,
                         "result": result,
                         "opponent": opponent,
-                        "opponent_rank": opponent_rank
+                        "opponent_rank": opponent_rank,
+                        "handicap": [],  # Added to match sample
+                        "euro_odds": []  # Added to match sample
                     })
                 except Exception as e:
                     logger.warning(f"Error parsing row in {section_type}: {e}")

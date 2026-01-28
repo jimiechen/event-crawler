@@ -9,6 +9,7 @@ from app.database import db_manager
 from app.services.redis_cache_service import RedisCacheService
 from app.crawler.okooo.scheduler import OkoooScheduler
 from app.services.task_executor import manager  # WebSocket manager
+from app.services.sse_service import sse_service  # SSE Service
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ class OkoooService:
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         await manager.broadcast(log_data)
+        await sse_service.broadcast("okooo_log", log_data)
 
     async def _on_progress(self, processed: int, total: int):
         """进度回调"""
@@ -112,6 +114,7 @@ class OkoooService:
             "percentage": round(processed / total * 100, 2) if total > 0 else 0
         }
         await manager.broadcast(progress_data)
+        await sse_service.broadcast("okooo_progress", progress_data)
 
     async def _on_match_list(self, matches: list):
         """比赛列表回调"""
@@ -120,6 +123,7 @@ class OkoooService:
             "matches": matches
         }
         await manager.broadcast(data)
+        await sse_service.broadcast("okooo_matches", data)
 
     async def start_crawl(self, start_id: int, end_id: int) -> bool:
         """启动爬虫任务"""
@@ -140,6 +144,8 @@ class OkoooService:
         
         # Configure
         storage_path = "okooo_session.json" if use_cache else None
+        
+        # 强制配置更新，确保单例模式下的配置一致性
         await scheduler.configure(headless=headless, storage_state_path=storage_path)
         
         return await scheduler.fetch_match_lists()
@@ -162,7 +168,7 @@ class OkoooService:
         self._crawl_task = asyncio.create_task(self._run_crawl_lists(scheduler))
         return True
 
-    async def start_crawl_ids(self, match_ids: list, headless: bool = True, use_cache: bool = False) -> bool:
+    async def start_crawl_ids(self, match_ids: list, headless: bool = True, use_cache: bool = False, force: bool = False) -> bool:
         """启动指定ID列表爬虫任务"""
         if self.is_running:
             logger.warning("Okooo crawler is already running")
@@ -177,13 +183,13 @@ class OkoooService:
         self.is_running = True
         
         # 创建后台任务
-        self._crawl_task = asyncio.create_task(self._run_crawl_ids(scheduler, match_ids))
+        self._crawl_task = asyncio.create_task(self._run_crawl_ids(scheduler, match_ids, force))
         return True
 
-    async def _run_crawl_ids(self, scheduler: OkoooScheduler, match_ids: list):
+    async def _run_crawl_ids(self, scheduler: OkoooScheduler, match_ids: list, force: bool = False):
         """执行ID列表爬虫任务的包装器"""
         try:
-            await scheduler.crawl_ids(match_ids)
+            await scheduler.crawl_ids(match_ids, force=force)
         except Exception as e:
             logger.error(f"Crawl ids task error: {e}")
             await self._on_log("ERROR", f"Crawl ids task crashed: {e}")
@@ -191,6 +197,10 @@ class OkoooService:
             self.is_running = False
             await self._on_log("INFO", "Crawl ids task ended")
             await manager.broadcast({
+                "type": "okooo_status",
+                "is_running": False
+            })
+            await sse_service.broadcast("okooo_status", {
                 "type": "okooo_status",
                 "is_running": False
             })
@@ -209,6 +219,10 @@ class OkoooService:
                 "type": "okooo_status",
                 "is_running": False
             })
+            await sse_service.broadcast("okooo_status", {
+                "type": "okooo_status",
+                "is_running": False
+            })
 
     async def _run_crawl(self, scheduler: OkoooScheduler, start_id: int, end_id: int):
         """执行爬虫任务的包装器"""
@@ -222,6 +236,10 @@ class OkoooService:
             await self._on_log("INFO", "Crawl task ended")
             # 发送最终状态
             await manager.broadcast({
+                "type": "okooo_status",
+                "is_running": False
+            })
+            await sse_service.broadcast("okooo_status", {
                 "type": "okooo_status",
                 "is_running": False
             })

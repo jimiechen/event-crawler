@@ -1,11 +1,10 @@
 # -*- coding: utf-8 -*-
-from datetime import date
-from typing import Optional, Dict, Any
-from sqlalchemy import String, Integer, JSON, Date
+from sqlalchemy import String, Integer, JSON, BigInteger, Text, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
-from app.models.base import Base, TimestampMixin
+from sqlalchemy.sql import func
+from app.models.base import Base
 
-class OkoooMatch(Base, TimestampMixin):
+class OkoooMatch(Base):
     """
     Okooo比赛数据模型
     存储爬取到的比赛基本信息和历史战绩详情
@@ -14,14 +13,25 @@ class OkoooMatch(Base, TimestampMixin):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     
-    league_name: Mapped[Optional[str]] = mapped_column(String(100), comment="联赛名称", nullable=True)
-    home_team: Mapped[str] = mapped_column(String(100), comment="主队名称", index=True)
-    away_team: Mapped[str] = mapped_column(String(100), comment="客队名称", index=True)
-    match_time_text: Mapped[Optional[str]] = mapped_column(String(100), comment="比赛时间文本", nullable=True)
-    match_date: Mapped[Optional[date]] = mapped_column(Date, comment="比赛日期", index=True, nullable=True)
+    match_no: Mapped[str] = mapped_column(String(20), comment="比赛序号", nullable=True)
+    match_type: Mapped[str] = mapped_column(String(20), comment="比赛类型", nullable=True)
+    match_id: Mapped[str] = mapped_column(String(10), comment="比赛ID", nullable=True)
+    league_name: Mapped[str] = mapped_column(String(100), comment="联赛名称", nullable=True)
+    home_team: Mapped[str] = mapped_column(String(100), comment="主队名称", nullable=False)
+    away_team: Mapped[str] = mapped_column(String(100), comment="客队名称", nullable=False)
+    match_time_text: Mapped[str] = mapped_column(String(100), comment="比赛时间文本", nullable=True)
+    match_date: Mapped[int] = mapped_column(BigInteger, comment="比赛日期(时间戳)", nullable=True)
     
-    # 存储完整解析数据，包含 match_info, home_history, away_history, head_to_head, future_matches
-    history_data: Mapped[Dict[str, Any]] = mapped_column(JSON, comment="历史交锋完整数据")
+    form_data: Mapped[str] = mapped_column(Text, comment="近期战绩", nullable=True)
+    exchange_data: Mapped[str] = mapped_column(Text, comment="交易数据", nullable=True)
+    odds_data: Mapped[str] = mapped_column(Text, comment="赔率数据", nullable=True)
+    history_data: Mapped[str] = mapped_column(Text, comment="历史交锋完整数据", nullable=False)
+    
+    data: Mapped[dict] = mapped_column(JSON, comment="分析结果", nullable=True)
+    analysis: Mapped[dict] = mapped_column(JSON, comment="爬虫数据聚合", nullable=True)
+    
+    updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
 
     def __repr__(self) -> str:
         return f"<OkoooMatch(id={self.id}, {self.home_team} vs {self.away_team})>"
