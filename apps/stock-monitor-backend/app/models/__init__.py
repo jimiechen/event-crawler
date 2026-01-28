@@ -22,6 +22,7 @@ from .generic_task import GenericTask
 from .task_execution_detail import TaskExecutionDetail
 from .ai_decision import AIDecisionResult
 from .arena_models import PromptTemplate, SignalDefinition, SignalPool
+from .okooo_match import OkoooMatch
 
 __all__ = [
     "Base",
@@ -60,5 +61,6 @@ __all__ = [
     "AIDecisionResult",
     "PromptTemplate",
     "SignalDefinition",
-    "SignalPool"
+    "SignalPool",
+    "OkoooMatch"
 ]

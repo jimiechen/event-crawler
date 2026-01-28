@@ -172,8 +172,8 @@ class OkoooMobileCrawler:
             await self.human_behavior_simulation(page)
             
             # 5. Save Content
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{name}_{timestamp}.html"
+            # Use fixed filename to overwrite previous runs and avoid duplication
+            filename = f"{name}.html"
             filepath = os.path.join(self.output_dir, filename)
             
             with open(filepath, "w", encoding="utf-8") as f:
@@ -182,9 +182,9 @@ class OkoooMobileCrawler:
             logger.info(f"Successfully saved {name} to {filepath}")
             
             # Optional: Take screenshot for verification
-            screenshot_path = os.path.join(self.output_dir, f"{name}_{timestamp}.png")
-            await page.screenshot(path=screenshot_path)
-            logger.info(f"Screenshot saved to {screenshot_path}")
+            # screenshot_path = os.path.join(self.output_dir, f"{name}.png")
+            # await page.screenshot(path=screenshot_path)
+            # logger.info(f"Screenshot saved to {screenshot_path}")
             
             return True
             
