@@ -1,9 +1,12 @@
 import { createErrorResponse } from '@/common/tool-handler';
 import { ERROR_MESSAGES } from '@/common/constants';
 import * as browserTools from './browser';
+import { BaseBrowserToolExecutor } from './base-browser';
 
 const tools = { ...browserTools };
-const toolsMap = new Map(Object.values(tools).map((tool) => [tool.name, tool]));
+const toolsMap = new Map<string, BaseBrowserToolExecutor>(
+  Object.values(tools).map((tool) => [tool.name, tool])
+);
 
 /**
  * Tool call parameter interface

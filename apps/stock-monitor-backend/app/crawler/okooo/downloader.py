@@ -15,9 +15,132 @@ class OkoooDownloader:
     负责页面HTML的下载，包含反爬处理和WAF检测
     """
     
-    def __init__(self, headless: bool = True):
+    def __init__(self, headless: bool = True, is_mobile: bool = False, storage_state_path: Optional[str] = None):
         self.headless = headless
+        self.is_mobile = is_mobile
+        self.storage_state_path = storage_state_path
+        self.playwright = None
+        self.browser = None
+        self.context = None
+
+    async def close(self):
+        """关闭资源"""
+        if self.context:
+            try:
+                if self.storage_state_path:
+                    await self.context.storage_state(path=self.storage_state_path)
+                await self.context.close()
+            except Exception as e:
+                logger.error(f"Error closing context: {e}")
+            self.context = None
+            
+        if self.browser:
+            await self.browser.close()
+            self.browser = None
+            
+        if self.playwright:
+            await self.playwright.stop()
+            self.playwright = None
+
+    async def _ensure_context(self):
+        """Ensure browser context exists"""
+        if not self.playwright:
+            self.playwright, self.browser, self.context = await self._create_browser_context()
+        elif not self.browser:
+            self.playwright, self.browser, self.context = await self._create_browser_context()
+        elif not self.context:
+            self.context = await self._create_context(self.browser)
+
+    async def download(self, url: str) -> Optional[str]:
+        """别名方法"""
+        return await self.download_html(url)
+    
+    async def download_html(self, url: str) -> Optional[str]:
+        """
+        下载HTML内容
+        """
+        page = None
+        try:
+            await self._ensure_context()
+            
+            # Create new page in the persistent context
+            page = await self.context.new_page()
+            
+            try:
+                await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                # Wait for some content
+                await page.wait_for_timeout(random.randint(1500, 3000))
+                
+                content = await page.content()
+                title = await page.title()
+                
+                # Check for blocking
+                if self._is_blocked(content, title, page.url, url):
+                    logger.warning(f"Blocked or empty content for {url}")
+                    return None
+                
+                # Save storage state periodically or on success
+                if self.storage_state_path and self.context:
+                    try:
+                        await self.context.storage_state(path=self.storage_state_path)
+                    except Exception as e:
+                        logger.warning(f"Failed to save storage state: {e}")
+                
+                return content
+                
+            except Exception as e:
+                logger.error(f"Page goto error for {url}: {e}")
+                return None
+            finally:
+                if page:
+                    await page.close()
+            
+        except Exception as e:
+            logger.error(f"Download error for {url}: {e}")
+            return None
+
+    async def _create_context(self, browser: Browser) -> BrowserContext:
+        """Create context with config"""
+        if self.is_mobile:
+            viewport = {'width': 375, 'height': 812}
+            user_agent = 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1'
+            is_mobile_device = True
+            sec_ch_ua_platform = '"iOS"'
+            sec_ch_ua_mobile = "?1"
+        else:
+            viewport = {'width': 1920, 'height': 1080}
+            user_agent = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            is_mobile_device = False
+            sec_ch_ua_platform = '"macOS"'
+            sec_ch_ua_mobile = "?0"
+            
+        context = await browser.new_context(
+            viewport=viewport,
+            user_agent=user_agent,
+            is_mobile=is_mobile_device,
+            locale='zh-CN',
+            timezone_id='Asia/Shanghai',
+            permissions=['geolocation'],
+            geolocation={'latitude': 31.2304, 'longitude': 121.4737},
+            color_scheme='light',
+            storage_state=self.storage_state_path if self.storage_state_path else None
+        )
         
+        # Set extra headers globally for the context
+        await context.set_extra_http_headers({
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+            "Sec-Ch-Ua-Mobile": sec_ch_ua_mobile,
+            "Sec-Ch-Ua-Platform": sec_ch_ua_platform,
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1"
+        })
+        
+        return context
+
     async def _create_browser_context(self) -> Tuple[Any, Browser, BrowserContext]:
         """
         创建Playwright浏览器上下文，注入反爬脚本
@@ -34,17 +157,9 @@ class OkoooDownloader:
             '--disable-features=IsolateOrigins,site-per-process',
         ]
         
+        # Launch browser (headless handled here)
         browser = await p.chromium.launch(headless=self.headless, args=args)
-        
-        context = await browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            locale='zh-CN',
-            timezone_id='Asia/Shanghai',
-            permissions=['geolocation'],
-            geolocation={'latitude': 31.2304, 'longitude': 121.4737}, # Shanghai
-            color_scheme='light'
-        )
+        context = await self._create_context(browser)
         
         # 注入反爬脚本
         await context.add_init_script("""
@@ -89,8 +204,6 @@ class OkoooDownloader:
             return True
             
         # 2. Soft block (redirect to homepage)
-        # Note: target_url might be different if there were redirects, but here we compare with intended target
-        # We assume target_url is the one we wanted to visit.
         if current_url == "https://www.okooo.com/" and target_url != "https://www.okooo.com/":
              logger.error("Redirected to homepage (Soft Block).")
              return True
@@ -101,107 +214,3 @@ class OkoooDownloader:
             return True
             
         return False
-
-    async def download_html(self, url: str) -> Optional[str]:
-        """
-        下载指定URL的HTML内容
-        
-        Args:
-            url: 目标URL
-            
-        Returns:
-            Optional[str]: 成功返回HTML内容，失败返回None
-        """
-        playwright = None
-        browser = None
-        context = None
-        
-        try:
-            playwright, browser, context = await self._create_browser_context()
-            
-            # Randomize User Agent
-            chrome_version = random.randint(115, 120)
-            if self.is_mobile:
-                ua = f"Mozilla/5.0 (iPhone; CPU iPhone OS 16_{random.randint(0, 6)} like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1"
-                sec_ch_ua_platform = '"iOS"'
-                sec_ch_ua_mobile = "?1"
-            else:
-                ua = f"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{chrome_version}.0.0.0 Safari/537.36"
-                sec_ch_ua_platform = '"macOS"'
-                sec_ch_ua_mobile = "?0"
-            
-            # Enhanced Headers
-            await context.set_extra_http_headers({
-                "User-Agent": ua,
-                "Referer": "https://www.okooo.com/",
-                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-                "Sec-Ch-Ua": f'"Not_A Brand";v="8", "Chromium";v="{chrome_version}", "Google Chrome";v="{chrome_version}"',
-                "Sec-Ch-Ua-Mobile": sec_ch_ua_mobile,
-                "Sec-Ch-Ua-Platform": sec_ch_ua_platform,
-                "Sec-Fetch-Dest": "document",
-                "Sec-Fetch-Mode": "navigate",
-                "Sec-Fetch-Site": "same-origin",
-                "Sec-Fetch-User": "?1",
-                "Upgrade-Insecure-Requests": "1"
-            })
-            
-            page = await context.new_page()
-            
-            # 策略：先访问主页建立Session/Cookies
-            try:
-                # logger.info("Visiting homepage to establish session...")
-                await page.goto("https://www.okooo.com/", wait_until='domcontentloaded', timeout=20000)
-                await asyncio.sleep(random.uniform(2, 4))
-                
-                # 模拟简单交互
-                await page.mouse.move(random.randint(100, 500), random.randint(100, 500))
-                await page.evaluate("window.scrollTo(0, 200)")
-                await asyncio.sleep(random.uniform(1, 2))
-                
-            except Exception as e:
-                logger.warning(f"Homepage visit failed: {e}, continuing...")
-
-            logger.info(f"Navigating to {url}")
-            
-            # Update Referer
-            await page.set_extra_http_headers({
-                "Referer": "https://www.okooo.com/",
-            })
-
-            # 访问目标页面
-            try:
-                response = await page.goto(url, wait_until='domcontentloaded', timeout=40000)
-                
-                if response and response.status == 405:
-                    logger.error("Got 405 status code directly.")
-                    return None
-                    
-            except Exception as e:
-                logger.warning(f"Navigation warning: {e}, but continuing to check content...")
-
-            await asyncio.sleep(random.uniform(4, 7)) # 等待动态内容加载
-            
-            # 模拟滚动
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight/3)")
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            await page.evaluate("window.scrollTo(0, document.body.scrollHeight/1.5)")
-            await asyncio.sleep(random.uniform(0.5, 1.5))
-            
-            content = await page.content()
-            title = await page.title()
-            current_url = page.url
-            
-            if self._is_blocked(content, title, current_url, url):
-                return None
-            
-            logger.info(f"Download success. Title: {title}, Size: {len(content)}")
-            return content
-            
-        except Exception as e:
-            logger.error(f"Fetch error: {e}")
-            return None
-        finally:
-            if context: await context.close()
-            if browser: await browser.close()
-            if playwright: await playwright.stop()

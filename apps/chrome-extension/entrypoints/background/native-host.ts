@@ -1,4 +1,4 @@
-import { NativeMessageType } from 'chrome-mcp-shared';
+import { NativeMessageType } from '@/common/shared-types';
 import { BACKGROUND_MESSAGE_TYPES } from '@/common/message-types';
 import {
   NATIVE_HOST,

@@ -32,6 +32,10 @@
                     :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'results' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
                     测试结果
                 </button>
+                <button @click="currentTab = 'okooo'" 
+                    :class="['px-4 py-2 font-semibold rounded-t-lg transition duration-300', currentTab === 'okooo' ? 'text-blue-600 border-b-2 border-blue-600 bg-white' : 'text-gray-600 hover:bg-gray-100']">
+                    Okooo竞彩
+                </button>
             </nav>
         </div>
 
@@ -288,6 +292,160 @@
             </div>
         </div>
 
+        <!-- Content: Okooo Crawler -->
+        <div v-if="currentTab === 'okooo'" class="flex flex-col h-[calc(100vh-150px)] space-y-4">
+            <!-- Top: Match List & Controls -->
+            <div class="bg-white p-6 rounded-lg shadow flex flex-col flex-none max-h-[50%]">
+                <div class="flex justify-between items-center mb-4 flex-none">
+                    <h2 class="text-xl font-bold text-gray-800">Okooo竞彩比赛列表</h2>
+                    <div class="flex gap-4 items-center">
+                        <!-- Date Filter -->
+                        <div class="flex items-center">
+                            <span class="mr-2 text-sm text-gray-600">日期:</span>
+                            <select v-model="okoooDate" @change="fetchOkoooMatches" class="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                <option value="">实时 (Live)</option>
+                                <option v-for="date in availableDates" :key="date" :value="date">{{ date }}</option>
+                            </select>
+                        </div>
+                        <div class="h-6 w-px bg-gray-300 mx-2"></div>
+                        
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input type="checkbox" v-model="okoooConfig.headless" class="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+                            <span class="ml-2 text-gray-700 text-sm font-medium">无头模式</span>
+                        </label>
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input type="checkbox" v-model="okoooConfig.useCache" class="form-checkbox h-5 w-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+                            <span class="ml-2 text-gray-700 text-sm font-medium">使用缓存</span>
+                        </label>
+                        <div class="h-6 w-px bg-gray-300 mx-2"></div>
+                        <button @click="fetchOkoooMatches" :disabled="okoooStatus.isRunning" 
+                            class="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white font-medium py-1.5 px-4 rounded shadow-sm transition-colors text-sm flex items-center">
+                            <span class="mr-1">🔄</span> 获取列表
+                        </button>
+                        <button @click="startSelectedOkoooCrawl" :disabled="okoooStatus.isRunning || selectedOkoooMatches.length === 0" 
+                            class="bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white font-medium py-1.5 px-4 rounded shadow-sm transition-colors text-sm flex items-center">
+                            <span class="mr-1">▶</span> 爬取选中 ({{ selectedOkoooMatches.length }})
+                        </button>
+                        <button @click="stopOkoooCrawl" :disabled="!okoooStatus.isRunning" 
+                            class="bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white font-medium py-1.5 px-4 rounded shadow-sm transition-colors text-sm flex items-center">
+                            <span class="mr-1">⏹</span> 停止
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Match Table -->
+                <div class="overflow-auto border border-gray-200 rounded-lg flex-1">
+                    <table class="min-w-full leading-normal relative">
+                        <thead>
+                            <tr class="bg-gray-50 sticky top-0 shadow-sm z-10">
+                                <th class="px-5 py-3 border-b border-gray-200 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-10">
+                                    <input type="checkbox" @change="toggleAllOkoooMatches" :checked="isAllOkoooMatchesSelected" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                </th>
+                                <th class="px-5 py-3 border-b border-gray-200 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">ID</th>
+                                <th class="px-5 py-3 border-b border-gray-200 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-32">联赛</th>
+                                <th class="px-5 py-3 border-b border-gray-200 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-32">时间</th>
+                                <th class="px-5 py-3 border-b border-gray-200 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">主队</th>
+                                <th class="px-5 py-3 border-b border-gray-200 text-center text-xs font-semibold text-gray-600 uppercase tracking-wider w-20">让球</th>
+                                <th class="px-5 py-3 border-b border-gray-200 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">客队</th>
+                                <th class="px-5 py-3 border-b border-gray-200 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider w-24">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <tr v-for="match in okoooMatches" :key="match.match_id" class="hover:bg-blue-50 transition-colors">
+                                <td class="px-5 py-3 text-sm">
+                                    <input type="checkbox" v-model="selectedOkoooMatches" :value="match.match_id" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                </td>
+                                <td class="px-5 py-3 text-sm font-mono text-gray-600">{{ match.match_id }}</td>
+                                <td class="px-5 py-3 text-sm">
+                                    <span class="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs">{{ match.league }}</span>
+                                </td>
+                                <td class="px-5 py-3 text-sm text-gray-500">{{ match.match_time }}</td>
+                                <td class="px-5 py-3 text-sm font-medium text-gray-900">{{ match.home_team }}</td>
+                                <td class="px-5 py-3 text-sm text-center font-bold" :class="getHandicapClass(match.handicap)">{{ match.handicap }}</td>
+                                <td class="px-5 py-3 text-sm font-medium text-gray-900">{{ match.away_team }}</td>
+                                <td class="px-5 py-3 text-sm">
+                                    <button @click="crawlSingleOkoooMatch(match)" class="text-blue-600 hover:text-blue-900 text-xs font-medium hover:underline">
+                                        单场爬取
+                                    </button>
+                                </td>
+                            </tr>
+                            <tr v-if="okoooMatches.length === 0">
+                                <td colspan="8" class="px-5 py-10 text-center text-gray-500 bg-gray-50">
+                                    <div class="flex flex-col items-center justify-center">
+                                        <span class="text-4xl mb-2">📋</span>
+                                        <p>暂无比赛数据</p>
+                                        <p class="text-xs mt-1">请点击右上角"获取列表"按钮加载比赛</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Bottom: Status & Logs -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
+                <!-- Status Panel -->
+                <div class="bg-white p-6 rounded-lg shadow overflow-y-auto">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-bold text-gray-800">运行状态</h2>
+                        <span :class="okoooStatus.isRunning ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'" class="px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide">
+                            {{ okoooStatus.isRunning ? 'RUNNING' : 'IDLE' }}
+                        </span>
+                    </div>
+                    
+                    <div class="space-y-6">
+                        <div>
+                            <div class="flex justify-between text-sm mb-2">
+                                <span class="text-gray-600 font-medium">总进度</span>
+                                <span class="font-bold text-gray-800">{{ okoooStatus.stats.processed }} / {{ okoooStatus.stats.total }}</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                                <div class="bg-blue-600 h-full rounded-full transition-all duration-500 ease-out" 
+                                     :style="{ width: getProgressPercentage() + '%' }"
+                                     :class="{'animate-pulse': okoooStatus.isRunning}"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-3 gap-3">
+                            <div class="bg-green-50 p-3 rounded-lg border border-green-100 text-center">
+                                <div class="text-2xl font-bold text-green-600">{{ okoooStatus.stats.success }}</div>
+                                <div class="text-green-800 text-xs font-medium mt-1">成功</div>
+                            </div>
+                            <div class="bg-red-50 p-3 rounded-lg border border-red-100 text-center">
+                                <div class="text-2xl font-bold text-red-600">{{ okoooStatus.stats.failed }}</div>
+                                <div class="text-red-800 text-xs font-medium mt-1">失败</div>
+                            </div>
+                            <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-center">
+                                <div class="text-2xl font-bold text-yellow-600">{{ okoooStatus.stats.skipped }}</div>
+                                <div class="text-yellow-800 text-xs font-medium mt-1">跳过</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Logs -->
+                <div class="lg:col-span-2 bg-gray-900 rounded-lg shadow flex flex-col overflow-hidden border border-gray-800">
+                    <div class="flex justify-between items-center px-4 py-3 border-b border-gray-800 bg-gray-800/50">
+                        <h2 class="text-gray-200 text-sm font-bold flex items-center">
+                            <span class="w-2 h-2 rounded-full bg-green-500 mr-2 animate-pulse" v-if="okoooStatus.isRunning"></span>
+                            实时日志
+                        </h2>
+                        <button @click="clearLogs" class="text-xs text-gray-400 hover:text-white px-2 py-1 rounded hover:bg-gray-700 transition-colors">
+                            清空日志
+                        </button>
+                    </div>
+                    <div ref="logContainer" class="flex-1 p-4 overflow-y-auto font-mono text-xs space-y-1.5 scroll-smooth">
+                        <div v-if="okoooLogs.length === 0" class="text-gray-600 italic text-center mt-10">Waiting for logs...</div>
+                        <div v-for="(log, index) in okoooLogs" :key="index" :class="getLogClass(log.level)" class="break-words leading-relaxed">
+                            <span class="text-gray-500 opacity-70 select-none">[{{ log.timestamp }}]</span>
+                            <span class="ml-2">{{ log.message }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Result Detail Modal -->
         <div v-if="showResultDetailModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
             <div class="relative top-20 mx-auto p-5 border w-[800px] shadow-lg rounded-md bg-white">
@@ -347,11 +505,11 @@
     </div>
 
     <script>
-        const { createApp, ref, onMounted, onUnmounted, reactive } = Vue;
+        const { createApp, ref, onMounted, onUnmounted, reactive, computed } = Vue;
 
         createApp({
             setup() {
-                const currentTab = ref('pages');
+                const currentTab = ref('okooo'); // Default to Okooo tab as requested
                 const testPages = ref([]);
                 const testResults = ref([]);
                 const allTestResults = ref([]);
@@ -364,6 +522,33 @@
                 const isRunningTest = ref(false);
                 const runningTestMessage = ref('');
                 const editingPageId = ref(null);
+
+                // Okooo related state
+                const okoooMatches = ref([]);
+                const selectedOkoooMatches = ref([]);
+                const okoooDate = ref(''); // Selected date
+                const availableDates = ref([]); // Available dates from DB
+                const okoooConfig = ref({
+                    headless: false, // Default to headed as requested
+                    useCache: true   // Default to use cache as requested
+                });
+                const okoooForm = ref({
+                    startId: 1143895,
+                    endId: 1143900
+                });
+                const okoooStatus = ref({
+                    isRunning: false,
+                    stats: {
+                        total: 0,
+                        processed: 0,
+                        success: 0,
+                        failed: 0,
+                        skipped: 0
+                    }
+                });
+                const okoooLogs = ref([]);
+                const logContainer = ref(null);
+                let websocket = null;
 
                 const testPageForm = ref({
                     name: '',
@@ -753,12 +938,226 @@
                     return new Date(timeStr).toLocaleString();
                 };
 
+                // Okooo Functions
+                const fetchOkoooStatus = async () => {
+                    try {
+                        const response = await axios.get('/api/v1/okooo/status');
+                        if (response.data.success) {
+                            const data = response.data.data;
+                            okoooStatus.value.isRunning = data.is_running;
+                            if (data.stats) {
+                                okoooStatus.value.stats = data.stats;
+                            }
+                        }
+                    } catch (error) {
+                        console.error('Error fetching Okooo status:', error);
+                    }
+                };
+
+                const startOkoooCrawl = async () => {
+                    if (okoooForm.value.startId > okoooForm.value.endId) {
+                        alert('起始ID不能大于结束ID');
+                        return;
+                    }
+                    try {
+                        const response = await axios.post('/api/v1/okooo/start', {
+                            start_id: okoooForm.value.startId,
+                            end_id: okoooForm.value.endId
+                        });
+                        if (response.data.success) {
+                            okoooStatus.value.isRunning = true;
+                            alert('爬虫已启动');
+                        } else {
+                            alert('启动失败: ' + response.data.message);
+                        }
+                    } catch (error) {
+                        alert('启动失败: ' + error.message);
+                    }
+                };
+
+                const stopOkoooCrawl = async () => {
+                    if (!confirm('确定要停止爬虫吗？')) return;
+                    try {
+                        const response = await axios.post('/api/v1/okooo/stop');
+                        if (response.data.success) {
+                            alert('停止指令已发送');
+                        } else {
+                            alert('停止失败: ' + response.data.message);
+                        }
+                    } catch (error) {
+                        alert('停止失败: ' + error.message);
+                    }
+                };
+
+                const fetchOkoooDates = async () => {
+                    try {
+                        const response = await axios.get('/api/v1/okooo/matches/dates');
+                        if (response.data.success) {
+                            availableDates.value = response.data.data;
+                        }
+                    } catch (error) {
+                        console.error('Error fetching Okooo dates:', error);
+                    }
+                };
+
+                const fetchOkoooMatches = async () => {
+                    if (okoooStatus.value.isRunning) return;
+                    try {
+                        let response;
+                        if (okoooDate.value) {
+                            // Fetch from DB by date
+                            response = await axios.get('/api/v1/okooo/matches', {
+                                params: { date: okoooDate.value }
+                            });
+                        } else {
+                            // Use fetch_lists endpoint (Live)
+                            response = await axios.post('/api/v1/okooo/fetch_lists', {
+                                headless: okoooConfig.value.headless,
+                                use_cache: okoooConfig.value.useCache
+                            });
+                        }
+
+                        if (response.data.success) {
+                            okoooMatches.value = response.data.data;
+                            // Reset selection
+                            selectedOkoooMatches.value = [];
+                            if (okoooMatches.value.length === 0) {
+                                alert('未获取到比赛数据');
+                            }
+                        } else {
+                            alert('获取列表失败: ' + response.data.message);
+                        }
+                    } catch (error) {
+                        alert('获取列表失败: ' + error.message);
+                    }
+                };
+
+                const startSelectedOkoooCrawl = async () => {
+                    if (selectedOkoooMatches.value.length === 0) return;
+                    
+                    try {
+                        const response = await axios.post('/api/v1/okooo/start_ids', {
+                            match_ids: selectedOkoooMatches.value,
+                            headless: okoooConfig.value.headless,
+                            use_cache: okoooConfig.value.useCache
+                        });
+                        if (response.data.success) {
+                            okoooStatus.value.isRunning = true;
+                            alert('选中比赛爬取任务已启动');
+                        } else {
+                            alert('启动失败: ' + response.data.message);
+                        }
+                    } catch (error) {
+                        alert('启动失败: ' + error.message);
+                    }
+                };
+
+                const crawlSingleOkoooMatch = async (match) => {
+                    if (okoooStatus.value.isRunning) return;
+                    
+                    try {
+                        const response = await axios.post('/api/v1/okooo/start_ids', {
+                            match_ids: [match.match_id],
+                            headless: okoooConfig.value.headless,
+                            use_cache: okoooConfig.value.useCache
+                        });
+                        if (response.data.success) {
+                            okoooStatus.value.isRunning = true;
+                            alert(`比赛 ${match.match_id} 爬取任务已启动`);
+                        } else {
+                            alert('启动失败: ' + response.data.message);
+                        }
+                    } catch (error) {
+                        alert('启动失败: ' + error.message);
+                    }
+                };
+
+                const toggleAllOkoooMatches = () => {
+                    if (selectedOkoooMatches.value.length === okoooMatches.value.length) {
+                        selectedOkoooMatches.value = [];
+                    } else {
+                        selectedOkoooMatches.value = okoooMatches.value.map(m => m.match_id);
+                    }
+                };
+
+                const isAllOkoooMatchesSelected = Vue.computed(() => {
+                    return okoooMatches.value.length > 0 && selectedOkoooMatches.value.length === okoooMatches.value.length;
+                });
+
+                const getHandicapClass = (handicap) => {
+                    if (!handicap) return 'text-gray-500';
+                    const h = parseInt(handicap);
+                    if (isNaN(h)) return 'text-gray-500';
+                    if (h > 0) return 'text-red-600';
+                    if (h < 0) return 'text-green-600';
+                    return 'text-gray-600';
+                };
+
+                const initWebSocket = () => {
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/api/v1/timed-task/ws`;
+                    
+                    websocket = new WebSocket(wsUrl);
+                    
+                    websocket.onmessage = (event) => {
+                        try {
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'okooo_log') {
+                                okoooLogs.value.push(data);
+                                // Auto scroll
+                                Vue.nextTick(() => {
+                                    if (logContainer.value) {
+                                        logContainer.value.scrollTop = logContainer.value.scrollHeight;
+                                    }
+                                });
+                            } else if (data.type === 'okooo_progress') {
+                                okoooStatus.value.stats.processed = data.processed;
+                                okoooStatus.value.stats.total = data.total;
+                            } else if (data.type === 'okooo_status') {
+                                okoooStatus.value.isRunning = data.is_running;
+                            }
+                        } catch (e) {
+                            console.error('WebSocket message parse error:', e);
+                        }
+                    };
+
+                    websocket.onclose = () => {
+                        console.log('WebSocket disconnected, retrying in 5s...');
+                        setTimeout(initWebSocket, 5000);
+                    };
+                };
+
+                const getProgressPercentage = () => {
+                    const { processed, total } = okoooStatus.value.stats;
+                    if (total === 0) return 0;
+                    return Math.min(100, Math.round((processed / total) * 100));
+                };
+
+                const getLogClass = (level) => {
+                    switch (level) {
+                        case 'ERROR': return 'text-red-400';
+                        case 'WARNING': return 'text-yellow-400';
+                        case 'INFO': return 'text-green-400';
+                        default: return 'text-gray-300';
+                    }
+                };
+
+                const clearLogs = () => {
+                    okoooLogs.value = [];
+                };
+
                 onMounted(() => {
                     if (window.initNavbar) {
                         window.initNavbar();
                     }
                     fetchTestPages();
                     fetchTestResults();
+                    fetchOkoooStatus();
+                    initWebSocket();
+                    fetchOkoooDates();
+                    
+                    // Poll status every 5 seconds as backup
+                    setInterval(fetchOkoooStatus, 5000);
                 });
 
                 onUnmounted(() => {
@@ -802,7 +1201,28 @@
                     getTestPageName,
                     getTestTypeClass,
                     getResultClass,
-                    formatTime
+                    formatTime,
+                    // Okooo
+                    okoooMatches,
+                    selectedOkoooMatches,
+                    okoooDate,
+                    availableDates,
+                    fetchOkoooDates,
+                    okoooConfig,
+                    okoooStatus,
+                    okoooLogs,
+                    logContainer,
+                    fetchOkoooMatches,
+                    startSelectedOkoooCrawl,
+                    crawlSingleOkoooMatch,
+                    toggleAllOkoooMatches,
+                    isAllOkoooMatchesSelected,
+                    getHandicapClass,
+                    startOkoooCrawl,
+                    stopOkoooCrawl,
+                    clearLogs,
+                    getProgressPercentage,
+                    getLogClass
                 };
             }
         }).mount('#app');

@@ -38,7 +38,7 @@ setup_logging()
 # 导入控制器 (在日志配置后导入，确保日志sink正确设置)
 from .api import stock_controller, monitor_controller, health_controller, wencai_controller, network_controller, stock_daily_controller, favorites_controller, analysis_controller, trading_rules_controller, morphology_controller, test_tool_controller, system_controller, tag_controller, timed_task_controller, stock_score_controller, dashboard_controller, volume_analysis_controller, debug_controller, ranking_controller, stock_sync_controller, cookie_controller, crawler_controller, adb_controller, automation_controller, pattern_analysis_controller, platform_controller, session_controller, data_merge_controller, decision_controller, arena_controller, test_page_controller
 # from .api import generic_task_controller, mcp_controller, simulation_controller  # 暂时注释掉MCP相关,避免启动失败
-from .api import generic_task_controller, simulation_controller
+from .api import generic_task_controller, simulation_controller, okooo_controller
 from .api.schemas import ErrorResponse
 
 
@@ -245,6 +245,7 @@ async def log_requests(request: Request, call_next):
 
 # 注册路由
 app.include_router(health_controller.router)
+app.include_router(okooo_controller.router)
 app.include_router(stock_controller.router)
 app.include_router(monitor_controller.router)
 app.include_router(wencai_controller.router)

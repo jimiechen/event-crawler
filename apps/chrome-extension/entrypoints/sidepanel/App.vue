@@ -2625,7 +2625,7 @@ const selectTool = (tool: any) => {
   
   // 根据工具的输入模式生成示例参数
   if (tool.inputSchema && tool.inputSchema.properties) {
-    const exampleParams = {};
+    const exampleParams: Record<string, any> = {};
     Object.keys(tool.inputSchema.properties).forEach(key => {
       const prop = tool.inputSchema.properties[key];
       if (prop.type === 'string') {

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
+from datetime import date
 from typing import Optional, Dict, Any
-from sqlalchemy import String, Integer, JSON
+from sqlalchemy import String, Integer, JSON, Date
 from sqlalchemy.orm import Mapped, mapped_column
 from app.models.base import Base, TimestampMixin
 
@@ -17,6 +18,7 @@ class OkoooMatch(Base, TimestampMixin):
     home_team: Mapped[str] = mapped_column(String(100), comment="主队名称", index=True)
     away_team: Mapped[str] = mapped_column(String(100), comment="客队名称", index=True)
     match_time_text: Mapped[Optional[str]] = mapped_column(String(100), comment="比赛时间文本", nullable=True)
+    match_date: Mapped[Optional[date]] = mapped_column(Date, comment="比赛日期", index=True, nullable=True)
     
     # 存储完整解析数据，包含 match_info, home_history, away_history, head_to_head, future_matches
     history_data: Mapped[Dict[str, Any]] = mapped_column(JSON, comment="历史交锋完整数据")

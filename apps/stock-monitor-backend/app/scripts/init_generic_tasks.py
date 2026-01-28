@@ -63,6 +63,16 @@ async def init_tasks():
                 "cron_expression": "30 17 * * 1-5",  # 周一至周五 17:30
                 "description": "每日盘后执行全流程仿真 (问财抓取 -> 优选 -> 评分 -> 异动分析)",
                 "priority": 6
+            },
+            {
+                "name": "每日Okooo比赛抓取",
+                "task_category": "crawler",
+                "api_method": "POST",
+                "api_endpoint": "/api/v1/okooo/start_lists",
+                "request_params": {},
+                "cron_expression": "0 13 * * *",  # 每天 13:00
+                "description": "每日从Okooo列表页面抓取比赛",
+                "priority": 8
             }
         ]
         

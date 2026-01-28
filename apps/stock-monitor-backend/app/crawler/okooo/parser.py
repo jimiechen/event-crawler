@@ -14,6 +14,242 @@ class OkoooParser:
     """
 
     @staticmethod
+    def parse_match_list(html_content: str) -> List[Dict[str, Any]]:
+        """
+        解析比赛列表页面，提取比赛详情
+        返回: List[Dict] 包含 match_id, league, home, away, handicap, time
+        """
+        soup = BeautifulSoup(html_content, 'lxml')
+        matches = []
+        seen_ids = set()
+        
+        # 查找所有比赛项
+        # 结构: <div class="clearfix center listItem ctrl_eachmatch jsMatchItem" data-mid="...">
+        items = soup.find_all('div', class_='jsMatchItem')
+        
+        for item in items:
+            try:
+                # 1. Match ID
+                # 尝试从 data-matchid 或内部链接获取
+                match_id = None
+                
+                # 查找包含 matchid 的元素
+                mid_elem = item.find(attrs={"matchid": True})
+                if mid_elem:
+                    match_id = mid_elem.get("matchid")
+                
+                if not match_id:
+                    # 尝试从链接提取
+                    link = item.find('a', href=re.compile(r'MatchID=(\d+)'))
+                    if link:
+                        m = re.search(r'MatchID=(\d+)', link.get('href'))
+                        if m:
+                            match_id = m.group(1)
+                            
+                if not match_id or match_id in seen_ids:
+                    continue
+                    
+                seen_ids.add(match_id)
+                
+                # 2. League
+                league = ""
+                league_elem = item.find(class_='liansai')
+                if league_elem:
+                    league = league_elem.get_text(strip=True)
+                else:
+                    # 备选: leaguename 属性
+                    ln_elem = item.find(attrs={"leaguename": True})
+                    if ln_elem:
+                        league = ln_elem.get("leaguename")
+                        
+                # 3. Time
+                match_time = ""
+                time_elem = item.find(class_='timetxt')
+                if time_elem:
+                    match_time = time_elem.get_text(strip=True)
+                    
+                # 4. Teams
+                home_team = ""
+                away_team = ""
+                
+                # 尝试 ctrl_homename / ctrl_awayname
+                home_elem = item.find(class_='ctrl_homename')
+                if home_elem:
+                    home_team = home_elem.get_text(strip=True)
+                
+                away_elem = item.find(class_='ctrl_awayname')
+                if away_elem:
+                    away_team = away_elem.get_text(strip=True)
+                    
+                # 如果找不到，尝试 hn/an 属性
+                if not home_team or not away_team:
+                    team_attr_elem = item.find(attrs={"hn": True, "an": True})
+                    if team_attr_elem:
+                        if not home_team:
+                            home_team = team_attr_elem.get("hn")
+                        if not away_team:
+                            away_team = team_attr_elem.get("an")
+                            
+                # 5. Handicap (让球)
+                handicap = ""
+                rq_elem = item.find(class_='rangqiu')
+                if rq_elem:
+                    handicap = rq_elem.get_text(strip=True)
+                    
+                matches.append({
+                    "match_id": match_id,
+                    "league": league,
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "handicap": handicap,
+                    "match_time": match_time
+                })
+                
+            except Exception as e:
+                logger.warning(f"Error parsing match item: {e}")
+                continue
+                
+        return matches
+
+    @staticmethod
+    def parse_mobile_match_list(html_content: str) -> List[Dict[str, Any]]:
+        """
+        解析手机版比赛列表
+        """
+        soup = BeautifulSoup(html_content, 'lxml')
+        matches = []
+        seen_ids = set()
+        
+        # 1. 尝试查找特定结构的比赛列表 (根据m.okooo.com常见结构)
+        # 结构通常是: .match-list-item or similar
+        # Added 'ctrl_eachmatch' for BJDC/JCZQ lists
+        items = soup.find_all('div', class_=re.compile(r'match-item|match_list|match-wrapper|ctrl_eachmatch'))
+        
+        # If no items found with specific classes, try generic div but check for data-id strictly
+        if not items:
+            items = soup.find_all('div', attrs={'data-id': True})
+            
+        for item in items:
+            try:
+                match_id = item.get('data-id') or item.get('id')
+                
+                # Try to find MatchID from link if not in attributes (common in bjdc/jczq)
+                if not match_id or not str(match_id).isdigit():
+                     link = item.find('a', href=re.compile(r'MatchID=(\d+)'))
+                     if link:
+                         m = re.search(r'MatchID=(\d+)', link.get('href'))
+                         if m:
+                             match_id = m.group(1)
+
+                # Verify match_id is numeric
+                if not match_id or not str(match_id).isdigit():
+                    # 尝试从链接提取 (pattern 2)
+                    link = item.find('a', href=re.compile(r'/match/(\d+)'))
+                    if link:
+                        m = re.search(r'/match/(\d+)', link.get('href'))
+                        if m:
+                            match_id = m.group(1)
+                
+                if not match_id or not str(match_id).isdigit():
+                    continue
+                    
+                if match_id in seen_ids:
+                    continue
+                seen_ids.add(match_id)
+                
+                # 提取信息
+                league = ""
+                league_elem = item.find(class_=re.compile(r'league|match-name|liansai'))
+                if league_elem:
+                    league = league_elem.get_text(strip=True)
+                    
+                home_team = ""
+                away_team = ""
+                
+                # Try specific classes for BJDC/JCZQ
+                home_ctrl = item.find(class_='ctrl_homename')
+                away_ctrl = item.find(class_='ctrl_awayname')
+                
+                if home_ctrl and away_ctrl:
+                    home_team = home_ctrl.get_text(strip=True)
+                    away_team = away_ctrl.get_text(strip=True)
+                else:
+                    teams = item.find_all(class_=re.compile(r'team-name|name|duiwu'))
+                    if len(teams) >= 2:
+                        home_team = teams[0].get_text(strip=True)
+                        away_team = teams[1].get_text(strip=True)
+                    else:
+                        # Try finding by attributes or specific classes
+                        home_elem = item.find(class_='home-team')
+                        away_elem = item.find(class_='away-team')
+                        if home_elem: home_team = home_elem.get_text(strip=True)
+                        if away_elem: away_team = away_elem.get_text(strip=True)
+
+                # Handicap
+                handicap = ""
+                rq_elem = item.find(class_=re.compile(r'rangqiu|handicap'))
+                if rq_elem:
+                    handicap = rq_elem.get_text(strip=True)
+                
+                # Time
+                match_time = ""
+                time_elem = item.find(class_=re.compile(r'timetxt|match-time'))
+                if time_elem:
+                    match_time = time_elem.get_text(strip=True)
+
+                matches.append({
+                    "match_id": match_id,
+                    "league": league,
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "handicap": handicap,
+                    "match_time": match_time
+                })
+            except Exception:
+                continue
+                
+        # 2. 如果上面没找到，尝试直接通过链接提取
+        if not matches:
+            # Look for links containing /match/ or match.php?MatchID=
+            links = soup.find_all('a', href=True)
+            for link in links:
+                try:
+                    href = link.get('href')
+                    match_id = None
+                    
+                    # Pattern 1: /match/123456/
+                    m1 = re.search(r'/match/(\d+)', href)
+                    if m1:
+                        match_id = m1.group(1)
+                        
+                    # Pattern 2: match.php?MatchID=123456
+                    if not match_id:
+                        m2 = re.search(r'MatchID=(\d+)', href, re.IGNORECASE)
+                        if m2:
+                            match_id = m2.group(1)
+                            
+                    if not match_id: continue
+                    if match_id in seen_ids: continue
+                    
+                    seen_ids.add(match_id)
+                    
+                    # Try to get text context for teams
+                    text = link.get_text(strip=True)
+                    
+                    matches.append({
+                        "match_id": match_id,
+                        "league": "",
+                        "home_team": text if len(text) > 5 else "", # Rough guess
+                        "away_team": "",
+                        "handicap": "",
+                        "match_time": ""
+                    })
+                except Exception:
+                    continue
+
+        return matches
+
+    @staticmethod
     def parse_history(html_content: str) -> Dict[str, Any]:
         """
         解析历史战绩页面
@@ -29,6 +265,9 @@ class OkoooParser:
         
         # Parse Match Header Info
         nav_content = soup.find('div', class_='match-nav-content')
+        if not nav_content:
+            logger.warning(f"Could not find match-nav-content. Page title: {soup.title.string if soup.title else 'No Title'}")
+
         if nav_content:
             try:
                 home_team_tag = nav_content.find('a', href=re.compile(r'/team/'))
@@ -162,6 +401,199 @@ class OkoooParser:
                         found_future = True
                         break
                 
+                if not found_future:
+                     if "未来三场" in title_div.get_text(strip=True):
+                          future_sections.append(sec)
+        
+        if len(future_sections) >= 1:
+            data["future_matches"]["home"] = parse_future_section(future_sections[0])
+                
+        if len(future_sections) >= 2:
+            data["future_matches"]["away"] = parse_future_section(future_sections[1])
+
+        return data
+
+    @staticmethod
+    def parse_mobile_history(html_content: str) -> Dict[str, Any]:
+        """
+        解析手机版历史战绩页面
+        """
+        soup = BeautifulSoup(html_content, 'lxml')
+        data = {
+            "match_info": {},
+            "home_history": [],
+            "away_history": [],
+            "head_to_head": [],
+            "future_matches": {"home": [], "away": []}
+        }
+        
+        # Parse Match Header Info
+        nav_content = soup.find('div', class_='match-nav-content')
+        if nav_content:
+            try:
+                home_team_tag = nav_content.find('a', href=re.compile(r'/team/'))
+                away_team_tag = nav_content.find_all('a', href=re.compile(r'/team/'))[-1]
+                
+                # Extract League from Title
+                league_match = re.search(r'【(.*?)】', soup.title.string) if soup.title else None
+                league = league_match.group(1) if league_match else ""
+
+                data["match_info"] = {
+                    "home_team": home_team_tag.get_text(strip=True) if home_team_tag else "",
+                    "away_team": away_team_tag.get_text(strip=True) if away_team_tag else "",
+                    "score_text": nav_content.find('div', class_='date').get_text(strip=True) if nav_content.find('div', class_='date') else "",
+                    "league": league
+                }
+            except Exception as e:
+                logger.warning(f"Error parsing header: {e}")
+
+        # Fallback parsing if team names are missing
+        if not data["match_info"].get("home_team") or not data["match_info"].get("away_team"):
+            logger.info("Attempting fallback parsing for team names from title...")
+            title = soup.title.string if soup.title else ""
+            
+            # Pattern 1: 【League】Home vs Away
+            m = re.search(r'【(.*?)】\s*(.*?)\s*vs\s*(.*?)\s*[-_]', title)
+            if m:
+                if not data["match_info"].get("league"):
+                    data["match_info"]["league"] = m.group(1)
+                data["match_info"]["home_team"] = m.group(2).strip()
+                data["match_info"]["away_team"] = m.group(3).strip()
+            else:
+                # Pattern 2: Home vs Away 【League】 (Common in some mobile views)
+                # Title format e.g.: "战绩走势-Home vs Away【League】-Suffix"
+                m3 = re.search(r'(?:战绩走势-)?(.*?)\s*vs\s*(.*?)\s*【(.*?)】', title)
+                if m3:
+                    data["match_info"]["home_team"] = m3.group(1).strip()
+                    data["match_info"]["away_team"] = m3.group(2).strip()
+                    if not data["match_info"].get("league"):
+                        data["match_info"]["league"] = m3.group(3)
+                else:
+                    # Pattern 3: Simple Home vs Away
+                    m2 = re.search(r'(?:战绩走势-)?(.*?)\s*vs\s*(.*?)\s*[-_]', title)
+                    if m2:
+                         data["match_info"]["home_team"] = m2.group(1).strip()
+                         data["match_info"]["away_team"] = m2.group(2).strip()
+
+        # Helper to parse table rows
+        def parse_table(section_type: str) -> List[Dict[str, Any]]:
+            rows_data = []
+            section = soup.find('section', attrs={'type': section_type})
+            if not section:
+                return rows_data
+            
+            # Identify "Subject Team" (Home or Away) for comparison
+            # section_type "home" means Home Team's history, so Subject is Home Team.
+            # section_type "away" means Away Team's history, so Subject is Away Team.
+            subject_team_name = data["match_info"].get("home_team") if section_type == "home" else data["match_info"].get("away_team")
+            
+            rows = section.select('table.matchtable tr')
+            for row in rows:
+                try:
+                    # Skip if not a data row (some might be headers or hidden)
+                    if not row.get('data-matchid'):
+                        continue
+                        
+                    cells = row.find_all('td')
+                    if len(cells) < 5:
+                        continue
+                        
+                    # Date & League
+                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
+                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
+                    
+                    # Score
+                    score_tag = row.find('a', href=re.compile(r'history\.php'))
+                    score = score_tag.get_text(strip=True) if score_tag else ""
+                    
+                    # Result (Win/Draw/Loss)
+                    result = cells[4].get_text(strip=True)
+
+                    # Opponent & Rank
+                    # Left Team
+                    left_team_div = cells[1].find('div', class_='team-name-l')
+                    left_team_name = left_team_div.find('b').get_text(strip=True)
+                    left_team_rank_tag = left_team_div.find_all('i')[-1] if left_team_div.find_all('i') else None
+                    left_team_rank = left_team_rank_tag.get_text(strip=True) if left_team_rank_tag else ""
+
+                    # Right Team
+                    right_team_div = cells[3].find('div', class_='team-name-r')
+                    right_team_name = right_team_div.find('b').get_text(strip=True)
+                    right_team_rank_tag = right_team_div.find_all('i')[0] if right_team_div.find_all('i') else None
+                    right_team_rank = right_team_rank_tag.get_text(strip=True) if right_team_rank_tag else ""
+
+                    if left_team_name == subject_team_name:
+                        opponent = right_team_name
+                        opponent_rank = right_team_rank
+                    else:
+                        opponent = left_team_name
+                        opponent_rank = left_team_rank
+                    
+                    rows_data.append({
+                        "match_id": row.get('data-matchid'),
+                        "league": league,
+                        "date": date_str,
+                        "score": score,
+                        "result": result,
+                        "opponent": opponent,
+                        "opponent_rank": opponent_rank
+                    })
+                except Exception as e:
+                    logger.warning(f"Error parsing row in {section_type}: {e}")
+            return rows_data
+
+        # Helper for Future Matches
+        def parse_future_section(section) -> List[Dict[str, Any]]:
+            rows_data = []
+            if not section:
+                return rows_data
+                
+            rows = section.select('table.matchtable tr')
+            for row in rows:
+                try:
+                    if not row.get('data-matchid'): continue
+                    cells = row.find_all('td')
+                    if len(cells) < 5: continue
+                    
+                    league = cells[0].find('p').get_text(strip=True) if cells[0].find('p') else ""
+                    date_str = cells[0].find_all('p')[1].get_text(strip=True) if len(cells[0].find_all('p')) > 1 else ""
+                    
+                    left_team = cells[1].get_text(strip=True)
+                    right_team = cells[3].get_text(strip=True)
+                    interval = cells[4].get_text(strip=True)
+                    
+                    rows_data.append({
+                        "league": league,
+                        "date": date_str,
+                        "home_team": left_team,
+                        "away_team": right_team,
+                        "interval": interval
+                    })
+                except Exception:
+                    pass
+            return rows_data
+
+        data["home_history"] = parse_table("home")
+        data["away_history"] = parse_table("away")
+        data["head_to_head"] = parse_table("vs")
+        
+        # Future matches
+        future_sections = []
+        sections = soup.find_all('section', class_='matchtabbox')
+        for sec in sections:
+            title_div = sec.find('div', class_='titlebox')
+            if title_div:
+                # Check all spans
+                spans = title_div.find_all('span')
+                found_future = False
+                for s in spans:
+                    text = s.get_text(strip=True)
+                    if "未来三场" in text:
+                        future_sections.append(sec)
+                        found_future = True
+                        break
+                
+                # If not found in spans, check the whole div text
                 if not found_future:
                      if "未来三场" in title_div.get_text(strip=True):
                           future_sections.append(sec)

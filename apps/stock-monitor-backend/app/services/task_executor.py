@@ -64,6 +64,16 @@ class TaskExecutor:
             max_instances=1
         )
         
+        # Add daily Okooo crawl job (runs at 13:00 every day)
+        self.scheduler.add_job(
+            self.schedule_okooo_daily_crawl,
+            trigger=CronTrigger(hour=13, minute=0),
+            id="okooo_daily_crawl",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1
+        )
+        
         logger.info("TaskExecutor initialized with APScheduler")
 
     @property
@@ -123,6 +133,16 @@ class TaskExecutor:
         # TODO: Implement batch job creation logic here
         # For example, fetch all active stocks and create 'analyze_stock' tasks in DB
         pass
+
+    async def schedule_okooo_daily_crawl(self):
+        """Scheduled job to trigger daily Okooo match list crawl"""
+        try:
+            from app.services.okooo_service import okooo_service
+            logger.info("Starting daily Okooo crawl task...")
+            # Start crawl from lists with cache enabled to bypass WAF
+            await okooo_service.start_crawl_lists(headless=True, use_cache=True)
+        except Exception as e:
+            logger.error(f"Failed to start daily Okooo crawl: {e}")
 
     async def execute_task(self, log_id: int, repo: TaskExecutionLogRepository):
         # Check processing lock

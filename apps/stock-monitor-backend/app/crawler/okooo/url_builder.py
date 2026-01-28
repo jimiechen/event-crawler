@@ -9,6 +9,9 @@ class OkoooPageType(Enum):
     """
     MATCH_DETAIL = "match_detail"  # 比赛详情页（包含概览、阵容等）
     HISTORY = "history"            # 历史战绩页
+    MOBILE_HISTORY = "mobile_history" # 手机版历史战绩页
+    MOBILE_ODDS = "mobile_odds"       # 手机版欧指页
+    MOBILE_HANDICAP = "mobile_handicap" # 手机版亚指页
     EXCHANGES = "exchanges"        # 欧赔页面（百家欧赔）
     AH = "ah"                      # 亚盘页面（亚盘对比）
     ANALYSIS = "analysis"          # 数据分析页
@@ -42,6 +45,12 @@ class OkoooUrlBuilder:
             return f"{base_match_url}/"
         elif page_type == OkoooPageType.HISTORY:
             return f"{base_match_url}/history/"
+        elif page_type == OkoooPageType.MOBILE_HISTORY:
+            return f"https://m.okooo.com/match/history.php?MatchID={match_id}"
+        elif page_type == OkoooPageType.MOBILE_ODDS:
+            return f"https://m.okooo.com/match/odds.php?MatchID={match_id}&from="
+        elif page_type == OkoooPageType.MOBILE_HANDICAP:
+            return f"https://m.okooo.com/match/handicap.php?MatchID={match_id}&from="
         elif page_type == OkoooPageType.EXCHANGES:
             return f"{base_match_url}/exchanges/"
         elif page_type == OkoooPageType.AH:

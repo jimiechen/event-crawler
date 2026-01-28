@@ -133,10 +133,10 @@ class ShallowDetector:
             )
         
         gaps = [r.handicap_gap for r in company_results]
-        avg_gap = sum(gaps) / len(gaps)
+        avg_gap = sum(gaps) / len(gaps) if gaps else 0.0
         
         shallow_companies = sum(1 for r in company_results if r.is_shallow)
-        shallow_ratio = shallow_companies / len(company_results)
+        shallow_ratio = shallow_companies / len(company_results) if company_results else 0
         
         water_diffs = [r.water_difference for r in company_results if r.actual_handicap > 0]
         avg_water_diff = sum(water_diffs) / len(water_diffs) if water_diffs else 0.15
@@ -144,22 +144,24 @@ class ShallowDetector:
         reasons = []
         warnings = []
         
-        if avg_gap > 0.5:
-            shallow_score = min(100, 50 + avg_gap * 20)
+        avg_gap_float = float(avg_gap) if not isinstance(avg_gap, (int, float)) else avg_gap
+        
+        if avg_gap_float > 0.5:
+            shallow_score = min(100, 50 + avg_gap_float * 20)
             shallow_level = ShallowLevel.EXTREMELY_SHALLOW
-            reasons.append(f"多家公司盘口明显偏浅，平均差距达{avg_gap:.2f球}")
-        elif avg_gap > 0.35:
-            shallow_score = min(100, 40 + avg_gap * 25)
+            reasons.append(f"多家公司盘口明显偏浅，平均差距达{avg_gap_float:.2f}球")
+        elif avg_gap_float > 0.35:
+            shallow_score = min(100, 40 + avg_gap_float * 25)
             shallow_level = ShallowLevel.VERY_SHALLOW
-            reasons.append(f"盘口深度不足，与预期差距{avg_gap:.2f球}")
-        elif avg_gap > 0.2:
-            shallow_score = min(100, 30 + avg_gap * 30)
+            reasons.append(f"盘口深度不足，与预期差距{avg_gap_float:.2f}球")
+        elif avg_gap_float > 0.2:
+            shallow_score = min(100, 30 + avg_gap_float * 30)
             shallow_level = ShallowLevel.MODERATELY_SHALLOW
-            reasons.append(f"盘口略浅，存在一定差距{avg_gap:.2f球}")
-        elif avg_gap > 0.1:
-            shallow_score = min(100, 20 + avg_gap * 40)
+            reasons.append(f"盘口略浅，存在一定差距{avg_gap_float:.2f}球")
+        elif avg_gap_float > 0.1:
+            shallow_score = min(100, 20 + avg_gap_float * 40)
             shallow_level = ShallowLevel.SLIGHTLY_SHALLOW
-            warnings.append(f"盘口轻微偏浅，差距{avg_gap:.2f球}")
+            warnings.append(f"盘口轻微偏浅，差距{avg_gap_float:.2f}球")
         else:
             shallow_score = min(100, max(0, 20 - avg_gap * 20))
             shallow_level = ShallowLevel.NOT_SHALLOW

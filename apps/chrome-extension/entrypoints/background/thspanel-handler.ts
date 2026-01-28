@@ -98,7 +98,7 @@ export function initThsPanelListener() {
         startNetworkCapture(message.pattern, message.tabId);
         console.log('Background: 网络捕获启动成功');
         sendResponse({ success: true });
-      } catch (error) {
+      } catch (error: any) {
         console.error('Background: 网络捕获启动失败:', error);
         sendResponse({ success: false, error: error.message });
       }
@@ -110,7 +110,7 @@ export function initThsPanelListener() {
         stopNetworkCapture();
         console.log('Background: 网络捕获停止成功');
         sendResponse({ success: true });
-      } catch (error) {
+      } catch (error: any) {
         console.error('Background: 网络捕获停止失败:', error);
         sendResponse({ success: false, error: error.message });
       }
@@ -123,7 +123,7 @@ export function initThsPanelListener() {
         chrome.sidePanel.open({ tabId: message.tabId });
         console.log('Background: THS Panel 打开成功');
         sendResponse({ success: true });
-      } catch (error) {
+      } catch (error: any) {
         console.error('Background: THS Panel 打开失败:', error);
         sendResponse({ success: false, error: error.message });
       }
@@ -135,7 +135,7 @@ export function initThsPanelListener() {
         const status = getNetworkCaptureStatus();
         console.log('Background: 网络捕获状态:', status);
         sendResponse(status);
-      } catch (error) {
+      } catch (error: any) {
         console.error('Background: 获取网络捕获状态失败:', error);
         sendResponse({ success: false, error: error.message });
       }
@@ -432,13 +432,13 @@ async function handleDebuggerNetworkResponse(tabId: number, params: any) {
     if (!url || !url.includes(networkCaptureState.pattern)) return;
     
     // 获取响应体
-    const response = await chrome.debugger.sendCommand(
+    const response = (await chrome.debugger.sendCommand(
       { tabId },
       'Network.getResponseBody',
       { requestId: params.requestId }
-    );
+    )) as any;
     
-    if (response.body) {
+    if (response && response.body) {
       const jsonpData = parseJsonpResponse(response.body);
       
       // 发送数据到thspanel

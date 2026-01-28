@@ -339,10 +339,14 @@ class TeamAnalyzer:
     
     def _analyze_league_position(self) -> float:
         """分析联赛排名评分"""
-        points_table = self.game_points.get('points_table', [])
+        points_table = self.game_points
+        if isinstance(self.game_points, dict):
+            points_table = self.game_points.get('points_table', [])
+        elif not isinstance(self.game_points, list):
+            points_table = []
         
         for team in points_table:
-            if '利雅得胜利' in team.get('team', ''):
+            if isinstance(team, dict) and '利雅得胜利' in team.get('team', ''):
                 rank = int(team.get('rank', 10))
                 points = int(team.get('points', 0))
                 
@@ -355,10 +359,14 @@ class TeamAnalyzer:
     
     def _analyze_away_position(self) -> float:
         """分析客队联赛排名评分"""
-        points_table = self.game_points.get('points_table', [])
+        points_table = self.game_points
+        if isinstance(self.game_points, dict):
+            points_table = self.game_points.get('points_table', [])
+        elif not isinstance(self.game_points, list):
+            points_table = []
         
         for team in points_table:
-            if '布赖合作' in team.get('team', ''):
+            if isinstance(team, dict) and '布赖合作' in team.get('team', ''):
                 rank = int(team.get('rank', 10))
                 points = int(team.get('points', 0))
                 

@@ -305,8 +305,15 @@ class TrapDetector:
         score = 0.0
         
         five_factors = self.exchanges.get('five_factors', [])
+        if not five_factors:
+            five_factors = self.exchanges.get('five_elements', [])
+        
+        if five_factors and not isinstance(five_factors, list):
+            five_factors = []
         
         for factor in five_factors:
+            if not isinstance(factor, dict):
+                continue
             factor_name = factor.get('factor', '')
             suggestion = factor.get('suggestion', '')
             
@@ -318,20 +325,30 @@ class TrapDetector:
             if factor_name == '人气':
                 if '主胜' in suggestion:
                     popularity_data = self.exchanges.get('jczq_popularity', [])
-                    for pop in popularity_data:
-                        if pop.get('result') == '胜':
-                            hot_cold = int(pop.get('hot_cold', 0))
-                            if hot_cold > 5:
-                                score = max(score, 35)
-                                warnings.append("主胜热度较高，需警惕过热风险")
+                    if isinstance(popularity_data, list):
+                        for pop in popularity_data:
+                            if isinstance(pop, dict) and pop.get('result') == '胜':
+                                try:
+                                    hot_cold = int(pop.get('hot_cold', 0))
+                                    if hot_cold > 5:
+                                        score = max(score, 35)
+                                        warnings.append("主胜热度较高，需警惕过热风险")
+                                except:
+                                    pass
         
-        betfair = self.exchanges.get('betfair_transaction', [])
+        betfair = self.exchanges.get('bifa_transaction', [])
+        if not isinstance(betfair, list):
+            betfair = self.exchanges.get('betfair_transaction', [])
+        
         for bet in betfair:
-            if bet.get('result') == '胜':
-                hot_cold = int(bet.get('hot_cold', 0))
-                if hot_cold > 20:
-                    score = max(score, 40)
-                    warnings.append("必发主胜交易热度异常偏高，可能存在诱盘风险")
+            if isinstance(bet, dict) and bet.get('result') == '胜':
+                try:
+                    hot_cold = int(bet.get('hot_cold', 0))
+                    if hot_cold > 20:
+                        score = max(score, 40)
+                        warnings.append("必发主胜交易热度异常偏高，可能存在诱盘风险")
+                except:
+                    pass
         
         trap_type = TrapType.LATE_TRAP if score > 40 else TrapType.NO_TRAP
         return trap_type, score, reasons, warnings
