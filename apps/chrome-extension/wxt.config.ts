@@ -58,6 +58,7 @@ export default defineConfig({
           '/workers/*', // 允许访问 workers 文件
           '/test-scripts/*', // 允许访问 test-scripts 文件
           'test-rules.json', // 允许访问 test-rules.json 文件
+          'inject-scripts/*.js', // 允许访问注入脚本
         ],
         matches: ['<all_urls>'],
       },

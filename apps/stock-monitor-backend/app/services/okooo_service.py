@@ -138,7 +138,7 @@ class OkoooService:
         self._crawl_task = asyncio.create_task(self._run_crawl(scheduler, start_id, end_id))
         return True
 
-    async def fetch_match_lists(self, headless: bool = True, use_cache: bool = False) -> list:
+    async def fetch_match_lists(self, headless: bool = True, use_cache: bool = False, use_proxy: bool = False) -> list:
         """获取比赛列表"""
         scheduler = await self.get_scheduler()
         
@@ -146,11 +146,11 @@ class OkoooService:
         storage_path = "okooo_session.json" if use_cache else None
         
         # 强制配置更新，确保单例模式下的配置一致性
-        await scheduler.configure(headless=headless, storage_state_path=storage_path)
+        await scheduler.configure(headless=headless, storage_state_path=storage_path, use_proxy=use_proxy)
         
         return await scheduler.fetch_match_lists()
 
-    async def start_crawl_lists(self, headless: bool = True, use_cache: bool = False) -> bool:
+    async def start_crawl_lists(self, headless: bool = True, use_cache: bool = False, use_proxy: bool = False) -> bool:
         """启动列表爬虫任务"""
         if self.is_running:
             logger.warning("Okooo crawler is already running")
@@ -160,7 +160,7 @@ class OkoooService:
         
         # Configure
         storage_path = "okooo_session.json" if use_cache else None
-        await scheduler.configure(headless=headless, storage_state_path=storage_path)
+        await scheduler.configure(headless=headless, storage_state_path=storage_path, use_proxy=use_proxy)
         
         self.is_running = True
         
@@ -168,7 +168,7 @@ class OkoooService:
         self._crawl_task = asyncio.create_task(self._run_crawl_lists(scheduler))
         return True
 
-    async def start_crawl_ids(self, match_ids: list, headless: bool = True, use_cache: bool = False, force: bool = False) -> bool:
+    async def start_crawl_ids(self, match_ids: list, headless: bool = True, use_cache: bool = False, force: bool = False, use_proxy: bool = False) -> bool:
         """启动指定ID列表爬虫任务"""
         if self.is_running:
             logger.warning("Okooo crawler is already running")
@@ -178,7 +178,7 @@ class OkoooService:
         
         # Configure
         storage_path = "okooo_session.json" if use_cache else None
-        await scheduler.configure(headless=headless, storage_state_path=storage_path)
+        await scheduler.configure(headless=headless, storage_state_path=storage_path, use_proxy=use_proxy)
         
         self.is_running = True
         
@@ -275,6 +275,365 @@ class OkoooService:
             "is_running": self.is_running,
             "stats": stats
         }
+
+    async def capture_history_match(
+        self,
+        url: str,
+        match_id: str,
+        parent_match_id: str = None,
+        source: str = "okooo_crawler"
+    ) -> Dict[str, Any]:
+        """
+        捕获并保存历史记录比赛页面
+        """
+        import httpx
+        import os
+        import aiofiles
+
+        try:
+            # 下载页面 HTML
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=30.0)
+                response.raise_for_status()
+                html_content = response.text
+
+            # 构建保存路径
+            date_str = datetime.now().strftime('%Y-%m-%d')
+
+            if parent_match_id:
+                save_dir = os.path.abspath(os.path.join(
+                    os.getcwd(), "data", "okooo", "history", date_str,
+                    f"parent_{parent_match_id}", match_id
+                ))
+            else:
+                save_dir = os.path.abspath(os.path.join(
+                    os.getcwd(), "data", "okooo", "history", date_str, match_id
+                ))
+
+            os.makedirs(save_dir, exist_ok=True)
+
+            save_path = os.path.join(save_dir, "index.html")
+
+            # 保存 HTML
+            async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
+                await f.write(html_content)
+
+            logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+
+            return {
+                "success": True,
+                "match_id": match_id,
+                "parent_match_id": parent_match_id,
+                "url": url,
+                "source": source,
+                "save_path": save_path,
+                "content_length": len(html_content),
+                "saved_at": date_str
+            }
+
+        except Exception as e:
+            logger.error(f"[OkoooHistory] 保存失败 {match_id}: {e}")
+            raise
+
+    async def save_list_html(
+        self,
+        html: str,
+        url: str,
+        captured_at: str,
+        date: str
+    ) -> Dict[str, Any]:
+        """
+        保存比赛列表 HTML 页面
+        保存到 data/okooo/list/[date]/
+        """
+        import os
+        import aiofiles
+
+        try:
+            # 构建保存路径
+            save_dir = os.path.abspath(os.path.join(
+                os.getcwd(), "data", "okooo", "list", date
+            ))
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 文件名使用时间戳
+            timestamp = captured_at.replace(':', '-').replace('T', '_').split('.')[0]
+            save_path = os.path.join(save_dir, f"match_list_{timestamp}.html")
+
+            # 保存 HTML 文件
+            async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
+                await f.write(html)
+
+            logger.info(f"[OkoooList] 保存成功: {save_path}")
+
+            return {
+                "success": True,
+                "url": url,
+                "save_path": save_path,
+                "html_size": len(html),
+                "captured_at": captured_at,
+                "date": date
+            }
+
+        except Exception as e:
+            logger.error(f"[OkoooList] 保存失败: {e}")
+            raise
+
+    def _validate_html_content(self, html: str):
+        """验证 HTML 内容有效性"""
+        if not html or len(html) < 500:
+            raise ValueError("页面内容为空或过短")
+        if "验证码" in html or "访问过于频繁" in html or "security check" in html.lower():
+            raise ValueError("页面包含验证码或访问限制")
+
+    def _get_filename_by_type(self, page_type: Optional[str], match_id: str) -> str:
+        """根据页面类型生成文件名"""
+        filename_map = {
+            "澳客欧赔": "odds",
+            "澳客亚盘": "handicap",
+            "澳客历史": "history",
+            "澳客阵容": "form",
+            "澳客盈亏": "exchanges",
+            "澳客积分": "table",
+            "澳客澳门亚盘变化": "odds_change"
+        }
+        prefix = filename_map.get(page_type, "index") if page_type else "index"
+        return f"{prefix}_{match_id}.html"
+
+    async def save_match_html(
+        self,
+        html: str,
+        url: str,
+        match_id: str,
+        captured_at: str,
+        date: str,
+        page_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        保存比赛详情页面 HTML
+        保存到 data/okooo/matches/[date]/[match_id]/
+        """
+        import os
+        import aiofiles
+
+        try:
+            # 验证内容
+            self._validate_html_content(html)
+
+            # 构建保存路径
+            save_dir = os.path.abspath(os.path.join(
+                os.getcwd(), "data", "okooo", "matches", date, match_id
+            ))
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 生成文件名
+            filename = self._get_filename_by_type(page_type, match_id)
+            save_path = os.path.join(save_dir, filename)
+
+            # 保存 HTML 文件
+            async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
+                await f.write(html)
+
+            logger.info(f"[OkoooMatch] 保存成功: {save_path}")
+
+            return {
+                "success": True,
+                "match_id": match_id,
+                "url": url,
+                "save_path": save_path,
+                "html_size": len(html),
+                "captured_at": captured_at,
+                "date": date,
+                "page_type": page_type
+            }
+
+        except Exception as e:
+            logger.error(f"[OkoooMatch] 保存失败 {match_id}: {e}")
+            raise
+
+    async def save_history_html(
+        self,
+        html: str,
+        url: str,
+        match_id: str,
+        parent_match_id: str,
+        captured_at: str,
+        date: str,
+        page_type: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        保存历史记录页面 HTML（由浏览器扩展直接获取 HTML）
+        保存到 data/okooo/history/[date]/[parent_match_id]/[match_id]/
+        """
+        import os
+        import aiofiles
+
+        try:
+            # 验证内容
+            self._validate_html_content(html)
+
+            # 构建保存路径
+            save_dir = os.path.abspath(os.path.join(
+                os.getcwd(), "data", "okooo", "history", date,
+                f"parent_{parent_match_id}", match_id
+            ))
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 生成文件名
+            # 对于历史记录，通常 page_type 可能是 "澳客历史"
+            # 但这里已经是具体的历史子项了，或者就是历史概览
+            # 如果 page_type 是 "澳客历史"，则保存为 history_xxx.html
+            filename = self._get_filename_by_type(page_type, match_id)
+            save_path = os.path.join(save_dir, filename)
+
+            # 保存 HTML 文件
+            async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
+                await f.write(html)
+
+            logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+
+            return {
+                "success": True,
+                "match_id": match_id,
+                "parent_match_id": parent_match_id,
+                "url": url,
+                "save_path": save_path,
+                "html_size": len(html),
+                "captured_at": captured_at,
+                "date": date,
+                "page_type": page_type
+            }
+
+        except Exception as e:
+            logger.error(f"[OkoooHistory] 保存失败 {match_id}: {e}")
+            raise
+
+    async def save_history_with_tab(
+        self,
+        html: str,
+        url: str,
+        match_id: str,
+        parent_match_id: str,
+        tab_name: str,
+        captured_at: str,
+        date: str
+    ) -> Dict[str, Any]:
+        """
+        保存历史记录页面 HTML（带 tab 编号和名称）
+        保存到 data/okooo/history/[date]/[parent_match_id]/[match_id]_[tab_name]/
+        """
+        import os
+        import re
+        import aiofiles
+
+        try:
+            # 清理 tab 名称用于文件名（移除特殊字符）
+            safe_tab_name = re.sub(r'[<>:"/\\|?*]', '', tab_name).strip()[:20]
+            
+            # 构建保存路径
+            save_dir = os.path.abspath(os.path.join(
+                os.getcwd(), "data", "okooo", "history", date,
+                f"parent_{parent_match_id}", f"{match_id}_{safe_tab_name}"
+            ))
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 保存 HTML 文件
+            save_path = os.path.join(save_dir, "index.html")
+            async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
+                await f.write(html)
+
+            logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+
+            return {
+                "success": True,
+                "match_id": match_id,
+                "parent_match_id": parent_match_id,
+                "tab_name": tab_name,
+                "url": url,
+                "save_path": save_path,
+                "html_size": len(html),
+                "captured_at": captured_at,
+                "date": date
+            }
+
+        except Exception as e:
+            logger.error(f"[OkoooHistory] 保存失败 {match_id}: {e}")
+            raise
+
+    async def query_matches(self, sql: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        执行 SQL 查询获取比赛数据
+        """
+        from sqlalchemy import text
+        from app.database import db_manager
+
+        try:
+            async with db_manager.get_session() as session:
+                # 添加 LIMIT
+                if "limit" not in sql.lower():
+                    sql = f"{sql.rstrip(';')} LIMIT {limit}"
+                
+                result = await session.execute(text(sql))
+                # 获取列名
+                keys = result.keys()
+                rows = result.fetchall()
+                
+                results = []
+                for row in rows:
+                    # 将 row 转换为字典
+                    row_dict = dict(zip(keys, row))
+                    results.append(row_dict)
+                
+                logger.info(f"[OkoooQuery] 执行 SQL 查询，返回 {len(results)} 条记录")
+                return results
+
+        except Exception as e:
+            logger.error(f"[OkoooQuery] SQL 查询失败: {e}")
+            raise
+
+    async def save_handicap_html(
+        self,
+        html: str,
+        url: str,
+        match_id: str,
+        captured_at: str,
+        date: str
+    ) -> Dict[str, Any]:
+        """
+        保存让球盘页面 HTML（由浏览器扩展直接获取 HTML）
+        保存到 data/okooo/handicap/[date]/[match_id]/
+        """
+        import os
+        import re
+        import aiofiles
+
+        try:
+            # 构建保存路径
+            save_dir = os.path.abspath(os.path.join(
+                os.getcwd(), "data", "okooo", "handicap", date, match_id
+            ))
+            os.makedirs(save_dir, exist_ok=True)
+
+            # 保存 HTML 文件
+            save_path = os.path.join(save_dir, "index.html")
+            async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
+                await f.write(html)
+
+            logger.info(f"[OkoooHandicap] 保存成功: {save_path}")
+
+            return {
+                "success": True,
+                "match_id": match_id,
+                "url": url,
+                "save_path": save_path,
+                "html_size": len(html),
+                "captured_at": captured_at,
+                "date": date
+            }
+
+        except Exception as e:
+            logger.error(f"[OkoooHandicap] 保存失败 {match_id}: {e}")
+            raise
 
 # 全局实例
 okooo_service = OkoooService()

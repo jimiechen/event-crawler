@@ -114,3 +114,20 @@ export enum ExecutionWorld {
   ISOLATED = 'ISOLATED',
   MAIN = 'MAIN',
 }
+
+// Okooo Crawler Configuration
+export const OKOOO_CRAWLER_CONFIG = {
+  ENTRY_URL: 'https://m.okooo.com/jczq/',
+  MATCH_LIST_XPATH: '//*[starts-with(@id, "match_")]/a',
+  MATCH_LIST_SELECTOR: '[id^="match_"] a',
+  HISTORY_XPATH: '//*[@id="wrapper"]/div[1]/div[2]/a',
+  HISTORY_SELECTOR: '#wrapper > div > div > a',
+  MATCH_DETAIL_PREFIX: 'https://m.okooo.com/match/',
+  PAGE_LOAD_WAIT: 3000,
+  CONTENT_WAIT: 1500,
+  CLICK_DELAY: 1000,
+  UPLOAD_DELAY: 500,
+  MAX_MATCHES: 50,
+  MAX_HISTORY: 20,
+  API_BASE_URL: 'http://localhost:8000',
+} as const;

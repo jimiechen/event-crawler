@@ -481,6 +481,179 @@
         </div>
       </div>
 
+      <!-- 澳客爬虫Tab -->
+      <div v-if="activeTab === 'okooo'" class="tab-content">
+        <div class="section">
+          <div class="config-card">
+            <div class="section-header">
+              <h3>⚽ 澳客竞彩自动爬虫</h3>
+              <p>自动遍历比赛列表和历史记录</p>
+            </div>
+            
+            <!-- 比赛列表捕获按钮 -->
+            <div class="list-capture-section">
+              <h4>📋 比赛列表</h4>
+              <p class="section-desc">打开比赛列表页面并捕获 HTML</p>
+              <div class="list-capture-buttons">
+                <button 
+                  @click="openAndCaptureList"
+                  :disabled="okoooListStatus.isCapturing"
+                  class="ths-btn ths-btn-primary ths-btn-large"
+                >
+                  {{ okoooListStatus.isCapturing ? '捕获中...' : '📄 打开并捕获比赛列表' }}
+                </button>
+                <button 
+                  @click="openListPage"
+                  class="ths-btn ths-btn-secondary"
+                >
+                  🔗 打开比赛列表
+                </button>
+              </div>
+              <div v-if="okoooListStatus.lastResult" class="list-result">
+                <span :class="['result-badge', okoooListStatus.lastResult.success ? 'result-success' : 'result-error']">
+                  {{ okoooListStatus.lastResult.success ? '✓' : '✗' }} {{ okoooListStatus.lastResult.message }}
+                </span>
+                <span v-if="okoooListStatus.lastResult.size" class="size-info">
+                  ({{ formatSize(okoooListStatus.lastResult.size) }})
+                </span>
+              </div>
+            </div>
+            
+            <!-- 当前页面 -->
+            <div class="current-page">
+              <span class="page-label">当前页面:</span>
+              <span class="page-url" :class="{ 'url-valid': currentUrl?.includes('m.okooo.com') }">
+                {{ currentUrl || '未检测到页面' }}
+              </span>
+            </div>
+            
+            <!-- 爬虫阶段 -->
+            <div class="phase-indicator">
+              <span :class="['phase-badge', `phase-${okoooCrawlerStatus.phase}`]">
+                {{ getPhaseText(okoooCrawlerStatus.phase) }}
+              </span>
+            </div>
+            
+            <!-- 统计信息 -->
+            <div class="crawler-stats">
+              <div class="stat-grid">
+                <div class="stat-item">
+                  <span class="stat-label">比赛进度</span>
+                  <span class="stat-value">{{ okoooCrawlerStatus.currentMatchIndex }}/{{ okoooCrawlerStatus.totalMatches }}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">历史进度</span>
+                  <span class="stat-value">{{ okoooCrawlerStatus.currentHistoryIndex }}/{{ okoooCrawlerStatus.totalHistory }}</span>
+                </div>
+                <div class="stat-item success">
+                  <span class="stat-label">成功</span>
+                  <span class="stat-value">{{ okoooCrawlerStatus.successCount }}</span>
+                </div>
+                <div class="stat-item error">
+                  <span class="stat-label">失败</span>
+                  <span class="stat-value">{{ okoooCrawlerStatus.errorCount }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 进度条 -->
+            <div v-if="okoooCrawlerStatus.totalMatches > 0" class="progress-section">
+              <div class="progress-bar large">
+                <div 
+                  class="progress-fill"
+                  :style="{ width: `${(okoooCrawlerStatus.currentMatchIndex / okoooCrawlerStatus.totalMatches) * 100}%` }"
+                ></div>
+              </div>
+              <span class="progress-text">
+                {{ Math.round((okoooCrawlerStatus.currentMatchIndex / okoooCrawlerStatus.totalMatches) * 100) }}%
+              </span>
+            </div>
+            
+            <!-- 控制按钮 -->
+            <div class="action-buttons">
+              <button 
+                @click="startOkoooCrawler"
+                :disabled="okoooCrawlerStatus.isRunning || !currentUrl?.includes('m.okooo.com')"
+                class="ths-btn ths-btn-success ths-btn-large"
+              >
+                {{ okoooCrawlerStatus.isRunning ? '爬取中...' : '🚀 开始自动爬取' }}
+              </button>
+              
+              <button 
+                @click="stopOkoooCrawler"
+                :disabled="!okoooCrawlerStatus.isRunning"
+                class="ths-btn ths-btn-danger ths-btn-large"
+              >
+                ⏹️ 停止爬取
+              </button>
+            </div>
+            
+            <!-- 让球盘爬取按钮 -->
+            <div class="action-section">
+              <h4>让球盘/指数爬取</h4>
+              <p class="description">从数据库查询数据，爬取让球盘页面</p>
+              <button 
+                @click="startHandicapCrawler"
+                :disabled="handicapCrawlerStatus.isRunning"
+                class="ths-btn ths-btn-primary ths-btn-large"
+              >
+                {{ handicapCrawlerStatus.isRunning ? '爬取中...' : '📊 爬取让球盘' }}
+              </button>
+              
+              <div v-if="handicapCrawlerStatus.totalCount > 0" class="stats-row">
+                <div class="stat-item">
+                  <span class="stat-label">进度</span>
+                  <span class="stat-value">{{ handicapCrawlerStatus.currentIndex }}/{{ handicapCrawlerStatus.totalCount }}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">成功</span>
+                  <span class="stat-value success">{{ handicapCrawlerStatus.successCount }}</span>
+                </div>
+                <div class="stat-item">
+                  <span class="stat-label">失败</span>
+                  <span class="stat-value error">{{ handicapCrawlerStatus.errorCount }}</span>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 结果列表 -->
+            <div v-if="okoooCrawlerStatus.results && okoooCrawlerStatus.results.length > 0" class="results-section">
+              <h4>爬取结果 ({{ okoooCrawlerStatus.results.length }})</h4>
+              <div class="results-scroll">
+                <div 
+                  v-for="(result, index) in okoooCrawlerStatus.results.slice(-30)" 
+                  :key="index"
+                  :class="['result-item', `result-${result.status}`]"
+                >
+                  <span class="match-id">#{{ result.matchId }}</span>
+                  <span class="status-icon">
+                    {{ result.status === 'success' ? '✓' : (result.status === 'error' ? '✗' : '...') }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 实时日志 -->
+            <div class="log-section">
+              <div class="section-header-small">
+                <h4>
+                  <span class="status-dot" :class="{ 'active': isLogStreamActive }"></span>
+                  实时日志
+                </h4>
+                <button @click="clearOkoooLogs" class="text-btn">清空</button>
+              </div>
+              <div ref="logContainer" class="log-container">
+                <div v-if="okoooLogs.length === 0" class="empty-logs">等待日志...</div>
+                <div v-for="(log, index) in okoooLogs" :key="index" :class="['log-item', log.level]">
+                  <span class="log-time">[{{ log.timestamp }}]</span>
+                  <span class="log-msg">{{ log.message }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- 数据详情模态框 -->
@@ -510,7 +683,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import {
   initializeMCPSession,
   getChromeWebContent,
@@ -553,6 +726,7 @@ const tabs = ref([
   { id: 'status', name: '系统状态' },
   { id: 'session', name: '会话管理' },
   { id: 'mcp', name: 'MCP测试' },
+  { id: 'okooo', name: '澳客爬虫' },
   { id: 'config', name: '配置管理' }
 ]);
 
@@ -593,6 +767,127 @@ const nativeStatus = ref({ connected: false, text: 'Native Host' });
 
 // MCP服务器配置
 const MCP_SERVER_URL = 'http://localhost:56889';
+
+// Okooo crawler status
+interface CrawlerStatus {
+  isRunning: boolean;
+  phase: 'idle' | 'matches' | 'history' | 'completed';
+  totalMatches: number;
+  currentMatchIndex: number;
+  totalHistory: number;
+  currentHistoryIndex: number;
+  successCount: number;
+  errorCount: number;
+  results: Array<{
+    matchId: string;
+    url: string;
+    status: 'pending' | 'success' | 'error';
+  }>;
+}
+
+const okoooCrawlerStatus = ref<CrawlerStatus>({
+  isRunning: false,
+  phase: 'idle',
+  totalMatches: 0,
+  currentMatchIndex: 0,
+  totalHistory: 0,
+  currentHistoryIndex: 0,
+  successCount: 0,
+  errorCount: 0,
+  results: []
+});
+
+interface OkoooListStatus {
+  isCapturing: boolean;
+  lastResult: { success: boolean; message: string; size?: number } | null;
+}
+
+const okoooListStatus = ref<OkoooListStatus>({
+  isCapturing: false,
+  lastResult: null
+});
+
+// Handicap crawler status
+interface HandicapCrawlerStatus {
+  isRunning: boolean;
+  phase: 'idle' | 'query' | 'processing' | 'completed';
+  totalCount: number;
+  currentIndex: number;
+  successCount: number;
+  errorCount: number;
+}
+
+const handicapCrawlerStatus = ref<HandicapCrawlerStatus>({
+  isRunning: false,
+  phase: 'idle',
+  totalCount: 0,
+  currentIndex: 0,
+  successCount: 0,
+  errorCount: 0
+});
+
+// 实时日志相关
+interface LogEntry {
+  message: string;
+  level: string;
+  timestamp: string;
+}
+
+const okoooLogs = ref<LogEntry[]>([]);
+const isLogStreamActive = ref(false);
+let eventSource: EventSource | null = null;
+
+const clearOkoooLogs = () => {
+  okoooLogs.value = [];
+};
+
+const setupSSE = () => {
+  if (eventSource) {
+    eventSource.close();
+  }
+
+  const serverUrl = backendUrl.value || 'http://localhost:8000';
+  const sseUrl = `${serverUrl}/api/sse/subscribe`;
+  
+  try {
+    eventSource = new EventSource(sseUrl);
+    
+    eventSource.onopen = () => {
+      console.log('SSE连接已建立');
+      isLogStreamActive.value = true;
+    };
+    
+    eventSource.addEventListener('log', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        okoooLogs.value.unshift({
+          message: data.message,
+          level: data.level || 'info',
+          timestamp: data.timestamp || new Date().toLocaleTimeString()
+        });
+        
+        // 保持日志数量在合理范围
+        if (okoooLogs.value.length > 200) {
+          okoooLogs.value = okoooLogs.value.slice(0, 200);
+        }
+      } catch (e) {
+        console.error('解析日志数据失败:', e);
+      }
+    });
+    
+    eventSource.onerror = (error) => {
+      console.error('SSE连接错误:', error);
+      isLogStreamActive.value = false;
+      // 尝试重连 logic could go here, but EventSource usually auto-reconnects
+    };
+    
+  } catch (e) {
+    console.error('建立SSE连接失败:', e);
+    isLogStreamActive.value = false;
+  }
+};
+
+let crawlerStatusTimer: number | null = null;
 
 // 调试模式配置 - 设为false可大幅减少console.log输出
 const DEBUG_MODE = false;
@@ -2649,9 +2944,207 @@ const formatMCPResult = (data: any): string => {
   return JSON.stringify(data, null, 2);
 };
 
+// Okooo crawler functions
+const startOkoooCrawler = async () => {
+  if (!currentUrl.value?.includes('m.okooo.com')) {
+    alert('请先打开澳客竞彩页面');
+    return;
+  }
+
+  okoooCrawlerStatus.value.isRunning = true;
+  okoooCrawlerStatus.value.phase = 'matches';
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_START_CRAWLER'
+    });
+
+    if (response.success) {
+      okoooCrawlerStatus.value.totalMatches = response.total;
+      okoooCrawlerStatus.value.currentMatchIndex = 0;
+      okoooCrawlerStatus.value.successCount = 0;
+      okoooCrawlerStatus.value.errorCount = 0;
+      okoooCrawlerStatus.value.results = [];
+      startCrawlerStatusPolling();
+    } else {
+      okoooCrawlerStatus.value.isRunning = false;
+      alert('启动失败: ' + response.message);
+    }
+  } catch (error) {
+    okoooCrawlerStatus.value.isRunning = false;
+    console.error('启动爬虫失败:', error);
+  }
+};
+
+const stopOkoooCrawler = async () => {
+  await chrome.runtime.sendMessage({
+    type: 'OKOOO_STOP_CRAWLER'
+  });
+
+  okoooCrawlerStatus.value.isRunning = false;
+  okoooCrawlerStatus.value.phase = 'idle';
+  stopCrawlerStatusPolling();
+};
+
+const startCrawlerStatusPolling = () => {
+  crawlerStatusTimer = setInterval(async () => {
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_GET_STATUS'
+    });
+
+    if (response.success) {
+      const data = response.data;
+      okoooCrawlerStatus.value.isRunning = data.isRunning;
+      okoooCrawlerStatus.value.phase = data.phase;
+      okoooCrawlerStatus.value.totalMatches = data.totalMatches;
+      okoooCrawlerStatus.value.currentMatchIndex = data.currentMatchIndex;
+      okoooCrawlerStatus.value.totalHistory = data.totalHistory;
+      okoooCrawlerStatus.value.currentHistoryIndex = data.currentHistoryIndex;
+      okoooCrawlerStatus.value.successCount = data.successCount;
+      okoooCrawlerStatus.value.errorCount = data.errorCount;
+      okoooCrawlerStatus.value.results = data.results || [];
+
+      if (!data.isRunning) {
+        stopCrawlerStatusPolling();
+      }
+    }
+  }, 1000);
+};
+
+const stopCrawlerStatusPolling = () => {
+  if (crawlerStatusTimer) {
+    clearInterval(crawlerStatusTimer);
+    crawlerStatusTimer = null;
+  }
+};
+
+// 启动让球盘爬虫
+const startHandicapCrawler = async () => {
+  handicapCrawlerStatus.value.isRunning = true;
+  handicapCrawlerStatus.value.phase = 'query';
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_HANDICAP_START'
+    });
+
+    if (response.success) {
+      handicapCrawlerStatus.value.totalCount = response.total;
+      handicapCrawlerStatus.value.currentIndex = 0;
+      handicapCrawlerStatus.value.successCount = 0;
+      handicapCrawlerStatus.value.errorCount = 0;
+      handicapCrawlerStatus.value.phase = 'processing';
+      startHandicapStatusPolling();
+    } else {
+      handicapCrawlerStatus.value.isRunning = false;
+      handicapCrawlerStatus.value.phase = 'idle';
+      alert('启动失败: ' + response.message);
+    }
+  } catch (error) {
+    handicapCrawlerStatus.value.isRunning = false;
+    handicapCrawlerStatus.value.phase = 'idle';
+    console.error('启动让球盘爬虫失败:', error);
+  }
+};
+
+let handicapStatusTimer: number | null = null;
+
+const startHandicapStatusPolling = () => {
+  handicapStatusTimer = setInterval(async () => {
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_HANDICAP_STATUS'
+    });
+
+    if (response.success) {
+      const data = response.data;
+      handicapCrawlerStatus.value.isRunning = data.isRunning;
+      handicapCrawlerStatus.value.phase = data.phase;
+      handicapCrawlerStatus.value.totalCount = data.totalCount;
+      handicapCrawlerStatus.value.currentIndex = data.currentIndex;
+      handicapCrawlerStatus.value.successCount = data.successCount;
+      handicapCrawlerStatus.value.errorCount = data.errorCount;
+
+      if (!data.isRunning) {
+        stopHandicapStatusPolling();
+        handicapCrawlerStatus.value.phase = 'completed';
+      }
+    }
+  }, 1000);
+};
+
+const stopHandicapStatusPolling = () => {
+  if (handicapStatusTimer) {
+    clearInterval(handicapStatusTimer);
+    handicapStatusTimer = null;
+  }
+};
+
+// 打开并捕获比赛列表
+const openAndCaptureList = async () => {
+  okoooListStatus.value.isCapturing = true;
+  okoooListStatus.value.lastResult = null;
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_OPEN_LIST'
+    });
+
+    okoooListStatus.value.isCapturing = false;
+
+    if (response.success) {
+      okoooListStatus.value.lastResult = {
+        success: true,
+        message: '比赛列表已保存',
+        size: response.size
+      };
+    } else {
+      okoooListStatus.value.lastResult = {
+        success: false,
+        message: response.message || '捕获失败'
+      };
+    }
+  } catch (error) {
+    okoooListStatus.value.isCapturing = false;
+    okoooListStatus.value.lastResult = {
+      success: false,
+      message: String(error)
+    };
+    console.error('捕获比赛列表失败:', error);
+  }
+};
+
+// 打开比赛列表页面
+const openListPage = async () => {
+  await chrome.tabs.create({
+    url: 'https://m.okooo.com/jczq/',
+    active: true
+  });
+};
+
+// 格式化文件大小
+const formatSize = (bytes: number): string => {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
+
+const getPhaseText = (phase: string): string => {
+  const phaseMap: Record<string, string> = {
+    'idle': '待机中',
+    'matches': '爬取比赛列表',
+    'history': '爬取历史记录',
+    'completed': '完成'
+  };
+  return phaseMap[phase] || phase;
+};
+
 onMounted(async () => {
   // 加载配置
   await loadConfig();
+  
+  // 初始化SSE连接
+  setupSSE();
+  
   // 初始化时获取当前URL
   currentUrl.value = await getCurrentTabUrl();
   // 初始化正则规则
@@ -2662,6 +3155,28 @@ onMounted(async () => {
   await initializeTonghuashunApp();
   // 设置网络数据监听器
   setupNetworkDataListener();
+  // 初始化爬虫状态
+  const status = await chrome.runtime.sendMessage({
+    type: 'OKOOO_GET_STATUS'
+  });
+  if (status.success) {
+    okoooCrawlerStatus.value = {
+      ...status.data,
+      results: status.data.results || []
+    };
+    if (status.data.isRunning) {
+      startCrawlerStatusPolling();
+    }
+  }
+});
+
+onUnmounted(() => {
+  stopCrawlerStatusPolling();
+  stopHandicapStatusPolling();
+  if (eventSource) {
+    eventSource.close();
+    isLogStreamActive.value = false;
+  }
 });
 </script>
 
@@ -3853,4 +4368,327 @@ onMounted(async () => {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+/* Okooo Crawler Styles */
+.current-page {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.page-label {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.page-url {
+  font-size: 12px;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.page-url.url-valid {
+  color: var(--primary-color);
+}
+
+.phase-indicator {
+  margin-bottom: var(--spacing-md);
+}
+
+.phase-badge {
+  display: inline-block;
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.phase-idle { background: var(--bg-tertiary); color: var(--text-secondary); }
+.phase-matches { background: #dbeafe; color: #1e40af; }
+.phase-history { background: #fef3c7; color: #92400e; }
+.phase-completed { background: #dcfce7; color: #166534; }
+
+.crawler-stats {
+  margin-bottom: var(--spacing-md);
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-sm);
+}
+
+.stat-item {
+  text-align: center;
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.stat-item.success { background: #dcfce7; }
+.stat-item.error { background: #fee2e2; }
+
+.stat-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-xs);
+}
+
+.stat-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.stat-item.success .stat-value { color: #166534; }
+.stat-item.error .stat-value { color: #991b1b; }
+
+.progress-section {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.progress-bar.large {
+  flex: 1;
+  height: 12px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.action-section {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.action-section h4 {
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.action-section .description {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-md) 0;
+}
+
+.stats-row {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-top: var(--spacing-md);
+  padding-top: var(--spacing-md);
+  border-top: 1px solid var(--border-light);
+}
+
+.results-section {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+}
+
+.results-section h4 {
+  margin: 0 0 var(--spacing-sm) 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.results-scroll {
+  max-height: 200px;
+  overflow-y: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+}
+
+.result-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.result-pending { background: var(--bg-tertiary); color: var(--text-secondary); }
+.result-success { background: #dcfce7; color: #166534; }
+.result-error { background: #fee2e2; color: #991b1b; }
+
+/* Okooo List Capture Styles */
+.list-capture-section {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.list-capture-section h4 {
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.section-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 var(--spacing-md) 0;
+}
+
+.list-capture-buttons {
+  display: flex;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.list-result {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: 12px;
+}
+
+.size-info {
+  color: var(--text-muted);
+}
+
+.result-badge {
+  display: inline-block;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.result-badge.result-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.result-badge.result-error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Real-time Log Styles */
+.log-section {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-top: var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.section-header-small {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.section-header-small h4 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--text-muted);
+  transition: background-color 0.3s;
+}
+
+.status-dot.active {
+  background-color: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+.text-btn {
+  background: none;
+  border: none;
+  color: var(--primary-color);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.text-btn:hover {
+  text-decoration: underline;
+}
+
+.log-container {
+  height: 200px;
+  background: #1a1a1a;
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm);
+  overflow-y: auto;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+}
+
+.empty-logs {
+  color: #6b7280;
+  text-align: center;
+  padding-top: var(--spacing-lg);
+}
+
+.log-item {
+  margin-bottom: 4px;
+  line-height: 1.4;
+  word-break: break-all;
+  display: flex;
+  gap: 8px;
+}
+
+.log-time {
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+.log-msg {
+  color: #e5e7eb;
+}
+
+.log-item.error .log-msg {
+  color: #ef4444;
+}
+
+.log-item.success .log-msg {
+  color: #10b981;
+}
+
+.log-item.warning .log-msg {
+  color: #f59e0b;
+}
+
 </style>

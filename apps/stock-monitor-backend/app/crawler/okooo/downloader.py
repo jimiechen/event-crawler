@@ -16,17 +16,18 @@ class OkoooDownloader:
     负责页面HTML的下载，包含反爬处理和WAF检测
     """
     
-    def __init__(self, headless: bool = True, is_mobile: bool = False, storage_state_path: Optional[str] = None):
+    def __init__(self, headless: bool = True, is_mobile: bool = False, storage_state_path: Optional[str] = None, proxy_url: Optional[str] = None):
         self.headless = headless
         self.is_mobile = is_mobile
         self.storage_state_path = storage_state_path
+        self.proxy_url = proxy_url
         self.playwright = None
         self.browser = None
         self.context = None
         self._lock = asyncio.Lock()
         
         # Simple proxy list (TODO: Move to config or DB)
-        self.proxies = [
+        self.proxies = [proxy_url] if proxy_url else [
             # Example format: "http://user:pass@host:port"
             # None means direct connection
             None

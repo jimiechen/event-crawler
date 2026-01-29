@@ -7,7 +7,7 @@ import { ErrorHandler, ErrorType, ErrorSeverity } from '@/utils/error-handler';
 import { EnhancedDataExtractor, ExtractionConfig, ExtractionResult } from '@/utils/enhanced-data-extractor';
 import { RetryMechanism } from '@/utils/retry-mechanism';
 import { monitoringStateManager, MonitoringStatus, DataFetchStatus, ErrorLevel } from '@/utils/monitoring-state-manager';
-import { SyncStateData, StateChangeNotification } from '@/utils/state-sync-service';
+import type { SyncStateData, StateChangeNotification } from '@/utils/state-sync-service';
 
 export default defineContentScript({
   matches: [

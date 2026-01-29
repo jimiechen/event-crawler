@@ -61,18 +61,20 @@ class OkoooScheduler:
             "skipped": 0
         }
 
-    async def configure(self, headless: bool = True, is_mobile: bool = True, storage_state_path: Optional[str] = None):
+    async def configure(self, headless: bool = True, is_mobile: bool = True, storage_state_path: Optional[str] = None, use_proxy: bool = False):
         """配置爬虫参数"""
         # 如果配置有变化，且downloader已存在，则关闭旧的以便重新初始化
         config_changed = (
             self.headless != headless or 
             self.is_mobile != is_mobile or 
-            self.storage_state_path != storage_state_path
+            self.storage_state_path != storage_state_path or
+            getattr(self, "use_proxy", False) != use_proxy
         )
         
         self.headless = headless
         self.is_mobile = is_mobile
         self.storage_state_path = storage_state_path
+        self.use_proxy = use_proxy
         
         if self.downloader and config_changed:
             await self._log("INFO", "Configuration changed, restarting downloader...")
@@ -124,10 +126,14 @@ class OkoooScheduler:
         if not self.downloader:
             # 单例模式下，如果downloader不存在，则创建新的
             # 只有在downloader确实不存在时才创建，避免覆盖已有的单例实例
+            # Use local proxy if configured
+            proxy_url = "http://127.0.0.1:8118" if getattr(self, "use_proxy", False) else None
+            
             self.downloader = OkoooDownloader(
                 headless=self.headless,
                 is_mobile=self.is_mobile,
-                storage_state_path=self.storage_state_path
+                storage_state_path=self.storage_state_path,
+                proxy_url=proxy_url
             )
         else:
             # 如果downloader已存在，确保其配置与当前scheduler配置一致

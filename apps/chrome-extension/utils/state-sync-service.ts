@@ -71,17 +71,20 @@ export class StateSyncService {
       }
     });
     
-    // 监听标签页关闭事件
-    chrome.tabs.onRemoved.addListener((tabId) => {
-      this.removeTabState(tabId);
-    });
-    
-    // 监听标签页更新事件
-    chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-      if (changeInfo.status === 'complete' && tab.url) {
-        this.updateTabUrl(tabId, tab.url);
-      }
-    });
+    // 仅在 chrome.tabs API 可用时添加标签页监听器（Background context）
+    if (chrome.tabs) {
+      // 监听标签页关闭事件
+      chrome.tabs.onRemoved.addListener((tabId) => {
+        this.removeTabState(tabId);
+      });
+      
+      // 监听标签页更新事件
+      chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+        if (changeInfo.status === 'complete' && tab.url) {
+          this.updateTabUrl(tabId, tab.url);
+        }
+      });
+    }
   }
   
   /**
@@ -212,6 +215,8 @@ export class StateSyncService {
    * 向指定标签页发送状态同步请求
    */
   public async requestStateSync(tabId: number): Promise<SyncStateData | null> {
+    if (!chrome.tabs) return null;
+    
     try {
       const response = await chrome.tabs.sendMessage(tabId, {
         type: 'state_sync_request'
@@ -232,6 +237,8 @@ export class StateSyncService {
    * 广播状态变更到所有标签页
    */
   public async broadcastStateChange(notification: StateChangeNotification): Promise<void> {
+    if (!chrome.tabs) return;
+
     const tabs = await chrome.tabs.query({ url: '*://*.10jqka.com.cn/*' });
     
     for (const tab of tabs) {

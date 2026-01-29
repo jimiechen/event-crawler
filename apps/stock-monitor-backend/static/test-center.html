@@ -318,6 +318,10 @@
                             <span class="ml-2 text-gray-700 text-sm font-medium">使用缓存</span>
                         </label>
                         <label class="inline-flex items-center cursor-pointer">
+                            <input type="checkbox" v-model="okoooConfig.useProxy" class="form-checkbox h-5 w-5 text-purple-600 rounded border-gray-300 focus:ring-purple-500">
+                            <span class="ml-2 text-gray-700 text-sm font-medium">使用代理</span>
+                        </label>
+                        <label class="inline-flex items-center cursor-pointer">
                             <input type="checkbox" v-model="okoooConfig.force" class="form-checkbox h-5 w-5 text-red-600 rounded border-gray-300 focus:ring-red-500">
                             <span class="ml-2 text-gray-700 text-sm font-medium">强制爬取</span>
                         </label>
@@ -535,7 +539,8 @@
                 const okoooConfig = ref({
                     headless: false, // Default to headed as requested
                     useCache: true,   // Default to use cache as requested
-                    force: false
+                    force: false,
+                    useProxy: false
                 });
                 const okoooForm = ref({
                     startId: 1143895,
@@ -1018,7 +1023,8 @@
                             // Use fetch_lists endpoint (Live)
                             response = await axios.post('/api/v1/okooo/fetch_lists', {
                                 headless: okoooConfig.value.headless,
-                                use_cache: okoooConfig.value.useCache
+                                use_cache: okoooConfig.value.useCache,
+                                use_proxy: okoooConfig.value.useProxy
                             });
                         }
 
@@ -1045,7 +1051,8 @@
                             match_ids: selectedOkoooMatches.value,
                             headless: okoooConfig.value.headless,
                             use_cache: okoooConfig.value.useCache,
-                            force: okoooConfig.value.force
+                            force: okoooConfig.value.force,
+                            use_proxy: okoooConfig.value.useProxy
                         });
                         if (response.data.success) {
                             okoooStatus.value.isRunning = true;
@@ -1066,7 +1073,8 @@
                             match_ids: [match.match_id],
                             headless: okoooConfig.value.headless,
                             use_cache: okoooConfig.value.useCache,
-                            force: okoooConfig.value.force
+                            force: okoooConfig.value.force,
+                            use_proxy: okoooConfig.value.useProxy
                         });
                         if (response.data.success) {
                             okoooStatus.value.isRunning = true;
