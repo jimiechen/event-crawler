@@ -586,7 +586,8 @@ class OkoooScheduler:
         
         urls = [
             "https://m.okooo.com/jczq/",
-            "https://m.okooo.com/bjdc/"
+            "https://m.okooo.com/bjdc/",
+            "https://m.okooo.com/sfc/"
         ]
         
         all_matches = []
@@ -597,6 +598,8 @@ class OkoooScheduler:
                 match_type = "jczq"
                 if "bjdc" in url:
                     match_type = "bjdc"
+                elif "sfc" in url:
+                    match_type = "sfc"
                     
                 await self._log("INFO", f"Fetching list: {url} (Type: {match_type})")
                 html = await self.downloader.download(url)
@@ -613,6 +616,10 @@ class OkoooScheduler:
                             new_count += 1
                             # Save to DB immediately
                             await self.storage.save_basic_match_info(m)
+                        elif mid and mid in seen_ids:
+                             # Also update mask/info for existing match found in different list
+                             m['match_type'] = match_type
+                             await self.storage.save_basic_match_info(m)
                             
                     await self._log("INFO", f"Found {new_count} new matches in {url}")
                 else:

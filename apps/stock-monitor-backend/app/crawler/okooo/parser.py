@@ -136,6 +136,21 @@ class OkoooParser:
         matches = []
         seen_ids = set()
         
+        # Check for SFC issue number
+        # User specified: //*[@id="match_list"]/div[1]/div[1]/p
+        issue_number = ""
+        match_list_div = soup.find(id="match_list")
+        if match_list_div:
+            # Try to find the issue number
+            # Structure might be: div > div > p
+            # Use recursive=True just in case, or specific path
+            p_tags = match_list_div.find_all("p", limit=5)
+            for p in p_tags:
+                text = p.get_text(strip=True)
+                if "期" in text and text.startswith("第"):
+                    issue_number = text
+                    break
+        
         # 1. 尝试查找特定结构的比赛列表 (根据m.okooo.com常见结构)
         # 结构通常是: .match-list-item or similar
         # Added 'ctrl_eachmatch' for BJDC/JCZQ lists
@@ -144,6 +159,8 @@ class OkoooParser:
         # If no items found with specific classes, try generic div but check for data-id strictly
         if not items:
             items = soup.find_all('div', attrs={'data-id': True})
+            
+        sfc_index = 0
             
         for item in items:
             try:
@@ -200,24 +217,48 @@ class OkoooParser:
                         away_elem = item.find(class_='away-team')
                         if home_elem: home_team = home_elem.get_text(strip=True)
                         if away_elem: away_team = away_elem.get_text(strip=True)
-
-                # Handicap
-                handicap = ""
-                rq_elem = item.find(class_=re.compile(r'rangqiu|handicap'))
-                if rq_elem:
-                    handicap = rq_elem.get_text(strip=True)
                 
+                # Extract Match No
+                match_no = ""
+                
+                # 1. Try matchnum attribute
+                if item.has_attr("matchnum"):
+                    match_no = item["matchnum"]
+                
+                # 2. If SFC issue number exists, generate match_no
+                if not match_no and issue_number:
+                    sfc_index += 1
+                    match_no = f"{issue_number} {sfc_index:03d}"
+                
+                # 3. Try to find in league text (common for JCZQ: 周三001)
+                if not match_no and league:
+                    m_no = re.search(r'(周[一二三四五六日]\d{3})', league)
+                    if m_no:
+                        match_no = m_no.group(1)
+                
+                # 4. Try explicit match-no class
+                if not match_no:
+                    no_elem = item.find(class_=re.compile(r'match-no|no|serial'))
+                    if no_elem:
+                        match_no = no_elem.get_text(strip=True)
+                
+                # 5. Fallback for BJDC (often just number like 1, 2, 3)
+                # Sometimes it is in a span with class 'no' or similar
+                if not match_no:
+                    # Look for span with numbers only at start of item
+                    pass 
+
                 # Time
                 match_time = ""
-                time_elem = item.find(class_=re.compile(r'timetxt|match-time'))
+                time_elem = item.find(class_=re.compile(r'time|match-time|timetxt'))
                 if time_elem:
                     match_time = time_elem.get_text(strip=True)
 
-                # Match No (序号)
-                match_no = ""
-                no_elem = item.find(class_=re.compile(r'match-no|no|xuhao|paiming'))
-                if no_elem:
-                    match_no = no_elem.get_text(strip=True)
+                # Handicap (Rangqiu)
+                handicap = ""
+                rq_elem = item.find(class_='rangqiu')
+                if rq_elem:
+                    handicap = rq_elem.get_text(strip=True)
 
                 matches.append({
                     "match_id": match_id,
@@ -225,11 +266,16 @@ class OkoooParser:
                     "league": league,
                     "home_team": home_team,
                     "away_team": away_team,
+                    "match_time": match_time,
                     "handicap": handicap,
-                    "match_time": match_time
+                    "rangqiu": handicap
                 })
-            except Exception:
+                
+            except Exception as e:
+                logger.warning(f"Error parsing mobile match item: {e}")
                 continue
+                
+        return matches
                 
         # 2. 如果上面没找到，尝试直接通过链接提取
         if not matches:

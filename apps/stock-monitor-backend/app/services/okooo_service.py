@@ -444,7 +444,11 @@ class OkoooService:
             
             # 解析并入库
             from app.crawler.okooo.parser import OkoooParser
-            matches = OkoooParser.parse_match_list(html)
+            
+            if "m.okooo.com" in url:
+                matches = OkoooParser.parse_mobile_match_list(html)
+            else:
+                matches = OkoooParser.parse_match_list(html)
             
             # Determine match_type from URL
             match_type = "jczq" # default
