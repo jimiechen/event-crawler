@@ -42,11 +42,7 @@ class OkoooService:
                 stmt = select(OkoooMatch)
                 
                 if date_str:
-                    try:
-                        target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-                        stmt = stmt.where(OkoooMatch.match_date == target_date)
-                    except ValueError:
-                        pass
+                    stmt = stmt.where(OkoooMatch.match_date == date_str)
                 
                 # Order by match time or ID
                 stmt = stmt.order_by(desc(OkoooMatch.match_date), desc(OkoooMatch.id))
@@ -56,11 +52,12 @@ class OkoooService:
                 
                 return [{
                     "id": m.id,
+                    "match_id": m.match_id,
                     "league": m.league_name,
                     "home_team": m.home_team,
                     "away_team": m.away_team,
                     "match_time": m.match_time_text,
-                    "match_date": m.match_date.strftime("%Y-%m-%d") if m.match_date else None,
+                    "match_date": m.match_date,
                     "history_data": m.history_data
                 } for m in matches]
         except Exception as e:
@@ -76,7 +73,16 @@ class OkoooService:
                 stmt = select(OkoooMatch.match_date).distinct().where(OkoooMatch.match_date.isnot(None)).order_by(desc(OkoooMatch.match_date))
                 result = await session.execute(stmt)
                 dates = result.scalars().all()
-                return [d.strftime("%Y-%m-%d") for d in dates if d]
+                
+                # Filter valid dates and deduplicate (though distinct should handle it)
+                valid_dates = []
+                seen = set()
+                for d in dates:
+                    if d and d not in seen:
+                        valid_dates.append(d)
+                        seen.add(d)
+                
+                return valid_dates
         except Exception as e:
             logger.error(f"Error getting match dates: {e}")
             return []
@@ -124,6 +130,72 @@ class OkoooService:
         }
         await manager.broadcast(data)
         await sse_service.broadcast("okooo_matches", data)
+
+    async def repair_daily_data(self, date_str: str) -> Dict[str, Any]:
+        """
+        检查指定日期的比赛数据完整性，并重新爬取缺失或无效的比赛
+        """
+        import os
+        
+        # 1. Get matches from DB
+        matches = await self.get_db_matches(date_str)
+        if not matches:
+             return {"total": 0, "repaired": 0, "message": "No matches found for date", "ids": []}
+             
+        # 2. Check files
+        base_dir = os.path.join(os.getcwd(), "data", "okooo", "matches", date_str)
+        ids_to_crawl = []
+        
+        # Expected file count is 8, but we'll accept 7 as well to be lenient, or strict 8?
+        # User said "only 6/8", so 8 is likely the target.
+        # Let's check for specific critical files.
+        # Prefixes based on user info.
+        
+        for m in matches:
+            mid = m.get('match_id')
+            if not mid: continue
+            
+            match_dir = os.path.join(base_dir, mid)
+            
+            # If directory doesn't exist, definitely re-crawl
+            if not os.path.exists(match_dir):
+                ids_to_crawl.append(mid)
+                continue
+                
+            # Check file count
+            files = os.listdir(match_dir)
+            html_files = [f for f in files if f.endswith('.html')]
+            
+            # User mentioned 6/8. So if < 8, we might want to repair.
+            # Strictly check for 8 files as per user requirement
+            if len(html_files) < 8:
+                 ids_to_crawl.append(mid)
+                 continue
+                 
+            # Check for invalid files (small size)
+            has_invalid = False
+            for f in html_files:
+                fpath = os.path.join(match_dir, f)
+                # Check size < 2KB (empty or error page)
+                if os.path.getsize(fpath) < 2048: 
+                    has_invalid = True
+                    break
+            
+            if has_invalid:
+                ids_to_crawl.append(mid)
+                continue
+
+        # 3. Start crawling if needed
+        if ids_to_crawl:
+            # Trigger crawl in background
+            await self.start_crawl_ids(ids_to_crawl, headless=True, force=True)
+            
+        return {
+            "total_checked": len(matches), 
+            "repairing_count": len(ids_to_crawl), 
+            "ids": ids_to_crawl,
+            "message": f"Found {len(ids_to_crawl)} matches to repair out of {len(matches)}"
+        }
 
     async def start_crawl(self, start_id: int, end_id: int) -> bool:
         """启动爬虫任务"""
@@ -300,25 +372,29 @@ class OkoooService:
             # 构建保存路径
             date_str = datetime.now().strftime('%Y-%m-%d')
 
-            if parent_match_id:
-                save_dir = os.path.abspath(os.path.join(
-                    os.getcwd(), "data", "okooo", "history", date_str,
-                    f"parent_{parent_match_id}", match_id
-                ))
-            else:
-                save_dir = os.path.abspath(os.path.join(
-                    os.getcwd(), "data", "okooo", "history", date_str, match_id
-                ))
+            # 统一保存到 matches 目录
+            save_dir = os.path.abspath(os.path.join(
+                os.getcwd(), "data", "okooo", "matches", date_str, match_id
+            ))
 
             os.makedirs(save_dir, exist_ok=True)
 
-            save_path = os.path.join(save_dir, "index.html")
+            save_path = os.path.join(save_dir, "history.html")
 
             # 保存 HTML
             async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
                 await f.write(html_content)
 
             logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+
+            # 发送 SSE 通知
+            await sse_service.broadcast("okooo_file_saved", {
+                "match_id": match_id,
+                "parent_match_id": parent_match_id,
+                "page_type": "history",
+                "filename": "history.html",
+                "path": save_path
+            })
 
             return {
                 "success": True,
@@ -365,6 +441,32 @@ class OkoooService:
                 await f.write(html)
 
             logger.info(f"[OkoooList] 保存成功: {save_path}")
+            
+            # 解析并入库
+            from app.crawler.okooo.parser import OkoooParser
+            matches = OkoooParser.parse_match_list(html)
+            
+            # Determine match_type from URL
+            match_type = "jczq" # default
+            if "bjdc" in url:
+                match_type = "bjdc"
+            elif "sfc" in url:
+                match_type = "sfc"
+            elif "jczq" in url:
+                match_type = "jczq"
+            
+            scheduler = await self.get_scheduler()
+            saved_count = 0
+            for match in matches:
+                # Add match_type
+                match["match_type"] = match_type
+                
+                # 将 match_id 和 date 传入
+                success = await scheduler.storage.save_basic_match_info(match, date_str=date)
+                if success:
+                    saved_count += 1
+            
+            logger.info(f"[OkoooList] 解析并入库成功: {saved_count} 条比赛数据")
 
             return {
                 "success": True,
@@ -372,7 +474,8 @@ class OkoooService:
                 "save_path": save_path,
                 "html_size": len(html),
                 "captured_at": captured_at,
-                "date": date
+                "date": date,
+                "saved_matches": saved_count
             }
 
         except Exception as e:
@@ -385,6 +488,8 @@ class OkoooService:
             raise ValueError("页面内容为空或过短")
         if "验证码" in html or "访问过于频繁" in html or "security check" in html.lower():
             raise ValueError("页面包含验证码或访问限制")
+        if "页面找不到了" in html or "404/search_children.js" in html:
+            raise ValueError("页面为404错误页")
 
     def _get_filename_by_type(self, page_type: Optional[str], match_id: str) -> str:
         """根据页面类型生成文件名"""
@@ -436,6 +541,14 @@ class OkoooService:
 
             logger.info(f"[OkoooMatch] 保存成功: {save_path}")
 
+            # 发送 SSE 通知
+            await sse_service.broadcast("okooo_file_saved", {
+                "match_id": match_id,
+                "page_type": page_type or "index",
+                "filename": filename,
+                "path": save_path
+            })
+
             return {
                 "success": True,
                 "match_id": match_id,
@@ -463,7 +576,7 @@ class OkoooService:
     ) -> Dict[str, Any]:
         """
         保存历史记录页面 HTML（由浏览器扩展直接获取 HTML）
-        保存到 data/okooo/history/[date]/[parent_match_id]/[match_id]/
+        保存到 data/okooo/matches/[date]/[match_id]/
         """
         import os
         import aiofiles
@@ -472,17 +585,15 @@ class OkoooService:
             # 验证内容
             self._validate_html_content(html)
 
-            # 构建保存路径
+            # 构建保存路径 (统一到 matches 目录)
             save_dir = os.path.abspath(os.path.join(
-                os.getcwd(), "data", "okooo", "history", date,
-                f"parent_{parent_match_id}", match_id
+                os.getcwd(), "data", "okooo", "matches", date, match_id
             ))
             os.makedirs(save_dir, exist_ok=True)
 
             # 生成文件名
-            # 对于历史记录，通常 page_type 可能是 "澳客历史"
-            # 但这里已经是具体的历史子项了，或者就是历史概览
-            # 如果 page_type 是 "澳客历史"，则保存为 history_xxx.html
+            # 如果是历史页面，强制使用 history_{match_id}.html (或者根据 page_type)
+            # 既然 page_type 传入了 "澳客历史" 等，_get_filename_by_type 会处理
             filename = self._get_filename_by_type(page_type, match_id)
             save_path = os.path.join(save_dir, filename)
 
@@ -491,6 +602,14 @@ class OkoooService:
                 await f.write(html)
 
             logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+
+            # 发送 SSE 通知
+            await sse_service.broadcast("okooo_file_saved", {
+                "match_id": match_id,
+                "page_type": page_type or "history",
+                "filename": filename,
+                "path": save_path
+            })
 
             return {
                 "success": True,
@@ -520,29 +639,43 @@ class OkoooService:
     ) -> Dict[str, Any]:
         """
         保存历史记录页面 HTML（带 tab 编号和名称）
-        保存到 data/okooo/history/[date]/[parent_match_id]/[match_id]_[tab_name]/
+        保存到 data/okooo/matches/[date]/[match_id]/history_[tab_name].html
         """
         import os
         import re
         import aiofiles
 
         try:
+            # 验证内容
+            self._validate_html_content(html)
+
             # 清理 tab 名称用于文件名（移除特殊字符）
             safe_tab_name = re.sub(r'[<>:"/\\|?*]', '', tab_name).strip()[:20]
             
-            # 构建保存路径
+            # 构建保存路径 (统一到 matches 目录)
             save_dir = os.path.abspath(os.path.join(
-                os.getcwd(), "data", "okooo", "history", date,
-                f"parent_{parent_match_id}", f"{match_id}_{safe_tab_name}"
+                os.getcwd(), "data", "okooo", "matches", date, match_id
             ))
             os.makedirs(save_dir, exist_ok=True)
 
             # 保存 HTML 文件
-            save_path = os.path.join(save_dir, "index.html")
+            filename = f"history_{safe_tab_name}.html"
+            save_path = os.path.join(save_dir, filename)
+            
             async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
                 await f.write(html)
 
             logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+
+            # 发送 SSE 通知
+            await sse_service.broadcast("okooo_file_saved", {
+                "match_id": match_id,
+                "parent_match_id": parent_match_id,
+                "page_type": "history_tab",
+                "tab_name": tab_name,
+                "filename": filename,
+                "path": save_path
+            })
 
             return {
                 "success": True,
@@ -601,25 +734,36 @@ class OkoooService:
     ) -> Dict[str, Any]:
         """
         保存让球盘页面 HTML（由浏览器扩展直接获取 HTML）
-        保存到 data/okooo/handicap/[date]/[match_id]/
+        保存到 data/okooo/matches/[date]/[match_id]/handicap.html
         """
         import os
         import re
         import aiofiles
 
         try:
-            # 构建保存路径
+            # 验证内容
+            self._validate_html_content(html)
+
+            # 构建保存路径 (统一到 matches 目录)
             save_dir = os.path.abspath(os.path.join(
-                os.getcwd(), "data", "okooo", "handicap", date, match_id
+                os.getcwd(), "data", "okooo", "matches", date, match_id
             ))
             os.makedirs(save_dir, exist_ok=True)
 
             # 保存 HTML 文件
-            save_path = os.path.join(save_dir, "index.html")
+            save_path = os.path.join(save_dir, "handicap.html")
             async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
                 await f.write(html)
 
             logger.info(f"[OkoooHandicap] 保存成功: {save_path}")
+
+            # 发送 SSE 通知
+            await sse_service.broadcast("okooo_file_saved", {
+                "match_id": match_id,
+                "page_type": "handicap",
+                "filename": "handicap.html",
+                "path": save_path
+            })
 
             return {
                 "success": True,

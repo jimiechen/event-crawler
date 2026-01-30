@@ -19,12 +19,18 @@ class OkoooMatch(Base):
     league_name: Mapped[str] = mapped_column(String(100), comment="联赛名称", nullable=True)
     home_team: Mapped[str] = mapped_column(String(100), comment="主队名称", nullable=False)
     away_team: Mapped[str] = mapped_column(String(100), comment="客队名称", nullable=False)
-    match_time_text: Mapped[str] = mapped_column(String(100), comment="比赛时间文本", nullable=True)
-    match_date: Mapped[int] = mapped_column(BigInteger, comment="比赛日期(时间戳)", nullable=True)
     
+    rangqiu: Mapped[str] = mapped_column(String(10), comment="北单让球", nullable=True)
+    mask: Mapped[str] = mapped_column(String(2), comment="类型集合，1竞彩2北单3十四场,4北单+竞彩，5北单+14场，6ALL", nullable=True)
+    
+    match_time_text: Mapped[str] = mapped_column(String(100), comment="比赛时间文本", nullable=True)
+    match_date: Mapped[str] = mapped_column(String(20), comment="比赛日期", nullable=True)
+    
+    handicap_data: Mapped[str] = mapped_column(Text, comment="亚盘数据", nullable=True)
+    game_data: Mapped[str] = mapped_column(Text, comment="联赛数据", nullable=True)
     form_data: Mapped[str] = mapped_column(Text, comment="近期战绩", nullable=True)
-    exchange_data: Mapped[str] = mapped_column(Text, comment="交易数据", nullable=True)
-    odds_data: Mapped[str] = mapped_column(Text, comment="赔率数据", nullable=True)
+    exchanges_data: Mapped[str] = mapped_column(Text, comment="盈亏数据", nullable=True)
+    odds_data: Mapped[str] = mapped_column(Text, comment="欧赔数据", nullable=True)
     history_data: Mapped[str] = mapped_column(Text, comment="历史交锋完整数据", nullable=False)
     
     data: Mapped[dict] = mapped_column(JSON, comment="分析结果", nullable=True)

@@ -51,11 +51,22 @@ class OkoooParser:
                     
                 seen_ids.add(match_id)
                 
+                # New: Match No
+                match_no = ""
+                if item.has_attr("matchnum"):
+                    match_no = item["matchnum"]
+                
                 # 2. League
                 league = ""
                 league_elem = item.find(class_='liansai')
                 if league_elem:
                     league = league_elem.get_text(strip=True)
+                    # If match_no not found yet, try to find in league text (e.g. 周三001)
+                    if not match_no:
+                        m_no = re.search(r'(周[一二三四五六日]\d{3})', league)
+                        if m_no:
+                            match_no = m_no.group(1)
+                            # Optional: remove match_no from league if desired, but keeping it is fine
                 else:
                     # 备选: leaguename 属性
                     ln_elem = item.find(attrs={"leaguename": True})
@@ -95,14 +106,19 @@ class OkoooParser:
                 rq_elem = item.find(class_='rangqiu')
                 if rq_elem:
                     handicap = rq_elem.get_text(strip=True)
+                
+                # Check for alternative rangqiu location (e.g. inside other elements or attributes)
+                # For now class='rangqiu' is standard on okooo mobile list
                     
                 matches.append({
                     "match_id": match_id,
+                    "match_no": match_no,
                     "league": league,
                     "home_team": home_team,
                     "away_team": away_team,
-                    "handicap": handicap,
-                    "match_time": match_time
+                    "match_time": match_time,
+                    "handicap": handicap, # This will map to rangqiu
+                    "rangqiu": handicap   # Explicitly set rangqiu
                 })
                 
             except Exception as e:

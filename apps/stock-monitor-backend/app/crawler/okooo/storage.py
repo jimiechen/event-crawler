@@ -84,14 +84,17 @@ class OkoooStorage:
                  logger.error(f"Fallback save failed: {e2}")
             return False
 
-    async def save_basic_match_info(self, match_data: Dict[str, Any]) -> bool:
+    async def save_basic_match_info(self, match_data: Dict[str, Any], date_str: Optional[str] = None) -> bool:
         """
         保存比赛列表中的基本信息
+        :param match_data: 比赛数据字典
+        :param date_str: 明确指定的日期字符串 (YYYY-MM-DD)，优先级高于 match_data 中的文本解析
         """
         match_id = match_data.get("match_id")
         home_team = match_data.get("home_team")
         away_team = match_data.get("away_team")
         match_type = match_data.get("match_type", "jczq")  # Default to jczq
+        rangqiu = match_data.get("rangqiu")
         
         if not home_team or not away_team:
             logger.warning(f"Skipping save_basic_match_info due to missing teams: {match_data}")
@@ -99,9 +102,14 @@ class OkoooStorage:
             
         # Try to parse match_date
         match_time = match_data.get("match_time", "")
-        match_timestamp = None
+        final_date_str = None
         
-        if match_time:
+        # 1. 优先使用传入的 date_str
+        if date_str:
+            final_date_str = date_str
+        
+        # 2. 如果没有 date_str，尝试解析 match_time (回退逻辑)
+        if not final_date_str and match_time:
             try:
                 # Expect format "MM-DD HH:MM" or similar
                 # Append current year if missing
@@ -111,9 +119,7 @@ class OkoooStorage:
                     # Assuming MM-DD
                     if len(date_part.split("-")) == 2:
                         current_year = datetime.now().year
-                        date_str = f"{current_year}-{date_part}"
-                        dt = datetime.strptime(date_str, "%Y-%m-%d")
-                        match_timestamp = int(dt.timestamp())
+                        final_date_str = f"{current_year}-{date_part}"
             except Exception:
                 pass
 
@@ -136,20 +142,86 @@ class OkoooStorage:
                     result = await session.execute(stmt)
                     existing_match = result.scalars().first()
 
+                # Calculate new mask
+                current_mask_val = 0
+                if existing_match and existing_match.mask:
+                    try:
+                        current_mask_val = int(existing_match.mask)
+                    except:
+                        current_mask_val = 0
+                
+                # Map type to bit
+                # JC(jczq)=1, BD(bjdc)=2, SFC(sfc)=4 (Internal)
+                # But output needs to follow user rule:
+                # 1竞彩, 2北单, 3十四场
+                # 4北单+竞彩 (1+2)
+                # 5北单+14场 (2+3? or 2+4?) -> User said 5 is BD+14. If 14 is 3, then 2+3=5.
+                # 6ALL
+                
+                # Let's use bits internally: JC=1, BD=2, SFC=4
+                # Then map bits to user value:
+                # 1 -> 1
+                # 2 -> 2
+                # 4 -> 3
+                # 3 (1+2) -> 4
+                # 6 (2+4) -> 5
+                # 7 (1+2+4) -> 6
+                # 5 (1+4) -> Not defined, maybe 6 or just 7? User didn't specify JC+SFC.
+                
+                type_bit = 0
+                if match_type == "jczq":
+                    type_bit = 1
+                elif match_type == "bjdc":
+                    type_bit = 2
+                elif match_type == "sfc":
+                    type_bit = 4
+                
+                # Reverse current user value to internal bits
+                internal_mask = 0
+                if current_mask_val == 1: internal_mask = 1
+                elif current_mask_val == 2: internal_mask = 2
+                elif current_mask_val == 3: internal_mask = 4
+                elif current_mask_val == 4: internal_mask = 3 # 1+2
+                elif current_mask_val == 5: internal_mask = 6 # 2+4
+                elif current_mask_val == 6: internal_mask = 7 # 1+2+4
+                
+                # Update bits
+                new_internal_mask = internal_mask | type_bit
+                
+                # Map back to user value
+                new_user_mask = "0"
+                if new_internal_mask == 1: new_user_mask = "1"
+                elif new_internal_mask == 2: new_user_mask = "2"
+                elif new_internal_mask == 4: new_user_mask = "3"
+                elif new_internal_mask == 3: new_user_mask = "4"
+                elif new_internal_mask == 6: new_user_mask = "5"
+                elif new_internal_mask == 7: new_user_mask = "6"
+                elif new_internal_mask == 5: new_user_mask = "6" # Fallback for JC+SFC to ALL/Mixed
+                
                 if existing_match:
                     # Update if needed
                     if match_data.get("league"):
                         existing_match.league_name = match_data.get("league")
-                    if match_timestamp:
-                        existing_match.match_date = match_timestamp
+                    
+                    # 强制更新 match_date (如果非空)
+                    if final_date_str:
+                        existing_match.match_date = final_date_str
                     
                     # Update match_id and type if missing or changed
                     if match_id:
                         existing_match.match_id = match_id
-                    if match_type:
+                    # Don't overwrite match_type if it exists, as mask handles multiple types
+                    # But we can update if it's currently null
+                    if not existing_match.match_type:
                         existing_match.match_type = match_type
+                        
                     if match_data.get("match_no"):
                         existing_match.match_no = match_data.get("match_no")
+                    
+                    if rangqiu:
+                        existing_match.rangqiu = rangqiu
+                        
+                    existing_match.mask = new_user_mask
                             
                 else:
                     # Create new
@@ -162,8 +234,10 @@ class OkoooStorage:
                         home_team=home_team,
                         away_team=away_team,
                         match_time_text=match_data.get("match_time"),
-                        match_date=match_timestamp,
-                        history_data="{}"  # Initialize with empty JSON string
+                        match_date=final_date_str,
+                        history_data="{}",  # Initialize with empty JSON string
+                        rangqiu=rangqiu,
+                        mask=new_user_mask
                     )
                     session.add(match)
                 

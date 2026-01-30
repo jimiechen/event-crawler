@@ -36,7 +36,7 @@ class OkoooScheduler:
         self.parser = OkoooParser()
         # Downloader将在run时初始化，确保在正确的事件循环中
         self.downloader: Optional[OkoooDownloader] = None
-        self.storage: Optional[OkoooStorage] = None
+        self.storage: Optional[OkoooStorage] = OkoooStorage(self.db_manager, self.redis_service)
         
         self.queue: Queue = Queue()
         self.active_workers = 0
@@ -140,9 +140,6 @@ class OkoooScheduler:
             # 注意：这可能会涉及到downloader内部状态的更新，但目前OkoooDownloader没有提供动态更新配置的方法
             # 且我们希望复用同一个浏览器实例，所以这里不做强制重启，而是依赖configure方法在必要时重启
             pass
-
-        if not self.storage:
-            self.storage = OkoooStorage(self.db_manager, self.redis_service)
 
     async def _worker(self, worker_id: int):
         """工作协程"""

@@ -193,6 +193,21 @@ async def save_handicap_html(request: OkoooHandicapHtmlRequest):
     except Exception as e:
         return BaseResponse(success=False, message=str(e))
 
+class RepairRequest(BaseModel):
+    date: str = Field(..., description="日期 (YYYY-MM-DD)")
+
+@router.post("/repair", summary="检查并修复比赛数据", response_model=BaseResponse)
+async def repair_matches(request: RepairRequest):
+    """
+    检查指定日期的比赛数据完整性，并重新爬取缺失或无效的比赛
+    """
+    try:
+        result = await okooo_service.repair_daily_data(request.date)
+        return BaseResponse(success=True, data=result)
+    except Exception as e:
+        return BaseResponse(success=False, message=str(e))
+
+
 class OkoooListHtmlRequest(BaseModel):
     html: str = Field(..., description="比赛列表页面 HTML")
     url: str = Field(..., description="页面 URL")

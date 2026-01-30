@@ -588,46 +588,48 @@
               </button>
             </div>
             
-            <!-- 让球盘爬取按钮 -->
+            <!-- 数据修复按钮 -->
             <div class="action-section">
-              <h4>让球盘/指数爬取</h4>
-              <p class="description">从数据库查询数据，爬取让球盘页面</p>
+              <h4>数据完整性检查与修复</h4>
+              <p class="description">检查本地文件完整性（如6/8），重新爬取缺失或无效页面</p>
               <button 
-                @click="startHandicapCrawler"
-                :disabled="handicapCrawlerStatus.isRunning"
+                @click="startRepair"
+                :disabled="repairStatus.isRunning"
                 class="ths-btn ths-btn-primary ths-btn-large"
               >
-                {{ handicapCrawlerStatus.isRunning ? '爬取中...' : '📊 爬取让球盘' }}
+                {{ repairStatus.isRunning ? '检查修复中...' : '🛠️ 补全/修复数据' }}
               </button>
               
-              <div v-if="handicapCrawlerStatus.totalCount > 0" class="stats-row">
+              <div v-if="repairStatus.message" class="stats-row">
+                 <div class="stat-item full-width">
+                  <span class="stat-value">{{ repairStatus.message }}</span>
+                </div>
+              </div>
+              
+              <div v-if="repairStatus.ids.length > 0" class="stats-row">
                 <div class="stat-item">
-                  <span class="stat-label">进度</span>
-                  <span class="stat-value">{{ handicapCrawlerStatus.currentIndex }}/{{ handicapCrawlerStatus.totalCount }}</span>
+                  <span class="stat-label">检查总数</span>
+                  <span class="stat-value">{{ repairStatus.totalChecked }}</span>
                 </div>
                 <div class="stat-item">
-                  <span class="stat-label">成功</span>
-                  <span class="stat-value success">{{ handicapCrawlerStatus.successCount }}</span>
-                </div>
-                <div class="stat-item">
-                  <span class="stat-label">失败</span>
-                  <span class="stat-value error">{{ handicapCrawlerStatus.errorCount }}</span>
+                  <span class="stat-label">修复数量</span>
+                  <span class="stat-value error">{{ repairStatus.repairingCount }}</span>
                 </div>
               </div>
             </div>
             
             <!-- 结果列表 -->
-            <div v-if="okoooCrawlerStatus.results && okoooCrawlerStatus.results.length > 0" class="results-section">
-              <h4>爬取结果 ({{ okoooCrawlerStatus.results.length }})</h4>
+            <div v-if="aggregatedResults.length > 0" class="results-section">
+              <h4>爬取结果 ({{ aggregatedResults.length }})</h4>
               <div class="results-scroll">
                 <div 
-                  v-for="(result, index) in okoooCrawlerStatus.results.slice(-30)" 
-                  :key="index"
+                  v-for="(result, index) in aggregatedResults" 
+                  :key="result.matchId"
                   :class="['result-item', `result-${result.status}`]"
                 >
                   <span class="match-id">#{{ result.matchId }}</span>
                   <span class="status-icon">
-                    {{ result.status === 'success' ? '✓' : (result.status === 'error' ? '✗' : '...') }}
+                     ({{ result.current }}/{{ result.total }}) {{ result.status === 'success' ? '✓' : '...' }}
                   </span>
                 </div>
               </div>
@@ -807,7 +809,65 @@ const okoooListStatus = ref<OkoooListStatus>({
   lastResult: null
 });
 
-// Handicap crawler status
+// Repair status
+interface RepairStatus {
+  isRunning: boolean;
+  totalChecked: number;
+  repairingCount: number;
+  ids: string[];
+  message: string;
+}
+
+const repairStatus = ref<RepairStatus>({
+  isRunning: false,
+  totalChecked: 0,
+  repairingCount: 0,
+  ids: [],
+  message: ''
+});
+
+const startRepair = async () => {
+  if (repairStatus.value.isRunning) return;
+  
+  repairStatus.value.isRunning = true;
+  repairStatus.value.message = '正在检查...';
+  
+  try {
+    // Default to today's date or 2026-01-30 as per context
+    const today = '2026-01-30'; 
+    
+    const response = await fetch(`${backendUrl.value}/api/v1/okooo/repair`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        date: today
+      })
+    });
+    
+    const data = await response.json();
+    if (data.success) {
+      repairStatus.value.totalChecked = data.data.total_checked;
+      repairStatus.value.repairingCount = data.data.repairing_count;
+      repairStatus.value.ids = data.data.ids;
+      repairStatus.value.message = data.data.message;
+      
+      if (data.data.repairing_count > 0) {
+        okoooCrawlerStatus.value.isRunning = true;
+      }
+    } else {
+      repairStatus.value.message = '失败: ' + data.message;
+    }
+  } catch (e: any) {
+    repairStatus.value.message = '错误: ' + e.message;
+  } finally {
+    repairStatus.value.isRunning = false;
+  }
+};
+
+// Handicap crawler status (Removed)
+/*
 interface HandicapCrawlerStatus {
   isRunning: boolean;
   phase: 'idle' | 'query' | 'processing' | 'completed';
@@ -825,6 +885,8 @@ const handicapCrawlerStatus = ref<HandicapCrawlerStatus>({
   successCount: 0,
   errorCount: 0
 });
+*/
+
 
 // 实时日志相关
 interface LogEntry {
@@ -874,6 +936,33 @@ const setupSSE = () => {
         console.error('解析日志数据失败:', e);
       }
     });
+
+    eventSource.addEventListener('okooo_file_saved', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('File saved confirmation:', data);
+        
+        const matchId = data.match_id;
+        if (!serverConfirmedProgress.value[matchId]) {
+          serverConfirmedProgress.value[matchId] = {
+            current: 0,
+            total: 8, // 假设每场比赛8个任务
+            status: 'pending'
+          };
+        }
+        
+        serverConfirmedProgress.value[matchId].current++;
+        
+        // 自动计算总数（如果任务数动态变化）
+        // 暂时假设8个
+        if (serverConfirmedProgress.value[matchId].current >= serverConfirmedProgress.value[matchId].total) {
+          serverConfirmedProgress.value[matchId].status = 'success';
+        }
+
+      } catch (e) {
+        console.error('解析文件保存通知失败:', e);
+      }
+    });
     
     eventSource.onerror = (error) => {
       console.error('SSE连接错误:', error);
@@ -888,6 +977,51 @@ const setupSSE = () => {
 };
 
 let crawlerStatusTimer: number | null = null;
+
+const serverConfirmedProgress = ref<Record<string, { current: number, total: number, status: string }>>({});
+
+// 计算属性：聚合后的比赛进度
+const aggregatedResults = computed(() => {
+  const map: Record<string, { matchId: string, current: number, total: number, status: string }> = {};
+  
+  // 1. 初始化所有任务中的比赛ID
+  if (okoooCrawlerStatus.value.results) {
+    okoooCrawlerStatus.value.results.forEach(task => {
+      if (!map[task.matchId]) {
+        map[task.matchId] = {
+          matchId: task.matchId,
+          current: 0,
+          total: 0,
+          status: 'pending'
+        };
+      }
+      map[task.matchId].total++;
+      // 本地状态更新（如果不用SSE也可以用这个）
+      // if (task.status === 'success') map[task.matchId].current++;
+    });
+  }
+  
+  // 2. 使用服务端SSE确认的进度覆盖
+  Object.keys(serverConfirmedProgress.value).forEach(matchId => {
+    if (map[matchId]) {
+      map[matchId].current = serverConfirmedProgress.value[matchId].current;
+      // 检查是否完成
+      if (map[matchId].current >= map[matchId].total && map[matchId].total > 0) {
+        map[matchId].status = 'success';
+      }
+    } else {
+        // 如果任务列表里没有（可能是历史遗留），也加上
+        map[matchId] = {
+            matchId: matchId,
+            current: serverConfirmedProgress.value[matchId].current,
+            total: serverConfirmedProgress.value[matchId].total,
+            status: serverConfirmedProgress.value[matchId].status
+        };
+    }
+  });
+
+  return Object.values(map);
+});
 
 // 调试模式配置 - 设为false可大幅减少console.log输出
 const DEBUG_MODE = false;
@@ -3018,6 +3152,7 @@ const stopCrawlerStatusPolling = () => {
   }
 };
 
+/*
 // 启动让球盘爬虫
 const startHandicapCrawler = async () => {
   handicapCrawlerStatus.value.isRunning = true;
@@ -3078,6 +3213,8 @@ const stopHandicapStatusPolling = () => {
     handicapStatusTimer = null;
   }
 };
+*/
+
 
 // 打开并捕获比赛列表
 const openAndCaptureList = async () => {
@@ -3172,7 +3309,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopCrawlerStatusPolling();
-  stopHandicapStatusPolling();
+  // stopHandicapStatusPolling();
   if (eventSource) {
     eventSource.close();
     isLogStreamActive.value = false;
