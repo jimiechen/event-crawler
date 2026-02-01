@@ -281,8 +281,6 @@ class OkoooParser:
                 logger.warning(f"Error parsing mobile match item: {e}")
                 continue
                 
-        return matches
-                
         # 2. 如果上面没找到，尝试直接通过链接提取
         if not matches:
             # Look for links containing /match/ or match.php?MatchID=

@@ -538,6 +538,10 @@
             <div class="crawler-stats">
               <div class="stat-grid">
                 <div class="stat-item">
+                  <span class="stat-label">列表抓取</span>
+                  <span class="stat-value">{{ okoooListStatus.progress || '-' }}</span>
+                </div>
+                <div class="stat-item">
                   <span class="stat-label">比赛进度</span>
                   <span class="stat-value">{{ okoooCrawlerStatus.currentMatchIndex }}/{{ okoooCrawlerStatus.totalMatches }}</span>
                 </div>
@@ -850,8 +854,8 @@ const startRepair = async (isDryRun: boolean = false) => {
   repairStatus.value.message = isDryRun ? '正在检查数据完整性...' : '正在检查并修复...';
   
   try {
-    // Default to today's date or 2026-01-30 as per context
-    const today = '2026-01-30'; 
+    // Default to today's date
+    const today = new Date().toISOString().split('T')[0];
     
     const response = await fetch(`${backendUrl.value}/api/v1/okooo/repair`, {
       method: 'POST',
@@ -3238,6 +3242,7 @@ const stopHandicapStatusPolling = () => {
 const openAndCaptureList = async () => {
       okoooListStatus.value.isCapturing = true;
       okoooListStatus.value.lastResult = null;
+      okoooListStatus.value.progress = '0/3';
 
       const captureSteps = [
         { name: '竞彩足球', url: 'https://m.okooo.com/jczq/' },
@@ -3251,9 +3256,10 @@ const openAndCaptureList = async () => {
 
         for (let i = 0; i < captureSteps.length; i++) {
           const step = captureSteps[i];
+          okoooListStatus.value.progress = `${i + 1}/${captureSteps.length}`;
           okoooListStatus.value.lastResult = {
             success: true,
-            message: `正在捕获 ${step.name} (${i + 1}/${captureSteps.length})...`
+            message: `正在捕获 ${step.name}...`
           };
 
           const response = await chrome.runtime.sendMessage({
@@ -3277,11 +3283,11 @@ const openAndCaptureList = async () => {
         okoooListStatus.value.isCapturing = false;
         okoooListStatus.value.lastResult = {
           success: true,
-          message: `成功捕获所有 ${successCount} 个列表`,
+          message: `成功捕获所有 ${successCount} 个列表，开始质检...`,
           size: totalSize
         };
         
-        // 自动触发数据完整性检查
+        // 自动触发数据完整性检查 (Dry Run)
         await startRepair(true);
       } catch (error) {
         okoooListStatus.value.isCapturing = false;
