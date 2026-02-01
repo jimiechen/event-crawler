@@ -14,12 +14,14 @@ class OkoooListCrawler {
   private captureListenerId: number | null = null;
   private result: CaptureResult | null = null;
 
-  async openAndCapture(): Promise<{ success: boolean; message: string; size?: number }> {
+  async openAndCapture(url?: string): Promise<{ success: boolean; message: string; size?: number }> {
     this.isCapturing = true;
     this.result = null;
 
+    const targetUrl = url || OKOOO_CRAWLER_CONFIG.ENTRY_URL;
+
     // 打开比赛列表页面
-    this.tabId = await this.getOrCreateTab(OKOOO_CRAWLER_CONFIG.ENTRY_URL);
+    this.tabId = await this.getOrCreateTab(targetUrl);
     if (!this.tabId) {
       this.isCapturing = false;
       return { success: false, message: '无法创建标签页' };
@@ -49,7 +51,7 @@ class OkoooListCrawler {
     }
 
     // 发送到后端
-    const success = await this.uploadToBackend(htmlContent);
+    const success = await this.uploadToBackend(htmlContent, targetUrl);
     
     this.isCapturing = false;
     
@@ -98,7 +100,7 @@ class OkoooListCrawler {
     return null;
   }
 
-  private async uploadToBackend(htmlContent: string): Promise<boolean> {
+  private async uploadToBackend(htmlContent: string, url: string): Promise<boolean> {
     try {
       const dateStr = new Date().toISOString().split('T')[0];
       
@@ -109,7 +111,7 @@ class OkoooListCrawler {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             html: htmlContent,
-            url: OKOOO_CRAWLER_CONFIG.ENTRY_URL,
+            url: url,
             captured_at: new Date().toISOString(),
             date: dateStr
           })

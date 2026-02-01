@@ -592,13 +592,22 @@
             <div class="action-section">
               <h4>数据完整性检查与修复</h4>
               <p class="description">检查本地文件完整性（如6/8），重新爬取缺失或无效页面</p>
-              <button 
-                @click="startRepair"
-                :disabled="repairStatus.isRunning"
-                class="ths-btn ths-btn-primary ths-btn-large"
-              >
-                {{ repairStatus.isRunning ? '检查修复中...' : '🛠️ 补全/修复数据' }}
-              </button>
+              <div class="button-group">
+                <button 
+                  @click="startRepair(true)"
+                  :disabled="repairStatus.isRunning"
+                  class="ths-btn ths-btn-secondary"
+                >
+                  🔍 仅检查完整性
+                </button>
+                <button 
+                  @click="startRepair(false)"
+                  :disabled="repairStatus.isRunning"
+                  class="ths-btn ths-btn-primary"
+                >
+                  🛠️ 补全/修复数据
+                </button>
+              </div>
               
               <div v-if="repairStatus.message" class="stats-row">
                  <div class="stat-item full-width">
@@ -606,14 +615,22 @@
                 </div>
               </div>
               
-              <div v-if="repairStatus.ids.length > 0" class="stats-row">
-                <div class="stat-item">
-                  <span class="stat-label">检查总数</span>
-                  <span class="stat-value">{{ repairStatus.totalChecked }}</span>
+              <div v-if="repairStatus.ids.length > 0" class="repair-details">
+                <div class="stats-row">
+                  <div class="stat-item">
+                    <span class="stat-label">检查总数</span>
+                    <span class="stat-value">{{ repairStatus.totalChecked }}</span>
+                  </div>
+                  <div class="stat-item">
+                    <span class="stat-label">需修复</span>
+                    <span class="stat-value error">{{ repairStatus.repairingCount }}</span>
+                  </div>
                 </div>
-                <div class="stat-item">
-                  <span class="stat-label">修复数量</span>
-                  <span class="stat-value error">{{ repairStatus.repairingCount }}</span>
+                <div class="missing-ids">
+                  <h5>缺失/不完整 ID列表:</h5>
+                  <div class="id-tags">
+                    <span v-for="id in repairStatus.ids" :key="id" class="id-tag">{{ id }}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -826,11 +843,11 @@ const repairStatus = ref<RepairStatus>({
   message: ''
 });
 
-const startRepair = async () => {
+const startRepair = async (isDryRun: boolean = false) => {
   if (repairStatus.value.isRunning) return;
   
   repairStatus.value.isRunning = true;
-  repairStatus.value.message = '正在检查...';
+  repairStatus.value.message = isDryRun ? '正在检查数据完整性...' : '正在检查并修复...';
   
   try {
     // Default to today's date or 2026-01-30 as per context
@@ -842,7 +859,8 @@ const startRepair = async () => {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        date: today
+        date: today,
+        dry_run: isDryRun
       })
     });
     
@@ -853,7 +871,7 @@ const startRepair = async () => {
       repairStatus.value.ids = data.data.ids;
       repairStatus.value.message = data.data.message;
       
-      if (data.data.repairing_count > 0) {
+      if (data.data.repairing_count > 0 && !isDryRun) {
         okoooCrawlerStatus.value.isRunning = true;
       }
     } else {
@@ -3218,37 +3236,62 @@ const stopHandicapStatusPolling = () => {
 
 // 打开并捕获比赛列表
 const openAndCaptureList = async () => {
-  okoooListStatus.value.isCapturing = true;
-  okoooListStatus.value.lastResult = null;
+      okoooListStatus.value.isCapturing = true;
+      okoooListStatus.value.lastResult = null;
 
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'OKOOO_OPEN_LIST'
-    });
+      const captureSteps = [
+        { name: '竞彩足球', url: 'https://m.okooo.com/jczq/' },
+        { name: '北京单场', url: 'https://m.okooo.com/bjdc/' },
+        { name: '胜负彩', url: 'https://m.okooo.com/sfc/' }
+      ];
 
-    okoooListStatus.value.isCapturing = false;
+      try {
+        let successCount = 0;
+        let totalSize = 0;
 
-    if (response.success) {
-      okoooListStatus.value.lastResult = {
-        success: true,
-        message: '比赛列表已保存',
-        size: response.size
-      };
-    } else {
-      okoooListStatus.value.lastResult = {
-        success: false,
-        message: response.message || '捕获失败'
-      };
-    }
-  } catch (error) {
-    okoooListStatus.value.isCapturing = false;
-    okoooListStatus.value.lastResult = {
-      success: false,
-      message: String(error)
+        for (let i = 0; i < captureSteps.length; i++) {
+          const step = captureSteps[i];
+          okoooListStatus.value.lastResult = {
+            success: true,
+            message: `正在捕获 ${step.name} (${i + 1}/${captureSteps.length})...`
+          };
+
+          const response = await chrome.runtime.sendMessage({
+            type: 'OKOOO_OPEN_LIST',
+            url: step.url
+          });
+
+          if (response.success) {
+            successCount++;
+            totalSize += response.size || 0;
+            // 每次成功后等待一小段时间，避免操作过快
+            if (i < captureSteps.length - 1) {
+              await new Promise(resolve => setTimeout(resolve, 2000));
+            }
+          } else {
+            console.error(`捕获 ${step.name} 失败:`, response.message);
+            throw new Error(`捕获 ${step.name} 失败: ${response.message}`);
+          }
+        }
+
+        okoooListStatus.value.isCapturing = false;
+        okoooListStatus.value.lastResult = {
+          success: true,
+          message: `成功捕获所有 ${successCount} 个列表`,
+          size: totalSize
+        };
+        
+        // 自动触发数据完整性检查
+        await startRepair(true);
+      } catch (error) {
+        okoooListStatus.value.isCapturing = false;
+        okoooListStatus.value.lastResult = {
+          success: false,
+          message: String(error)
+        };
+        console.error('捕获比赛列表失败:', error);
+      }
     };
-    console.error('捕获比赛列表失败:', error);
-  }
-};
 
 // 打开比赛列表页面
 const openListPage = async () => {

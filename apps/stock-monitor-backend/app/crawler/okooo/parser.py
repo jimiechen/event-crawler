@@ -241,12 +241,18 @@ class OkoooParser:
                     no_elem = item.find(class_=re.compile(r'match-no|no|serial'))
                     if no_elem:
                         match_no = no_elem.get_text(strip=True)
-                
-                # 5. Fallback for BJDC (often just number like 1, 2, 3)
-                # Sometimes it is in a span with class 'no' or similar
+
+                # 5. Stronger search for JCZQ (周X001) in the whole item text if still missing
                 if not match_no:
-                    # Look for span with numbers only at start of item
-                    pass 
+                     text = item.get_text()
+                     m_no_fallback = re.search(r'(周[一二三四五六日]\d{3})', text)
+                     if m_no_fallback:
+                         match_no = m_no_fallback.group(1)
+                     else:
+                         # Try pattern like "001" if league implies JCZQ
+                         # But be careful not to pick up odds
+                         pass
+ 
 
                 # Time
                 match_time = ""

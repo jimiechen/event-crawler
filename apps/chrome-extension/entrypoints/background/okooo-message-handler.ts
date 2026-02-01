@@ -25,7 +25,7 @@ export function initOkoooMessageHandler() {
         break;
 
       case 'OKOOO_OPEN_LIST':
-        okoooListCrawler.openAndCapture()
+        okoooListCrawler.openAndCapture(message.url)
           .then(result => sendResponse(result))
           .catch(error => sendResponse({ success: false, message: String(error) }));
         return true;

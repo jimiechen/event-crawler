@@ -131,9 +131,11 @@ class OkoooService:
         await manager.broadcast(data)
         await sse_service.broadcast("okooo_matches", data)
 
-    async def repair_daily_data(self, date_str: str) -> Dict[str, Any]:
+    async def repair_daily_data(self, date_str: str, dry_run: bool = False) -> Dict[str, Any]:
         """
         检查指定日期的比赛数据完整性，并重新爬取缺失或无效的比赛
+        :param date_str: 日期字符串
+        :param dry_run: 如果为True，只检查不触发后端爬取
         """
         import os
         
@@ -185,8 +187,8 @@ class OkoooService:
                 ids_to_crawl.append(mid)
                 continue
 
-        # 3. Start crawling if needed
-        if ids_to_crawl:
+        # 3. Start crawling if needed and not dry_run
+        if ids_to_crawl and not dry_run:
             # Trigger crawl in background
             await self.start_crawl_ids(ids_to_crawl, headless=True, force=True)
             
