@@ -329,7 +329,7 @@ const formatSuccessRate = (stats: any) => {
 
 // 获取健康状态样式
 const getHealthStatusClass = (status: string) => {
-  const classMap = {
+  const classMap: Record<string, string> = {
     'healthy': 'health-good',
     'warning': 'health-warning',
     'critical': 'health-critical'
@@ -339,7 +339,7 @@ const getHealthStatusClass = (status: string) => {
 
 // 获取健康状态图标
 const getHealthStatusIcon = (status: string) => {
-  const iconMap = {
+  const iconMap: Record<string, string> = {
     'healthy': '✅',
     'warning': '⚠️',
     'critical': '❌'
@@ -349,7 +349,7 @@ const getHealthStatusIcon = (status: string) => {
 
 // 获取健康状态文本
 const getHealthStatusText = (status: string) => {
-  const textMap = {
+  const textMap: Record<string, string> = {
     'healthy': '健康',
     'warning': '警告',
     'critical': '严重'
@@ -509,10 +509,12 @@ const getCurrentTabId = async () => {
 const clearErrors = async () => {
   try {
     const tabId = await getCurrentTabId();
-    await chrome.tabs.sendMessage(tabId, {
-      action: 'clear_errors'
-    });
-    recentErrors.value = [];
+    if (tabId) {
+      await chrome.tabs.sendMessage(tabId, {
+        action: 'clear_errors'
+      });
+      recentErrors.value = [];
+    }
   } catch (error) {
     console.error('清除错误失败:', error);
   }
@@ -522,18 +524,20 @@ const clearErrors = async () => {
 const exportStatus = async () => {
   try {
     const tabId = await getCurrentTabId();
-    const response = await chrome.tabs.sendMessage(tabId, {
-      action: 'export_status'
-    });
-    
-    if (response) {
-      const blob = new Blob([JSON.stringify(response, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `monitoring-status-${new Date().toISOString().slice(0, 19)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
+    if (tabId) {
+      const response = await chrome.tabs.sendMessage(tabId, {
+        action: 'export_status'
+      });
+      
+      if (response) {
+        const blob = new Blob([JSON.stringify(response, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `monitoring-status-${new Date().toISOString().slice(0, 19)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
     }
   } catch (error) {
     console.error('导出状态失败:', error);
@@ -544,10 +548,12 @@ const exportStatus = async () => {
 const resetStatistics = async () => {
   try {
     const tabId = await getCurrentTabId();
-    await chrome.tabs.sendMessage(tabId, {
-      action: 'reset_statistics'
-    });
-    await updateStatus();
+    if (tabId) {
+      await chrome.tabs.sendMessage(tabId, {
+        action: 'reset_statistics'
+      });
+      await updateStatus();
+    }
   } catch (error) {
     console.error('重置统计失败:', error);
   }
@@ -557,13 +563,15 @@ const resetStatistics = async () => {
 const showRunHistory = async () => {
   try {
     const tabId = await getCurrentTabId();
-    const response = await chrome.tabs.sendMessage(tabId, {
-      action: 'get_run_history'
-    });
-    
-    if (response) {
-      console.log('运行历史:', response);
-      // 这里可以打开一个模态框显示历史记录
+    if (tabId) {
+      const response = await chrome.tabs.sendMessage(tabId, {
+        action: 'get_run_history'
+      });
+      
+      if (response) {
+        console.log('运行历史:', response);
+        // 这里可以打开一个模态框显示历史记录
+      }
     }
   } catch (error) {
     console.error('获取运行历史失败:', error);
@@ -598,7 +606,9 @@ const debugHtml = async () => {
       })
     });
     
-    const { html, url } = results[0].result;
+    const result = (results[0] as any).result;
+    if (!result) throw new Error("No result from script execution");
+    const { html, url } = result;
     
     // Send to backend
     const response = await fetch('http://localhost:8000/api/v1/crawler/debughtml', {
@@ -638,7 +648,7 @@ const testCrawler = async (platform: string) => {
       func: () => document.documentElement.outerHTML
     });
     
-    const html = results[0].result;
+    const html = (results[0] as any).result;
     
     // Send to backend
     const response = await fetch('http://localhost:8000/api/v1/crawler/parse_html', {

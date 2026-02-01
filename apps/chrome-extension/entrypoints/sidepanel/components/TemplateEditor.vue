@@ -73,7 +73,7 @@ const initializeDefaultFields = async () => {
     const testRulesData = await response.json();
     
     // 将test-rules.json的数据转换为模板字段格式
-    templateFields.value = testRulesData.parsingRules.map(rule => ({
+    templateFields.value = testRulesData.parsingRules.map((rule: any) => ({
       id: generateId(),
       name: rule.description, // 使用description作为显示名称
       description: rule.description,

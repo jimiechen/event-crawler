@@ -801,7 +801,10 @@ const openSidebar = async () => {
   isOpeningSidebar.value = true;
   try {
     // eslint-disable-next-line no-undef
-    await chrome.sidePanel.open({ windowId: (await chrome.windows.getCurrent()).id });
+    const window = await chrome.windows.getCurrent();
+    if (window.id) {
+      await chrome.sidePanel.open({ windowId: window.id });
+    }
   } catch (error) {
     console.error('打开侧边栏失败:', error);
   } finally {

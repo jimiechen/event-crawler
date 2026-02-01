@@ -490,48 +490,20 @@
               <p>自动遍历比赛列表和历史记录</p>
             </div>
             
-            <!-- 比赛列表捕获按钮 -->
-            <div class="list-capture-section">
-              <h4>📋 比赛列表</h4>
-              <p class="section-desc">打开比赛列表页面并捕获 HTML</p>
-              <div class="list-capture-buttons">
+            <!-- 控制中心 -->
+            <div class="control-center-section">
+              <div class="main-action">
                 <button 
                   @click="openAndCaptureList"
-                  :disabled="okoooListStatus.isCapturing"
-                  class="ths-btn ths-btn-primary ths-btn-large"
+                  :disabled="isSyncing"
+                  class="ths-btn ths-btn-primary ths-btn-large full-width-btn"
                 >
-                  {{ okoooListStatus.isCapturing ? '捕获中...' : '📄 打开并捕获比赛列表' }}
+                  {{ isSyncing ? '🔄 同步中...' : '🚀 一键同步数据 (抓取+质检)' }}
                 </button>
-                <button 
-                  @click="openListPage"
-                  class="ths-btn ths-btn-secondary"
-                >
-                  🔗 打开比赛列表
-                </button>
+                <div class="sync-status-text" :class="{ 'active': isSyncing }">
+                  {{ syncStatusMessage }}
+                </div>
               </div>
-              <div v-if="okoooListStatus.lastResult" class="list-result">
-                <span :class="['result-badge', okoooListStatus.lastResult.success ? 'result-success' : 'result-error']">
-                  {{ okoooListStatus.lastResult.success ? '✓' : '✗' }} {{ okoooListStatus.lastResult.message }}
-                </span>
-                <span v-if="okoooListStatus.lastResult.size" class="size-info">
-                  ({{ formatSize(okoooListStatus.lastResult.size) }})
-                </span>
-              </div>
-            </div>
-            
-            <!-- 当前页面 -->
-            <div class="current-page">
-              <span class="page-label">当前页面:</span>
-              <span class="page-url" :class="{ 'url-valid': currentUrl?.includes('m.okooo.com') }">
-                {{ currentUrl || '未检测到页面' }}
-              </span>
-            </div>
-            
-            <!-- 爬虫阶段 -->
-            <div class="phase-indicator">
-              <span :class="['phase-badge', `phase-${okoooCrawlerStatus.phase}`]">
-                {{ getPhaseText(okoooCrawlerStatus.phase) }}
-              </span>
             </div>
             
             <!-- 统计信息 -->
@@ -539,104 +511,75 @@
               <div class="stat-grid">
                 <div class="stat-item">
                   <span class="stat-label">列表抓取</span>
-                  <span class="stat-value">{{ okoooListStatus.progress || '-' }}</span>
+                  <span class="stat-value">{{ okoooState.list.progress || '未开始' }}</span>
                 </div>
                 <div class="stat-item">
-                  <span class="stat-label">比赛进度</span>
-                  <span class="stat-value">{{ okoooCrawlerStatus.currentMatchIndex }}/{{ okoooCrawlerStatus.totalMatches }}</span>
+                  <span class="stat-label">本次抓取</span>
+                  <span class="stat-value">{{ okoooState.crawler.currentMatchIndex }}/{{ okoooState.crawler.totalMatches }}</span>
                 </div>
-                <div class="stat-item">
-                  <span class="stat-label">历史进度</span>
-                  <span class="stat-value">{{ okoooCrawlerStatus.currentHistoryIndex }}/{{ okoooCrawlerStatus.totalHistory }}</span>
+                <div class="stat-item" :class="{ 'error': okoooState.repair.repairingCount > 0 }">
+                  <span class="stat-label">待修复</span>
+                  <span class="stat-value">{{ okoooState.repair.repairingCount }}</span>
                 </div>
                 <div class="stat-item success">
                   <span class="stat-label">成功</span>
-                  <span class="stat-value">{{ okoooCrawlerStatus.successCount }}</span>
-                </div>
-                <div class="stat-item error">
-                  <span class="stat-label">失败</span>
-                  <span class="stat-value">{{ okoooCrawlerStatus.errorCount }}</span>
+                  <span class="stat-value">{{ okoooState.crawler.successCount }}</span>
                 </div>
               </div>
             </div>
             
             <!-- 进度条 -->
-            <div v-if="okoooCrawlerStatus.totalMatches > 0" class="progress-section">
+            <div v-if="okoooState.crawler.totalMatches > 0" class="progress-section">
               <div class="progress-bar large">
                 <div 
                   class="progress-fill"
-                  :style="{ width: `${(okoooCrawlerStatus.currentMatchIndex / okoooCrawlerStatus.totalMatches) * 100}%` }"
+                  :style="{ width: `${(okoooState.crawler.currentMatchIndex / okoooState.crawler.totalMatches) * 100}%` }"
                 ></div>
               </div>
-              <span class="progress-text">
-                {{ Math.round((okoooCrawlerStatus.currentMatchIndex / okoooCrawlerStatus.totalMatches) * 100) }}%
-              </span>
+              <div class="progress-text">
+                总进度: {{ Math.round((okoooState.crawler.currentMatchIndex / okoooState.crawler.totalMatches) * 100) }}%
+              </div>
             </div>
-            
-            <!-- 控制按钮 -->
-            <div class="action-buttons">
-              <button 
-                @click="startOkoooCrawler"
-                :disabled="okoooCrawlerStatus.isRunning || !currentUrl?.includes('m.okooo.com')"
-                class="ths-btn ths-btn-success ths-btn-large"
-              >
-                {{ okoooCrawlerStatus.isRunning ? '爬取中...' : '🚀 开始自动爬取' }}
-              </button>
-              
-              <button 
-                @click="stopOkoooCrawler"
-                :disabled="!okoooCrawlerStatus.isRunning"
-                class="ths-btn ths-btn-danger ths-btn-large"
-              >
-                ⏹️ 停止爬取
-              </button>
+
+            <!-- 修复详情区域 -->
+            <div v-if="okoooState.repair.repairDetails.length > 0" class="repair-details-section">
+              <h4>⚠️ 发现 {{ okoooState.repair.repairDetails.length }} 个数据异常</h4>
+              <div class="repair-list">
+                <div v-for="item in okoooState.repair.repairDetails" :key="item.id" class="repair-item">
+                  <span class="match-id">ID: {{ item.id }}</span>
+                  <span class="error-reason">{{ item.reason }}</span>
+                </div>
+              </div>
             </div>
-            
-            <!-- 数据修复按钮 -->
-            <div class="action-section">
-              <h4>数据完整性检查与修复</h4>
-              <p class="description">检查本地文件完整性（如6/8），重新爬取缺失或无效页面</p>
-              <div class="button-group">
-                <button 
-                  @click="startRepair(true)"
-                  :disabled="repairStatus.isRunning"
-                  class="ths-btn ths-btn-secondary"
-                >
-                  🔍 仅检查完整性
-                </button>
-                <button 
-                  @click="startRepair(false)"
-                  :disabled="repairStatus.isRunning"
-                  class="ths-btn ths-btn-primary"
-                >
-                  🛠️ 补全/修复数据
-                </button>
-              </div>
-              
-              <div v-if="repairStatus.message" class="stats-row">
-                 <div class="stat-item full-width">
-                  <span class="stat-value">{{ repairStatus.message }}</span>
+
+            <!-- 手动控制面板 -->
+            <div class="manual-controls-section">
+              <details>
+                <summary>🛠️ 手动控制选项</summary>
+                <div class="manual-buttons">
+                  <button 
+                    @click="startRepair(true)" 
+                    :disabled="isSyncing"
+                    class="ths-btn ths-btn-secondary"
+                  >
+                    🔍 仅检查完整性
+                  </button>
+                  <button 
+                    @click="startRepair(false)" 
+                    :disabled="isSyncing"
+                    class="ths-btn ths-btn-warning"
+                  >
+                    🔧 强制修复
+                  </button>
+                  <button 
+                    @click="stopOkoooCrawler"
+                    :disabled="!okoooState.crawler.isRunning"
+                    class="ths-btn ths-btn-danger"
+                  >
+                    🛑 停止爬虫
+                  </button>
                 </div>
-              </div>
-              
-              <div v-if="repairStatus.ids.length > 0" class="repair-details">
-                <div class="stats-row">
-                  <div class="stat-item">
-                    <span class="stat-label">检查总数</span>
-                    <span class="stat-value">{{ repairStatus.totalChecked }}</span>
-                  </div>
-                  <div class="stat-item">
-                    <span class="stat-label">需修复</span>
-                    <span class="stat-value error">{{ repairStatus.repairingCount }}</span>
-                  </div>
-                </div>
-                <div class="missing-ids">
-                  <h5>缺失/不完整 ID列表:</h5>
-                  <div class="id-tags">
-                    <span v-for="id in repairStatus.ids" :key="id" class="id-tag">{{ id }}</span>
-                  </div>
-                </div>
-              </div>
+              </details>
             </div>
             
             <!-- 结果列表 -->
@@ -707,10 +650,11 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+// @ts-ignore
 import {
   initializeMCPSession,
   getChromeWebContent,
-  parseFootballMatches,
+  parseFootballMatches as parseFootballMatchesLib,
   generateFootballReport,
 } from '../../utils/football-parser.js';
 import MonitoringStatusPanel from '../../components/MonitoringStatusPanel.vue';
@@ -791,7 +735,7 @@ const nativeStatus = ref({ connected: false, text: 'Native Host' });
 // MCP服务器配置
 const MCP_SERVER_URL = 'http://localhost:56889';
 
-// Okooo crawler status
+// Okooo Sync State
 interface CrawlerStatus {
   isRunning: boolean;
   phase: 'idle' | 'matches' | 'history' | 'completed';
@@ -808,50 +752,134 @@ interface CrawlerStatus {
   }>;
 }
 
-const okoooCrawlerStatus = ref<CrawlerStatus>({
-  isRunning: false,
-  phase: 'idle',
-  totalMatches: 0,
-  currentMatchIndex: 0,
-  totalHistory: 0,
-  currentHistoryIndex: 0,
-  successCount: 0,
-  errorCount: 0,
-  results: []
-});
-
 interface OkoooListStatus {
   isCapturing: boolean;
+  progress: string;
   lastResult: { success: boolean; message: string; size?: number } | null;
 }
 
-const okoooListStatus = ref<OkoooListStatus>({
-  isCapturing: false,
-  lastResult: null
-});
-
-// Repair status
 interface RepairStatus {
   isRunning: boolean;
+  isDryRun: boolean;
   totalChecked: number;
   repairingCount: number;
   ids: string[];
+  repairDetails: Array<{ id: string; reason: string }>;
   message: string;
 }
 
-const repairStatus = ref<RepairStatus>({
-  isRunning: false,
-  totalChecked: 0,
-  repairingCount: 0,
-  ids: [],
-  message: ''
+interface OkoooSyncState {
+  crawler: CrawlerStatus;
+  list: OkoooListStatus;
+  repair: RepairStatus;
+}
+
+const okoooState = ref<OkoooSyncState>({
+  crawler: {
+    isRunning: false,
+    phase: 'idle',
+    totalMatches: 0,
+    currentMatchIndex: 0,
+    totalHistory: 0,
+    currentHistoryIndex: 0,
+    successCount: 0,
+    errorCount: 0,
+    results: []
+  },
+  list: {
+    isCapturing: false,
+    progress: '',
+    lastResult: null
+  },
+  repair: {
+    isRunning: false,
+    isDryRun: false,
+    totalChecked: 0,
+    repairingCount: 0,
+    ids: [],
+    repairDetails: [],
+    message: ''
+  }
 });
 
+// Backward compatibility proxies for template (optional, but cleaner to update template)
+// We will update template references.
+
+// Unified Sync Status
+const isSyncing = computed(() => {
+  return okoooState.value.list.isCapturing || (okoooState.value.repair.isRunning && okoooState.value.repair.isDryRun);
+});
+
+const syncStatusMessage = computed(() => {
+  const { list, repair } = okoooState.value;
+  if (list.isCapturing) {
+    return `正在抓取列表 ${list.progress}...`;
+  }
+  if (repair.isRunning && repair.isDryRun) {
+    return '正在检查数据完整性...';
+  }
+  if (list.lastResult && !list.lastResult.success) {
+    return `上次失败: ${list.lastResult.message}`;
+  }
+  if (repair.message) {
+    return repair.message;
+  }
+  return '准备就绪';
+});
+
+const repairNotification = ref({
+    visible: false,
+    message: '',
+    totalMatches: 0,
+    totalTasks: 0,
+    date: ''
+});
+
+const startRepairFromNotification = async () => {
+    repairNotification.value.visible = false;
+    okoooState.value.repair.isRunning = true;
+    okoooState.value.repair.message = '正在获取修复任务...';
+    
+    try {
+        // Fetch tasks
+        const response = await fetch(`${backendUrl.value}/api/v1/okooo/repair-tasks`);
+        const result = await response.json();
+        
+        if (result.success && result.data && result.data.length > 0) {
+            okoooState.value.repair.message = `获取到 ${result.data.length} 个任务，开始爬取...`;
+            okoooState.value.crawler.isRunning = true;
+            
+            // Send to extension
+            chrome.runtime.sendMessage({
+                type: 'OKOOO_START_REPAIR_TASKS',
+                tasks: result.data
+            }).then(response => {
+                if (response.success) {
+                    startCrawlerStatusPolling();
+                } else {
+                    okoooState.value.crawler.isRunning = false;
+                    okoooState.value.repair.message = '修复启动失败: ' + response.message;
+                }
+            }).catch((err: any) => {
+                okoooState.value.crawler.isRunning = false;
+                okoooState.value.repair.message = '修复启动异常: ' + err;
+            });
+        } else {
+            okoooState.value.repair.message = '未获取到修复任务或任务列表为空';
+            okoooState.value.repair.isRunning = false;
+        }
+    } catch (e: any) {
+        okoooState.value.repair.message = '获取任务失败: ' + e.message;
+        okoooState.value.repair.isRunning = false;
+    }
+};
+
 const startRepair = async (isDryRun: boolean = false) => {
-  if (repairStatus.value.isRunning) return;
+  if (okoooState.value.repair.isRunning) return;
   
-  repairStatus.value.isRunning = true;
-  repairStatus.value.message = isDryRun ? '正在检查数据完整性...' : '正在检查并修复...';
+  okoooState.value.repair.isRunning = true;
+  okoooState.value.repair.isDryRun = isDryRun;
+  okoooState.value.repair.message = isDryRun ? '正在检查数据完整性...' : '正在检查并修复...';
   
   try {
     // Default to today's date
@@ -870,21 +898,37 @@ const startRepair = async (isDryRun: boolean = false) => {
     
     const data = await response.json();
     if (data.success) {
-      repairStatus.value.totalChecked = data.data.total_checked;
-      repairStatus.value.repairingCount = data.data.repairing_count;
-      repairStatus.value.ids = data.data.ids;
-      repairStatus.value.message = data.data.message;
+      okoooState.value.repair.totalChecked = data.data.total_checked;
+      okoooState.value.repair.repairingCount = data.data.repairing_count;
+      okoooState.value.repair.ids = data.data.ids;
+      okoooState.value.repair.repairDetails = data.data.repair_details || [];
+      okoooState.value.repair.message = data.data.message;
       
       if (data.data.repairing_count > 0 && !isDryRun) {
-        okoooCrawlerStatus.value.isRunning = true;
+        okoooState.value.crawler.isRunning = true;
+        // 触发 Chrome Extension 爬取
+        chrome.runtime.sendMessage({
+          type: 'OKOOO_START_REPAIR',
+          ids: data.data.ids
+        }).then(response => {
+          if (response.success) {
+            startCrawlerStatusPolling();
+          } else {
+             okoooState.value.crawler.isRunning = false;
+             okoooState.value.repair.message = '修复启动失败: ' + response.message;
+          }
+        }).catch((err: any) => {
+             okoooState.value.crawler.isRunning = false;
+             okoooState.value.repair.message = '修复启动异常: ' + err;
+        });
       }
     } else {
-      repairStatus.value.message = '失败: ' + data.message;
+      okoooState.value.repair.message = '失败: ' + data.message;
     }
   } catch (e: any) {
-    repairStatus.value.message = '错误: ' + e.message;
+    okoooState.value.repair.message = '错误: ' + e.message;
   } finally {
-    repairStatus.value.isRunning = false;
+    okoooState.value.repair.isRunning = false;
   }
 };
 
@@ -940,7 +984,43 @@ const setupSSE = () => {
       console.log('SSE连接已建立');
       isLogStreamActive.value = true;
     };
+
+    eventSource.addEventListener('okooo_repair_tasks_ready', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到修复任务通知:', data);
+        
+        repairNotification.value = {
+            visible: true,
+            message: data.message,
+            totalMatches: data.total_matches,
+            totalTasks: data.total_tasks,
+            date: data.date
+        };
+        
+      } catch (e) {
+        console.error('解析修复任务通知失败:', e);
+      }
+    });
     
+    eventSource.addEventListener('okooo_log', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        okoooLogs.value.unshift({
+          message: data.message,
+          level: data.level || 'info',
+          timestamp: data.timestamp || new Date().toLocaleTimeString()
+        });
+        
+        // 保持日志数量在合理范围
+        if (okoooLogs.value.length > 200) {
+          okoooLogs.value = okoooLogs.value.slice(0, 200);
+        }
+      } catch (e) {
+        console.error('解析日志数据失败:', e);
+      }
+    });
+
     eventSource.addEventListener('log', (event: MessageEvent) => {
       try {
         const data = JSON.parse(event.data);
@@ -1007,8 +1087,8 @@ const aggregatedResults = computed(() => {
   const map: Record<string, { matchId: string, current: number, total: number, status: string }> = {};
   
   // 1. 初始化所有任务中的比赛ID
-  if (okoooCrawlerStatus.value.results) {
-    okoooCrawlerStatus.value.results.forEach(task => {
+  if (okoooState.value.crawler.results) {
+    okoooState.value.crawler.results.forEach(task => {
       if (!map[task.matchId]) {
         map[task.matchId] = {
           matchId: task.matchId,
@@ -1145,7 +1225,7 @@ const initializeDefaultFields = async () => {
     const testRulesData = await response.json();
     
     // 将test-rules.json的数据转换为模板字段格式
-    templateFields.value = testRulesData.parsingRules.map(rule => ({
+    templateFields.value = testRulesData.parsingRules.map((rule: any) => ({
       id: generateId(),
       name: rule.description, // 使用description作为显示名称
       description: rule.description,
@@ -1667,8 +1747,8 @@ const parseFootballMatchesWithOriginalRules = (content: string, rules: any[]): a
       ];
       
       // 从HTML中提取所有可能的赔率数字
-      function extractAllOdds(html) {
-        const allOdds = [];
+      function extractAllOdds(html: string) {
+        const allOdds: { value: number; source: string; match: string }[] = [];
         console.log(`    🔍 开始使用备用正则提取赔率，HTML长度: ${html.length}`);
         fallbackOddsRegexes.forEach((regex, index) => {
           const matches = [...html.matchAll(regex)];
@@ -2608,7 +2688,7 @@ const autoPushToBackend = async (data: any) => {
       };
     }
     
-  } catch (error) {
+  } catch (error: any) {
     console.error('自动推送数据失败:', error);
     console.error('错误详情:', {
       name: error.name,
@@ -2793,7 +2873,7 @@ const checkIfSameStock = (newData: any, firstData: any): boolean => {
     const newCode = getStockCode(newResponse);
     const firstCode = getStockCode(firstResponse);
     
-    return newCode && firstCode && newCode === firstCode;
+    return !!(newCode && firstCode && newCode === firstCode);
   } catch (e) {
     console.warn('检查股票数据失败:', e);
     return false;
@@ -2850,7 +2930,7 @@ const executeScenario = async (scenario: string) => {
     mcpToolParams.value = JSON.stringify(params, null, 2);
     
     await executeMCPTool();
-  } catch (error) {
+  } catch (error: any) {
     mcpError.value = `场景执行失败: ${error.message}`;
     console.error('场景执行失败:', error);
   } finally {
@@ -2910,7 +2990,7 @@ const executeMCPTool = async () => {
     mcpStatus.value = { connected: true, text: 'MCP服务已连接' };
     nativeStatus.value = { connected: true, text: 'Native Host已连接' };
     
-  } catch (error) {
+  } catch (error: any) {
     mcpResult.value = {
       success: false,
       data: error.message,
@@ -2952,7 +3032,7 @@ const connectMCP = async () => {
       timestamp: Date.now()
     };
     
-  } catch (error) {
+  } catch (error: any) {
     mcpStatus.value = { connected: false, text: 'MCP服务连接失败' };
     nativeStatus.value = { connected: false, text: 'Native Host连接失败' };
     mcpError.value = `连接失败: ${error.message}`;
@@ -2978,7 +3058,7 @@ const validateMCPParams = () => {
       data: 'JSON参数格式正确',
       timestamp: Date.now()
     };
-  } catch (e) {
+  } catch (e: any) {
     mcpJsonError.value = `JSON格式错误: ${e.message}`;
   }
 };
@@ -3012,7 +3092,7 @@ const testMCPPing = async () => {
     
     mcpStatus.value = { connected: true, text: 'MCP服务正常' };
     
-  } catch (error) {
+  } catch (error: any) {
     mcpResult.value = {
       success: false,
       data: `Ping失败: ${error.message}`,
@@ -3033,7 +3113,7 @@ const getMCPToolsList = async () => {
       type: 'mcp_list_tools'
     };
     
-    const response = await new Promise((resolve, reject) => {
+    const response = await new Promise<any>((resolve, reject) => {
       chrome.runtime.sendNativeMessage('com.chrome.mcp.server', message, (response) => {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
@@ -3059,7 +3139,7 @@ const getMCPToolsList = async () => {
       };
     }
     
-  } catch (error) {
+  } catch (error: any) {
     mcpError.value = `获取工具列表失败: ${error.message}`;
     mcpResult.value = {
       success: false,
@@ -3107,8 +3187,8 @@ const startOkoooCrawler = async () => {
     return;
   }
 
-  okoooCrawlerStatus.value.isRunning = true;
-  okoooCrawlerStatus.value.phase = 'matches';
+  okoooState.value.crawler.isRunning = true;
+  okoooState.value.crawler.phase = 'matches';
 
   try {
     const response = await chrome.runtime.sendMessage({
@@ -3116,18 +3196,18 @@ const startOkoooCrawler = async () => {
     });
 
     if (response.success) {
-      okoooCrawlerStatus.value.totalMatches = response.total;
-      okoooCrawlerStatus.value.currentMatchIndex = 0;
-      okoooCrawlerStatus.value.successCount = 0;
-      okoooCrawlerStatus.value.errorCount = 0;
-      okoooCrawlerStatus.value.results = [];
+      okoooState.value.crawler.totalMatches = response.total;
+      okoooState.value.crawler.currentMatchIndex = 0;
+      okoooState.value.crawler.successCount = 0;
+      okoooState.value.crawler.errorCount = 0;
+      okoooState.value.crawler.results = [];
       startCrawlerStatusPolling();
     } else {
-      okoooCrawlerStatus.value.isRunning = false;
+      okoooState.value.crawler.isRunning = false;
       alert('启动失败: ' + response.message);
     }
-  } catch (error) {
-    okoooCrawlerStatus.value.isRunning = false;
+  } catch (error: any) {
+    okoooState.value.crawler.isRunning = false;
     console.error('启动爬虫失败:', error);
   }
 };
@@ -3137,28 +3217,28 @@ const stopOkoooCrawler = async () => {
     type: 'OKOOO_STOP_CRAWLER'
   });
 
-  okoooCrawlerStatus.value.isRunning = false;
-  okoooCrawlerStatus.value.phase = 'idle';
+  okoooState.value.crawler.isRunning = false;
+  okoooState.value.crawler.phase = 'idle';
   stopCrawlerStatusPolling();
 };
 
 const startCrawlerStatusPolling = () => {
-  crawlerStatusTimer = setInterval(async () => {
+  crawlerStatusTimer = window.setInterval(async () => {
     const response = await chrome.runtime.sendMessage({
       type: 'OKOOO_GET_STATUS'
     });
 
     if (response.success) {
       const data = response.data;
-      okoooCrawlerStatus.value.isRunning = data.isRunning;
-      okoooCrawlerStatus.value.phase = data.phase;
-      okoooCrawlerStatus.value.totalMatches = data.totalMatches;
-      okoooCrawlerStatus.value.currentMatchIndex = data.currentMatchIndex;
-      okoooCrawlerStatus.value.totalHistory = data.totalHistory;
-      okoooCrawlerStatus.value.currentHistoryIndex = data.currentHistoryIndex;
-      okoooCrawlerStatus.value.successCount = data.successCount;
-      okoooCrawlerStatus.value.errorCount = data.errorCount;
-      okoooCrawlerStatus.value.results = data.results || [];
+      okoooState.value.crawler.isRunning = data.isRunning;
+      okoooState.value.crawler.phase = data.phase;
+      okoooState.value.crawler.totalMatches = data.totalMatches;
+      okoooState.value.crawler.currentMatchIndex = data.currentMatchIndex;
+      okoooState.value.crawler.totalHistory = data.totalHistory;
+      okoooState.value.crawler.currentHistoryIndex = data.currentHistoryIndex;
+      okoooState.value.crawler.successCount = data.successCount;
+      okoooState.value.crawler.errorCount = data.errorCount;
+      okoooState.value.crawler.results = data.results || [];
 
       if (!data.isRunning) {
         stopCrawlerStatusPolling();
@@ -3240,9 +3320,9 @@ const stopHandicapStatusPolling = () => {
 
 // 打开并捕获比赛列表
 const openAndCaptureList = async () => {
-      okoooListStatus.value.isCapturing = true;
-      okoooListStatus.value.lastResult = null;
-      okoooListStatus.value.progress = '0/3';
+      okoooState.value.list.isCapturing = true;
+      okoooState.value.list.lastResult = null;
+      okoooState.value.list.progress = '0/3';
 
       const captureSteps = [
         { name: '竞彩足球', url: 'https://m.okooo.com/jczq/' },
@@ -3256,8 +3336,8 @@ const openAndCaptureList = async () => {
 
         for (let i = 0; i < captureSteps.length; i++) {
           const step = captureSteps[i];
-          okoooListStatus.value.progress = `${i + 1}/${captureSteps.length}`;
-          okoooListStatus.value.lastResult = {
+          okoooState.value.list.progress = `${i + 1}/${captureSteps.length}`;
+          okoooState.value.list.lastResult = {
             success: true,
             message: `正在捕获 ${step.name}...`
           };
@@ -3280,8 +3360,8 @@ const openAndCaptureList = async () => {
           }
         }
 
-        okoooListStatus.value.isCapturing = false;
-        okoooListStatus.value.lastResult = {
+        okoooState.value.list.isCapturing = false;
+        okoooState.value.list.lastResult = {
           success: true,
           message: `成功捕获所有 ${successCount} 个列表，开始质检...`,
           size: totalSize
@@ -3290,8 +3370,8 @@ const openAndCaptureList = async () => {
         // 自动触发数据完整性检查 (Dry Run)
         await startRepair(true);
       } catch (error) {
-        okoooListStatus.value.isCapturing = false;
-        okoooListStatus.value.lastResult = {
+        okoooState.value.list.isCapturing = false;
+        okoooState.value.list.lastResult = {
           success: false,
           message: String(error)
         };
@@ -3324,7 +3404,18 @@ const getPhaseText = (phase: string): string => {
   return phaseMap[phase] || phase;
 };
 
+const showCaptchaAlert = ref(false);
+
 onMounted(async () => {
+  // 监听来自 background 的消息
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'OKOOO_CAPTCHA_DETECTED') {
+      showCaptchaAlert.value = true;
+    } else if (message.type === 'OKOOO_CAPTCHA_SOLVED') {
+      showCaptchaAlert.value = false;
+    }
+  });
+
   // 加载配置
   await loadConfig();
   
@@ -3346,7 +3437,7 @@ onMounted(async () => {
     type: 'OKOOO_GET_STATUS'
   });
   if (status.success) {
-    okoooCrawlerStatus.value = {
+    okoooState.value.crawler = {
       ...status.data,
       results: status.data.results || []
     };
@@ -3900,11 +3991,20 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
+}
+
+.captcha-overlay {
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 2000;
+}
+
+.notification-overlay {
+  z-index: 1500;
 }
 
 .modal-content {
@@ -3918,12 +4018,81 @@ onUnmounted(() => {
   box-shadow: var(--shadow-xl);
 }
 
+.captcha-content {
+  border: 2px solid #ff4d4f;
+  animation: pulse 2s infinite;
+  max-width: 600px;
+}
+
+.notification-content {
+  max-width: 600px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: var(--spacing-lg);
   border-bottom: 1px solid var(--border-color);
+}
+
+.warning-header h3 {
+  color: #ff4d4f;
+}
+
+.info-header h3 {
+  color: #1890ff;
+}
+
+.captcha-message {
+  font-size: 16px;
+  font-weight: bold;
+  color: #ff4d4f;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.captcha-tips {
+  background: rgba(255, 77, 79, 0.1);
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+.captcha-tips p {
+  margin: 5px 0;
+  color: var(--text-primary);
+}
+
+.captcha-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.notification-info {
+  padding: 10px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  margin-bottom: 20px;
+}
+
+.notification-info p {
+  margin: 8px 0;
+  color: var(--text-primary);
+}
+
+.notification-message {
+  margin-top: 15px !important;
+  font-weight: bold;
+  color: #1890ff;
+  border-top: 1px solid var(--border-color);
+  padding-top: 10px;
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0.4); }
+  70% { box-shadow: 0 0 0 10px rgba(255, 77, 79, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 77, 79, 0); }
 }
 
 .modal-header h3 {

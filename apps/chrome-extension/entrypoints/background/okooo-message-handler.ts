@@ -17,6 +17,18 @@ export function initOkoooMessageHandler() {
           .catch(error => sendResponse({ success: false, message: String(error) }));
         return true;
 
+      case 'OKOOO_START_REPAIR':
+        okoooMainCrawler.startWithIds(message.ids)
+          .then(result => sendResponse(result))
+          .catch(error => sendResponse({ success: false, message: String(error) }));
+        return true;
+
+      case 'OKOOO_START_REPAIR_TASKS':
+        okoooMainCrawler.startWithTasks(message.tasks)
+          .then(result => sendResponse(result))
+          .catch(error => sendResponse({ success: false, message: String(error) }));
+        return true;
+
       case 'OKOOO_GET_STATUS':
         sendResponse({
           success: true,

@@ -47,6 +47,7 @@ interface Platform {
   home_url: string;
   login_url: string;
   currentAccount?: string;
+  domain?: string;
 }
 
 const platforms = ref<Platform[]>([]);
@@ -116,6 +117,7 @@ const checkPlatformLogin = async (platform: Platform) => {
       const cookieDomain = c.domain?.replace(/^\./, '');
       return platformDomains.some(pd => {
         const pdClean = pd?.replace(/^https?:\/\/(www\.)?/, '');
+        if (!pdClean || !cookieDomain) return false;
         return cookieDomain.includes(pdClean) || pdClean.includes(cookieDomain);
       });
     });
@@ -163,9 +165,10 @@ const syncSession = async (platform: Platform) => {
     const platformCookies = cookies.filter(c => {
       const cookieDomain = c.domain?.replace(/^\./, '');
       const platformDomain = platform.domain?.replace(/^\./, '');
+      if (!cookieDomain || !platformDomain) return false;
       return cookieDomain.includes(platformDomain) || 
-             platform.home_url?.includes(cookieDomain) ||
-             platform.login_url?.includes(cookieDomain);
+             (platform.home_url && platform.home_url.includes(cookieDomain)) ||
+             (platform.login_url && platform.login_url.includes(cookieDomain));
     });
     
     if (platformCookies.length === 0) {
@@ -229,7 +232,7 @@ const syncSession = async (platform: Platform) => {
     } else {
       throw new Error(`HTTP ${res.status}: Failed to sync session`);
     }
-  } catch (e) {
+  } catch (e: any) {
     console.error(`Error syncing session for ${platform.name}:`, e);
     error.value = `同步${platform.name}会话失败: ${e.message || e}`;
   } finally {

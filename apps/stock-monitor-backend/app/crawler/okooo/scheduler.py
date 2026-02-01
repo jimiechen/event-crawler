@@ -133,7 +133,8 @@ class OkoooScheduler:
                 headless=self.headless,
                 is_mobile=self.is_mobile,
                 storage_state_path=self.storage_state_path,
-                proxy_url=proxy_url
+                proxy_url=proxy_url,
+                log_callback=self._log
             )
         else:
             # 如果downloader已存在，确保其配置与当前scheduler配置一致
@@ -427,7 +428,7 @@ class OkoooScheduler:
                         "id": page.id
                     })
         except Exception as e:
-            logger.error(f"Failed to load crawl configs: {e}")
+            await self._log("ERROR", f"Failed to load crawl configs: {e}")
             
         return configs
 

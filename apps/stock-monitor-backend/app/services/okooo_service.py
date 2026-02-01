@@ -27,6 +27,7 @@ class OkoooService:
             cls._instance.scheduler = None
             cls._instance.is_running = False
             cls._instance._crawl_task = None
+            cls._instance.repair_tasks = []
         return cls._instance
 
     def __init__(self):
@@ -139,63 +140,116 @@ class OkoooService:
         """
         import os
         
+        await self._on_log("INFO", f"Starting repair check for date: {date_str} (Dry Run: {dry_run})")
+        
         # 1. Get matches from DB
         matches = await self.get_db_matches(date_str)
         if not matches:
+             await self._on_log("WARNING", f"No matches found in DB for date: {date_str}")
              return {"total": 0, "repaired": 0, "message": "No matches found for date", "ids": []}
+             
+        await self._on_log("INFO", f"Found {len(matches)} matches in DB for {date_str}. Checking files...")
              
         # 2. Check files
         base_dir = os.path.join(os.getcwd(), "data", "okooo", "matches", date_str)
         ids_to_crawl = []
+        repair_details = []
         
-        # Expected file count is 8, but we'll accept 7 as well to be lenient, or strict 8?
-        # User said "only 6/8", so 8 is likely the target.
-        # Let's check for specific critical files.
-        # Prefixes based on user info.
+        # Expected file count is 8
         
-        for m in matches:
+        for i, m in enumerate(matches):
             mid = m.get('match_id')
             if not mid: continue
+            
+            if i % 10 == 0:
+                 # Periodic progress log
+                 await self._on_log("INFO", f"Checked {i}/{len(matches)} matches...")
             
             match_dir = os.path.join(base_dir, mid)
             
             # If directory doesn't exist, definitely re-crawl
             if not os.path.exists(match_dir):
                 ids_to_crawl.append(mid)
+                repair_details.append({"id": mid, "reason": "目录缺失"})
+                await self._on_log("WARNING", f"Match {mid}: Directory missing")
                 continue
                 
             # Check file count
             files = os.listdir(match_dir)
             html_files = [f for f in files if f.endswith('.html')]
             
-            # User mentioned 6/8. So if < 8, we might want to repair.
-            # Strictly check for 8 files as per user requirement
             if len(html_files) < 8:
                  ids_to_crawl.append(mid)
+                 repair_details.append({"id": mid, "reason": f"文件缺失 ({len(html_files)}/8)"})
+                 await self._on_log("WARNING", f"Match {mid}: Files missing ({len(html_files)}/8)")
                  continue
                  
             # Check for invalid files (small size)
             has_invalid = False
+            invalid_file = ""
             for f in html_files:
                 fpath = os.path.join(match_dir, f)
                 # Check size < 2KB (empty or error page)
                 if os.path.getsize(fpath) < 2048: 
                     has_invalid = True
+                    invalid_file = f
                     break
             
             if has_invalid:
                 ids_to_crawl.append(mid)
+                repair_details.append({"id": mid, "reason": f"无效文件: {invalid_file}"})
+                await self._on_log("WARNING", f"Match {mid}: Invalid file ({invalid_file})")
                 continue
 
         # 3. Start crawling if needed and not dry_run
         if ids_to_crawl and not dry_run:
-            # Trigger crawl in background
-            await self.start_crawl_ids(ids_to_crawl, headless=True, force=True)
+            # 获取爬虫配置
+            scheduler = await self.get_scheduler()
+            configs = await scheduler.get_db_crawl_configs()
+            
+            # 生成任务队列
+            tasks = []
+            for match_id in ids_to_crawl:
+                # 如果没有配置，使用默认配置
+                if not configs:
+                    # 默认只爬取历史页面
+                    url = f"http://m.okooo.com/match/{match_id}/history/"
+                    tasks.append({
+                        'match_id': match_id,
+                        'url': url,
+                        'page_type': 'history',
+                        'filename_prefix': 'history'
+                    })
+                else:
+                    for config in configs:
+                        url = self._replace_match_id(config['url_template'], match_id)
+                        tasks.append({
+                            'match_id': match_id,
+                            'url': url,
+                            'page_type': config['page_type'],
+                            'filename_prefix': config['filename_prefix']
+                        })
+            
+            # 保存任务队列
+            self.repair_tasks = tasks
+            
+            await self._on_log("INFO", f"Generated {len(tasks)} repair tasks for {len(ids_to_crawl)} matches.")
+            
+            # 通知前端有修复任务待执行
+            await sse_service.broadcast("okooo_repair_tasks_ready", {
+                'date': date_str,
+                'total_matches': len(ids_to_crawl),
+                'total_tasks': len(tasks),
+                'message': f'有 {len(ids_to_crawl)} 个比赛需要修复，共 {len(tasks)} 个页面待爬取'
+            })
+            
+        await self._on_log("INFO", f"Repair check complete. Found {len(ids_to_crawl)} matches to repair.")
             
         return {
             "total_checked": len(matches), 
             "repairing_count": len(ids_to_crawl), 
             "ids": ids_to_crawl,
+            "repair_details": repair_details,
             "message": f"Found {len(ids_to_crawl)} matches to repair out of {len(matches)}"
         }
 
@@ -242,7 +296,7 @@ class OkoooService:
         self._crawl_task = asyncio.create_task(self._run_crawl_lists(scheduler))
         return True
 
-    async def start_crawl_ids(self, match_ids: list, headless: bool = True, use_cache: bool = False, force: bool = False, use_proxy: bool = False) -> bool:
+    async def start_crawl_ids(self, match_ids: list, headless: bool = True, use_cache: bool = False, force: bool = False, use_proxy: bool = False, date_str: Optional[str] = None) -> bool:
         """启动指定ID列表爬虫任务"""
         if self.is_running:
             logger.warning("Okooo crawler is already running")
@@ -257,13 +311,13 @@ class OkoooService:
         self.is_running = True
         
         # 创建后台任务
-        self._crawl_task = asyncio.create_task(self._run_crawl_ids(scheduler, match_ids, force))
+        self._crawl_task = asyncio.create_task(self._run_crawl_ids(scheduler, match_ids, force, date_str))
         return True
 
-    async def _run_crawl_ids(self, scheduler: OkoooScheduler, match_ids: list, force: bool = False):
+    async def _run_crawl_ids(self, scheduler: OkoooScheduler, match_ids: list, force: bool = False, date_str: Optional[str] = None):
         """执行ID列表爬虫任务的包装器"""
         try:
-            await scheduler.crawl_ids(match_ids, force=force)
+            await scheduler.crawl_ids(match_ids, force=force, date_str=date_str)
         except Exception as e:
             logger.error(f"Crawl ids task error: {e}")
             await self._on_log("ERROR", f"Crawl ids task crashed: {e}")
@@ -388,6 +442,7 @@ class OkoooService:
                 await f.write(html_content)
 
             logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+            await self._on_log("INFO", f"Saved history file: history.html")
 
             # 发送 SSE 通知
             await sse_service.broadcast("okooo_file_saved", {
@@ -443,6 +498,7 @@ class OkoooService:
                 await f.write(html)
 
             logger.info(f"[OkoooList] 保存成功: {save_path}")
+            await self._on_log("INFO", f"Saved list file: {save_path}")
             
             # 解析并入库
             from app.crawler.okooo.parser import OkoooParser
@@ -546,6 +602,7 @@ class OkoooService:
                 await f.write(html)
 
             logger.info(f"[OkoooMatch] 保存成功: {save_path}")
+            await self._on_log("INFO", f"Saved match file: {filename}")
 
             # 发送 SSE 通知
             await sse_service.broadcast("okooo_file_saved", {
@@ -608,6 +665,7 @@ class OkoooService:
                 await f.write(html)
 
             logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+            await self._on_log("INFO", f"Saved history file: {filename}")
 
             # 发送 SSE 通知
             await sse_service.broadcast("okooo_file_saved", {
@@ -672,6 +730,7 @@ class OkoooService:
                 await f.write(html)
 
             logger.info(f"[OkoooHistory] 保存成功: {save_path}")
+            await self._on_log("INFO", f"Saved history tab file: {filename}")
 
             # 发送 SSE 通知
             await sse_service.broadcast("okooo_file_saved", {
@@ -762,6 +821,7 @@ class OkoooService:
                 await f.write(html)
 
             logger.info(f"[OkoooHandicap] 保存成功: {save_path}")
+            await self._on_log("INFO", f"Saved handicap file: handicap.html")
 
             # 发送 SSE 通知
             await sse_service.broadcast("okooo_file_saved", {

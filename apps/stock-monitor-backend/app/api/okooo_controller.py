@@ -208,6 +208,17 @@ async def repair_matches(request: RepairRequest):
     except Exception as e:
         return BaseResponse(success=False, message=str(e))
 
+@router.get("/repair-tasks", summary="获取修复任务列表", response_model=BaseResponse)
+async def get_repair_tasks():
+    """
+    获取当前的修复任务列表（供 Chrome 扩展使用）
+    """
+    try:
+        tasks = await okooo_service.get_repair_tasks()
+        return BaseResponse(success=True, data=tasks)
+    except Exception as e:
+        return BaseResponse(success=False, message=str(e))
+
 
 class OkoooListHtmlRequest(BaseModel):
     html: str = Field(..., description="比赛列表页面 HTML")

@@ -491,11 +491,11 @@ export class MonitoringStateManager {
   /**
    * 导出状态数据
    */
-  public exportStateData(): {
+  public exportStateData(this: any): {
     monitoringStatus: MonitoringStatus;
     currentRun: CurrentRunState | null;
     statistics: MonitoringStatistics;
-    runHistory: typeof this.runHistory;
+    runHistory: any[];
     healthStatus: ReturnType<MonitoringStateManager['getHealthStatus']>;
   } {
     return {

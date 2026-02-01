@@ -130,6 +130,94 @@ export class OkoooMainCrawler {
     }
   }
 
+  async startWithIds(ids: string[]): Promise<{ success: boolean; message: string }> {
+    this.addLog(`🚀 修复模式启动 - 处理 ${ids.length} 个比赛`);
+    this.reset();
+    
+    try {
+      this.stats.phase = 'initializing';
+      this.isRunning = true;
+      this.stats.isRunning = true;
+
+      // 1. 获取入口页面（实际上只是为了拿 Tab ID）
+      this.addLog('正在打开/获取标签页...');
+      this.tabId = await this.getOrCreateTab(OKOOO_CRAWLER_CONFIG.ENTRY_URL);
+      if (!this.tabId) {
+        throw new Error('无法创建标签页');
+      }
+
+      // 2. 构造初始 Matches (home/away 未知)
+      const matches = ids.map(id => ({ id, home: '未知主队', away: '未知客队' }));
+      this.addLog(`准备修复 ${matches.length} 场比赛`);
+
+      // 3. 从后端获取页面模板
+      this.addLog('正在从后端获取页面模板...');
+      const templates = await this.fetchTemplatesFromBackend();
+      if (templates.length === 0) {
+        throw new Error('未获取到页面模板');
+      }
+      this.addLog(`获取到 ${templates.length} 个页面模板`);
+
+      // 4. 生成任务队列
+      this.generateTaskQueue(matches, templates);
+      this.addLog(`生成任务队列完成，共 ${this.taskQueue.length} 个任务`);
+
+      // 5. 开始执行队列
+      this.stats.phase = 'crawling';
+      this.processTaskQueue();
+
+      return { success: true, message: `开始修复，共 ${this.taskQueue.length} 个任务` };
+    } catch (error) {
+      this.isRunning = false;
+      this.stats.isRunning = false;
+      this.stats.phase = 'idle';
+      const msg = error instanceof Error ? error.message : String(error);
+      this.addLog(`❌ 启动失败: ${msg}`, 'error');
+      return { success: false, message: msg };
+    }
+  }
+
+  async startWithTasks(tasks: CrawlerTask[]): Promise<{ success: boolean; message: string }> {
+    this.addLog(`🚀 修复模式启动 (Direct Tasks) - 接收到 ${tasks.length} 个任务`);
+    this.reset();
+    
+    try {
+      this.stats.phase = 'initializing';
+      this.isRunning = true;
+      this.stats.isRunning = true;
+
+      // 1. 获取入口页面（实际上只是为了拿 Tab ID）
+      this.addLog('正在打开/获取标签页...');
+      this.tabId = await this.getOrCreateTab(OKOOO_CRAWLER_CONFIG.ENTRY_URL);
+      if (!this.tabId) {
+        throw new Error('无法创建标签页');
+      }
+
+      // 2. 直接使用传入的任务队列
+      this.taskQueue = tasks.map(t => ({
+          ...t,
+          status: 'pending',
+          homeTeam: t.homeTeam || '未知主队',
+          awayTeam: t.awayTeam || '未知客队'
+      }));
+      this.stats.totalTasks = this.taskQueue.length;
+      this.addLog(`任务队列准备就绪，共 ${this.taskQueue.length} 个任务`);
+
+      // 3. 开始执行队列
+      this.stats.phase = 'crawling';
+      this.processTaskQueue();
+
+      return { success: true, message: `开始修复，共 ${this.taskQueue.length} 个任务` };
+    } catch (error) {
+      this.isRunning = false;
+      this.stats.isRunning = false;
+      this.stats.phase = 'idle';
+      const msg = error instanceof Error ? error.message : String(error);
+      this.addLog(`❌ 启动失败: ${msg}`, 'error');
+      return { success: false, message: msg };
+    }
+  }
+
   private async extractMatchInfo(): Promise<{id: string, home: string, away: string}[]> {
     try {
       const [result] = await chrome.scripting.executeScript({
@@ -312,6 +400,9 @@ export class OkoooMainCrawler {
       this.stats.phase = 'paused';
       this.addLog('🛑 检测到验证码，爬虫已暂停，请手动处理验证码...', 'warning');
       
+      // 通知 Sidepanel 显示验证码提示
+      chrome.runtime.sendMessage({ type: 'OKOOO_CAPTCHA_DETECTED' }).catch(() => {});
+
       while (isCaptcha && this.isRunning) {
         await this.wait(3000);
         isCaptcha = await this.isCaptchaPage();
@@ -319,6 +410,8 @@ export class OkoooMainCrawler {
           this.addLog('✅ 验证码已通过，继续爬取');
           this.isPaused = false;
           this.stats.phase = 'crawling';
+          // 通知 Sidepanel 验证码已解决
+          chrome.runtime.sendMessage({ type: 'OKOOO_CAPTCHA_SOLVED' }).catch(() => {});
           await this.wait(2000);
         }
       }
@@ -361,10 +454,10 @@ export class OkoooMainCrawler {
       date: new Date().toISOString().split('T')[0]
     };
 
-    if (task.pageType.includes('历史') || task.pageType.includes('战绩')) {
+    if (task.pageType.includes('历史') || task.pageType.includes('战绩') || task.pageType === 'history') {
       apiUrl = '/api/v1/okooo/save-history-html';
       body.parent_match_id = task.matchId; 
-    } else if (task.pageType.includes('列表')) {
+    } else if (task.pageType.includes('列表') || task.pageType === 'list') {
       apiUrl = '/api/v1/okooo/save-list-html';
     }
 

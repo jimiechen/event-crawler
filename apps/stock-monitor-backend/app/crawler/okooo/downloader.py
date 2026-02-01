@@ -82,7 +82,7 @@ class OkoooDownloader:
             
         self.current_proxy_index = (self.current_proxy_index + 1) % len(self.proxies)
         proxy = self.proxies[self.current_proxy_index]
-        logger.info(f"Rotated to proxy index {self.current_proxy_index}: {proxy if proxy else 'Direct'}")
+        await self._log("INFO", f"Rotated to proxy index {self.current_proxy_index}: {proxy if proxy else 'Direct'}")
 
     async def _reset_context(self):
         """重置浏览器上下文（更换UA、指纹和代理）"""
@@ -200,7 +200,7 @@ class OkoooDownloader:
                     
                     # 检查验证码
                     if await self._check_captcha(page):
-                        logger.warning(f"Detected captcha for {url} (Attempt {attempt+1}/{retries}). Resetting context...")
+                        await self._log("WARNING", f"Detected captcha for {url} (Attempt {attempt+1}/{retries}). Resetting context...")
                         await page.close()
                         page = None
                         await self._reset_context()
@@ -211,7 +211,7 @@ class OkoooDownloader:
                     
                     # Check for blocking
                     if self._is_blocked(content, title, page.url, url):
-                        logger.warning(f"Blocked or empty content for {url} (Attempt {attempt+1}/{retries})")
+                        await self._log("WARNING", f"Blocked or empty content for {url} (Attempt {attempt+1}/{retries})")
                         last_error = "Blocked or empty content"
                         # 如果是被拦截，也尝试重置上下文
                         await page.close()
@@ -222,7 +222,7 @@ class OkoooDownloader:
                     return content
                     
                 except Exception as e:
-                    logger.error(f"Page goto error for {url} (Attempt {attempt+1}/{retries}): {e}")
+                    await self._log("ERROR", f"Page goto error for {url} (Attempt {attempt+1}/{retries}): {e}")
                     last_error = e
                     # 发生错误也尝试重置
                     if page:
@@ -231,7 +231,7 @@ class OkoooDownloader:
                     await self._reset_context()
                     
             except Exception as e:
-                logger.error(f"Download error for {url} (Attempt {attempt+1}/{retries}): {e}")
+                await self._log("ERROR", f"Download error for {url} (Attempt {attempt+1}/{retries}): {e}")
                 last_error = e
                 await self._reset_context()
                 

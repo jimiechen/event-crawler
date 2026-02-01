@@ -238,6 +238,20 @@ const overallStatusClass = computed(() => {
   return 'status-critical';
 });
 
+const overallStatusIcon = computed(() => {
+  if (backendStatus.value.alive) {
+    return '✅';
+  }
+  return '⚠️';
+});
+
+const overallStatusText = computed(() => {
+  if (backendStatus.value.alive) {
+    return '系统运行正常';
+  }
+  return '部分服务异常';
+});
+
 // SSE Connection for Crawler Status
 let eventSource: EventSource | null = null;
 
@@ -400,7 +414,8 @@ const syncCookies = async (p: PlatformConfig) => {
   }
 };
 
-const syncSession = async (p: PlatformConfig) => {
+const syncSession = async (p: PlatformConfig | undefined) => {
+  if (!p) return;
   try {
     if (!chrome.cookies) return;
     
