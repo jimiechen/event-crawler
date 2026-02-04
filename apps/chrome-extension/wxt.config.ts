@@ -45,6 +45,7 @@ export default defineConfig({
       'storage',
       'sidePanel',
       'cookies',
+      'webNavigation',
     ],
     side_panel: {
       default_path: 'sidepanel/index.html',

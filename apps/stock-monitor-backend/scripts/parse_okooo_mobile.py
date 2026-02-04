@@ -756,6 +756,127 @@ class OkoooParser:
 
         return combined_data
 
+    def process_date_match(self, date_str: str, match_id: str) -> Dict[str, Any]:
+        """
+        处理指定日期和比赛ID的目录（支持 matches/{日期}/{比赛ID}/ 结构）
+        
+        Args:
+            date_str: 日期 (YYYY-MM-DD)
+            match_id: 比赛ID
+        
+        Returns:
+            解析后的数据字典
+        """
+        dir_path = os.path.join(self.data_dir, date_str, match_id)
+        logger.info(f"Processing: {date_str}/{match_id}")
+        
+        if not os.path.exists(dir_path):
+            raise FileNotFoundError(f"目录不存在: {dir_path}")
+        
+        combined_data = {
+            "match_id": match_id,
+            "parse_date": date_str
+        }
+        
+        # 辅助函数：查找文件（支持两种命名格式）
+        def find_file(*filenames):
+            for filename in filenames:
+                filepath = os.path.join(dir_path, filename)
+                if os.path.exists(filepath):
+                    return filepath
+            return None
+        
+        # 1. Parse history - 支持 history_{match_id}.html 或 history.html
+        history_path = find_file(f"history_{match_id}.html", "history.html")
+        if history_path:
+            with open(history_path, 'r', encoding='utf-8', errors='ignore') as f:
+                history_data = self.parse_history(f.read())
+                combined_data.update(history_data)
+        
+        # 2. Parse handicap - 支持 handicap_{match_id}.html 或 handicap.html
+        handicap_path = find_file(f"handicap_{match_id}.html", "handicap.html")
+        if handicap_path:
+            with open(handicap_path, 'r', encoding='utf-8', errors='ignore') as f:
+                combined_data["handicap"] = self.parse_handicap(f.read())
+        else:
+            combined_data["handicap"] = []
+        
+        # 3. Parse odds - 支持 odds_{match_id}.html 或 odds.html
+        odds_path = find_file(f"odds_{match_id}.html", "odds.html")
+        if odds_path:
+            with open(odds_path, 'r', encoding='utf-8', errors='ignore') as f:
+                combined_data["euro_odds"] = self.parse_odds(f.read())
+        else:
+            combined_data["euro_odds"] = []
+        
+        # 4. Parse form - 支持 form_{match_id}.html 或 form.html
+        form_path = find_file(f"form_{match_id}.html", "form.html")
+        if form_path:
+            with open(form_path, 'r', encoding='utf-8') as f:
+                combined_data["form_analysis"] = self.parse_form_analysis(f.read())
+        else:
+            combined_data["form_analysis"] = {}
+        
+        # 5. Parse exchanges - 支持 exchanges_{match_id}.html 或 exchanges.html
+        exchanges_path = find_file(f"exchanges_{match_id}.html", "exchanges.html")
+        if exchanges_path:
+            with open(exchanges_path, 'r', encoding='utf-8', errors='ignore') as f:
+                combined_data["exchanges"] = self.parse_exchanges(f.read())
+        else:
+            combined_data["exchanges"] = {}
+        
+        # 6. Parse bifa_change - 支持 bifa_change_{match_id}.html (必发指数)
+        bifa_change_path = find_file(f"bifa_change_{match_id}.html", "bifa_change.html")
+        if bifa_change_path:
+            with open(bifa_change_path, 'r', encoding='utf-8', errors='ignore') as f:
+                combined_data["bifaIndex"] = self.parse_bifa_odds_change(f.read())
+        else:
+            combined_data["bifaIndex"] = []
+        
+        # 7. Parse odds_change - 支持 odds_change_{match_id}.html (澳门指数/欧赔变化)
+        odds_change_path = find_file(f"odds_change_{match_id}.html", "odds_change.html")
+        if odds_change_path:
+            with open(odds_change_path, 'r', encoding='utf-8', errors='ignore') as f:
+                combined_data["macaoIndex"] = self.parse_bifa_odds_change(f.read())
+        else:
+            combined_data["macaoIndex"] = []
+        
+        # 7. Parse table - 支持 table_{match_id}.html 或 table.html
+        table_path = find_file(f"table_{match_id}.html", "table.html")
+        if table_path:
+            with open(table_path, 'r', encoding='utf-8', errors='ignore') as f:
+                points = self.parse_game_points(f.read())
+                combined_data["game_points"] = points
+                combined_data["game_points_recent"] = points
+                combined_data["game_points_total"] = points
+        else:
+            combined_data["game_points"] = []
+            combined_data["game_points_recent"] = []
+            combined_data["game_points_total"] = []
+        
+        return combined_data
+    
+    def save_result(self, date_str: str, match_id: str, data: Dict) -> str:
+        """
+        保存解析结果到 processed/{日期}/ 目录
+        
+        Args:
+            date_str: 日期 (YYYY-MM-DD)
+            match_id: 比赛ID
+            data: 解析后的数据
+        
+        Returns:
+            输出文件路径
+        """
+        output_dir = os.path.join(self.output_dir, date_str)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        output_path = os.path.join(output_dir, f"{match_id}.json")
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        return output_path
+
 if __name__ == "__main__":
     parser = OkoooParser(DATA_DIR, OUTPUT_DIR)
     

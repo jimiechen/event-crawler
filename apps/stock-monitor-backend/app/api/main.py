@@ -134,6 +134,14 @@ app.include_router(mcp_controller.router)
 # except ImportError as e:
 #     logger.warning(f"未找到MCP控制器，跳过注册: {e}")
 
+# 注册Okooo解析控制器
+try:
+    from . import okooo_parser_controller
+    app.include_router(okooo_parser_controller.router)
+    logger.info("Okooo解析控制器注册成功")
+except ImportError as e:
+    logger.warning(f"未找到Okooo解析控制器，跳过注册: {e}")
+
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

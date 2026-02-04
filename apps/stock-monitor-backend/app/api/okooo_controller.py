@@ -2,6 +2,7 @@
 from typing import Optional
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+from loguru import logger
 from app.services.okooo_service import okooo_service
 from app.services.sse_service import sse_service
 from app.api.schemas import BaseResponse
@@ -9,9 +10,22 @@ from app.api.schemas import BaseResponse
 router = APIRouter(prefix="/api/v1/okooo", tags=["Okooo竞彩"])
 
 @router.get("/matches", summary="从数据库获取比赛列表", response_model=BaseResponse)
-async def get_db_matches(date: Optional[str] = Query(None, description="日期 (YYYY-MM-DD)")):
-    matches = await okooo_service.get_db_matches(date)
+async def get_db_matches(
+    date: Optional[str] = Query(None, description="日期 (YYYY-MM-DD)"),
+    match_type: Optional[str] = Query(None, description="比赛类型")
+):
+    matches = await okooo_service.get_db_matches(date, match_type)
     return BaseResponse(success=True, data=matches)
+
+@router.post("/matches/{id}/toggle-caw", summary="切换比赛爬取状态", response_model=BaseResponse)
+async def toggle_caw(id: int, is_caw: int = Body(..., embed=True)):
+    success = await okooo_service.update_match_caw_status(id, is_caw)
+    return BaseResponse(success=success, message="状态已更新" if success else "更新失败")
+
+@router.delete("/matches/{id}", summary="删除比赛", response_model=BaseResponse)
+async def delete_match(id: int):
+    success = await okooo_service.delete_match(id)
+    return BaseResponse(success=success, message="删除成功" if success else "删除失败")
 
 @router.get("/matches/dates", summary="获取有比赛的日期列表", response_model=BaseResponse)
 async def get_matches_dates():
@@ -66,6 +80,17 @@ async def fetch_match_lists(config: CrawlConfig = Body(default=CrawlConfig())):
     try:
         matches = await okooo_service.fetch_match_lists(config.headless, config.use_cache, config.use_proxy)
         return BaseResponse(success=True, data=matches)
+    except Exception as e:
+        return BaseResponse(success=False, message=str(e))
+
+@router.get("/entry-points", summary="获取Okooo爬虫入口配置", response_model=BaseResponse)
+async def get_entry_points():
+    """
+    获取爬虫入口 URL 配置 (从 test_pages 表)
+    """
+    try:
+        points = await okooo_service.get_crawl_entry_points()
+        return BaseResponse(success=True, data=points)
     except Exception as e:
         return BaseResponse(success=False, message=str(e))
 
@@ -217,6 +242,33 @@ async def get_repair_tasks():
         tasks = await okooo_service.get_repair_tasks()
         return BaseResponse(success=True, data=tasks)
     except Exception as e:
+        return BaseResponse(success=False, message=str(e))
+
+
+class CheckFilesExistRequest(BaseModel):
+    tasks: list = Field(..., description="任务列表")
+    date: str = Field(..., description="日期")
+
+
+@router.post("/check-files-exist", summary="检查文件是否存在")
+async def check_files_exist(request: CheckFilesExistRequest):
+    """
+    批量检查文件是否存在且有效
+    返回需要爬取的任务列表
+    """
+    try:
+        logger.info(f"📂 check_files_exist called with {len(request.tasks)} tasks, date: {request.date}")
+        if request.tasks:
+            logger.info(f"📂 First task: {request.tasks[0]}")
+        results = await okooo_service.check_files_exist(request.tasks, request.date)
+        logger.info(f"📂 check_files_exist completed: {len([r for r in results if r['skip']])} skipped, {len([r for r in results if not r['skip']])} to crawl")
+        return BaseResponse(
+            success=True,
+            data=results,
+            message=f"检查完成: {len([r for r in results if r['skip']])} 个文件已存在，{len([r for r in results if not r['skip']])} 个需要爬取"
+        )
+    except Exception as e:
+        logger.error(f"❌ check_files_exist error: {e}")
         return BaseResponse(success=False, message=str(e))
 
 

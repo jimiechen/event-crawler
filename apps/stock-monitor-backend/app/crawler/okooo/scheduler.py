@@ -2,12 +2,14 @@
 import asyncio
 import logging
 import re
+from urllib.parse import urlparse, parse_qs
 from datetime import datetime
 from typing import List, Optional, Callable, Awaitable, Dict, Any
 from asyncio import Queue
 from sqlalchemy import select
 
 from app.database import DatabaseManager
+from app.models.okooo_match import OkoooMatch
 from app.services.redis_cache_service import RedisCacheService
 from .url_builder import OkoooUrlBuilder, OkoooPageType
 from .downloader import OkoooDownloader
@@ -38,7 +40,11 @@ class OkoooScheduler:
         self.downloader: Optional[OkoooDownloader] = None
         self.storage: Optional[OkoooStorage] = OkoooStorage(self.db_manager, self.redis_service)
         
-        self.queue: Queue = Queue()
+        # 使用有界队列以防止生产者（check）远快于消费者（worker），导致日志顺序混乱
+        # 队列大小设为并发数的 2 倍
+        queue_size = concurrency * 2 if concurrency > 0 else 10
+        self.queue: Queue = Queue(maxsize=queue_size)
+        
         self.active_workers = 0
         self._stop_event = asyncio.Event()
         
@@ -195,6 +201,42 @@ class OkoooScheduler:
                     self.queue.task_done()
                     continue
 
+                # Determine filename early for check
+                if filename is None:
+                    # Fallback generation logic with match_id
+                    # Using underscores to match existing files where appropriate
+                    if page_type == OkoooPageType.MOBILE_HISTORY:
+                        filename = f"history_{match_id}.html"
+                    elif page_type == OkoooPageType.MOBILE_ODDS:
+                        filename = f"odds_{match_id}.html"
+                    elif page_type == OkoooPageType.MOBILE_HANDICAP:
+                        filename = f"handicap-{match_id}.html"
+                        # Check legacy filename 'handicap.html'
+                        # If standard name doesn't exist but legacy does, use legacy to skip download
+                        if not self.storage.check_file_exists(match_id, filename, date_str) and \
+                           self.storage.check_file_exists(match_id, "handicap.html", date_str):
+                            filename = "handicap.html"
+                    elif page_type == OkoooPageType.EXCHANGES:
+                        filename = f"exchanges_{match_id}.html"
+                    elif page_type == OkoooPageType.AH:
+                        filename = f"handicap_ah-{match_id}.html"
+                    elif page_type == OkoooPageType.MATCH_DETAIL:
+                        filename = f"game_{match_id}.html"
+                    elif page_type == OkoooPageType.MOBILE_FORM:
+                        filename = f"form_{match_id}.html"
+                    else:
+                        # Try _generate_filename as last resort for unknown types
+                        filename = self._generate_filename(url, match_id, "unknown")
+
+                # Check existence before processing
+                if not force and self.storage.check_file_exists(match_id, filename, date_str):
+                   await self._log("INFO", f"Skipping existing file: {filename}")
+                   self.stats["skipped"] += 1
+                   self.stats["processed"] += 1
+                   await self._update_progress()
+                   self.queue.task_done()
+                   continue
+
                 await self._log("INFO", f"Processing {url}")
                 
                 # 下载
@@ -209,21 +251,6 @@ class OkoooScheduler:
                 
                 # 保存HTML文件
                 try:
-                    if filename is None:
-                        filename = "unknown.html"
-                        if page_type == OkoooPageType.MOBILE_HISTORY:
-                            filename = "history.html"
-                        elif page_type == OkoooPageType.MOBILE_ODDS:
-                            filename = "odds.html"
-                        elif page_type == OkoooPageType.MOBILE_HANDICAP:
-                            filename = "handicap.html"
-                        elif page_type == OkoooPageType.EXCHANGES:
-                            filename = "exchanges.html"
-                        elif page_type == OkoooPageType.AH:
-                            filename = "handicap_ah.html"
-                        elif page_type == OkoooPageType.MATCH_DETAIL:
-                            filename = "game.html"
-                    
                     await self.storage.save_html(match_id, filename, html, date_str=date_str)
                 except Exception as e:
                     await self._log("ERROR", f"Failed to save HTML for {url}: {e}")
@@ -325,6 +352,76 @@ class OkoooScheduler:
 
         # await self._log("INFO", f"Worker {worker_id} stopped")
 
+    def _generate_filename(self, url: str, match_id: str, filename_prefix: str = "unknown") -> str:
+        """
+        根据URL和配置生成标准化的文件名
+        """
+        url_lower = url.lower()
+        
+        # 1. 优先处理 change.php (因为需要解析参数，且通用前缀往往不够准确)
+        if "change.php" in url_lower:
+            try:
+                parsed = urlparse(url)
+                query = parse_qs(parsed.query)
+                
+                # Get PID
+                pid_list = query.get('pid') or query.get('PID')
+                pid = pid_list[0] if pid_list else "0"
+                
+                # Get Type
+                type_list = query.get('Type') or query.get('type')
+                type_val = type_list[0].lower() if type_list else ""
+                
+                # Logic based on Type
+                if type_val == 'handicap':
+                    # 特殊处理：澳门彩票 (pid=84)
+                    if pid == '84':
+                        prefix = "macao"
+                    else:
+                        prefix = "handicap-change"
+                    return f"{prefix}-{match_id}-{pid}.html"
+                    
+                elif type_val == 'odds':
+                    return f"odds-{match_id}-{pid}.html"
+                    
+                else:
+                    # Fallback for other change types
+                    # 如果有传入 default_prefix 且不是 odds_change (默认值)，则使用
+                    if filename_prefix and filename_prefix != "odds_change" and filename_prefix != "unknown":
+                        return f"{filename_prefix}-{match_id}-{pid}.html"
+                    return f"change-{match_id}-{pid}.html"
+                    
+            except Exception:
+                # Fallback if parsing fails
+                pass
+        
+        # 2. 如果传入了有效的 prefix (非 unknown)，优先使用
+        # 排除 change.php 的情况 (上面已经处理或回退)
+        if filename_prefix and filename_prefix != "unknown":
+             # Special case for existing files that use underscores
+             if filename_prefix in ["history", "odds", "form", "exchanges", "game"]:
+                 return f"{filename_prefix}_{match_id}.html"
+             return f"{filename_prefix}-{match_id}.html"
+             
+        # 3. 根据 URL 智能推断 (当 prefix 为 unknown 或 None 时)
+        if "handicap.php" in url_lower:
+            return f"handicap-{match_id}.html"
+        elif "history.php" in url_lower:
+            return f"history_{match_id}.html"
+        elif "odds.php" in url_lower:
+            # odds.php 是列表页
+            return f"odds_{match_id}.html"
+        elif "exchanges.php" in url_lower:
+            return f"exchanges_{match_id}.html"
+        elif "ah" in url_lower and "handicap" not in url_lower: # simple check for ah
+            return f"handicap_ah-{match_id}.html"
+        elif "form.php" in url_lower:
+             return f"form_{match_id}.html"
+        elif "game.php" in url_lower:
+            return f"game_{match_id}.html"
+            
+        return f"unknown-{match_id}.html"
+
     async def crawl_lists(self, list_urls: List[str], force: bool = False):
         """
         爬取比赛列表并触发详情爬取
@@ -353,6 +450,15 @@ class OkoooScheduler:
                 new_matches = []
                 for m in matches:
                      # Check if we should process this match
+                     match_id = m.get("match_id")
+                     if not match_id:
+                         continue
+                         
+                     # Check DB existence (ignore date)
+                     if await self.storage.check_db_match_exists(match_id):
+                         await self._log("INFO", f"Match {match_id} already exists in DB. Skipping.")
+                         continue
+                         
                      # If force=False, we might want to check if it's already done?
                      # But crawl_ids does that too.
                      # Let's just count all found on page as "Found"
@@ -419,7 +525,13 @@ class OkoooScheduler:
                              filename_prefix = "game"
                     elif "change.php" in url_lower:
                         p_type = OkoooPageType.MOBILE_CHANGE
-                        filename_prefix = "odds_change"
+                        # Check Type parameter to refine prefix
+                        if "type=handicap" in url_lower:
+                            filename_prefix = "handicap-change" # To match user preference for hyphen
+                        elif "type=odds" in url_lower:
+                            filename_prefix = "odds-change"
+                        else:
+                            filename_prefix = "change"
                     
                     configs.append({
                         "url_template": page.url,
@@ -438,8 +550,52 @@ class OkoooScheduler:
         """
         # Load configs from DB
         configs = await self.get_db_crawl_configs()
+
+        # Filter out disabled matches (is_caw=0) or non-existent matches
+        if match_ids:
+            try:
+                async with self.db_manager.get_session() as session:
+                    # 1. Get all valid IDs from DB (is_caw=1)
+                    stmt = select(OkoooMatch.match_id).where(
+                        OkoooMatch.match_id.in_(match_ids)
+                    )
+                    result = await session.execute(stmt)
+                    existing_matches = result.scalars().all()
+                    existing_ids_set = set(str(mid) for mid in existing_matches)
+                    
+                    # 2. Get disabled IDs
+                    stmt_disabled = select(OkoooMatch.match_id).where(
+                        OkoooMatch.match_id.in_(match_ids),
+                        OkoooMatch.is_caw == 0
+                    )
+                    result_disabled = await session.execute(stmt_disabled)
+                    disabled_ids = set(str(mid) for mid in result_disabled.scalars().all())
+                    
+                    # 3. Filter
+                    valid_ids = []
+                    for mid in match_ids:
+                        str_mid = str(mid)
+                        if str_mid not in existing_ids_set:
+                             await self._log("WARNING", f"Match {str_mid} not found in DB. Skipping.")
+                             continue
+                        if str_mid in disabled_ids:
+                             await self._log("INFO", f"Match {str_mid} is disabled (is_caw=0). Skipping.")
+                             continue
+                        valid_ids.append(str_mid)
+                        
+                    if len(valid_ids) != len(match_ids):
+                        await self._log("INFO", f"Filtered matches. Original: {len(match_ids)}, Valid: {len(valid_ids)}")
+                    
+                    match_ids = valid_ids
+                    
+            except Exception as e:
+                await self._log("ERROR", f"Error filtering matches: {e}")
         
         self._stop_event.clear()
+        
+        # Ensure date_str is set for existence check consistency
+        if not date_str:
+            date_str = datetime.now().strftime('%Y-%m-%d')
         
         # Calculate total tasks based on configs or fallback
         tasks_per_match = len(configs) if configs else (len(page_types) if page_types else 1)
@@ -478,15 +634,19 @@ class OkoooScheduler:
                         url = re.sub(r'mid=\d+', f'mid={str_id}', url)
                         
                         # Determine filename
-                        filename_prefix = config["filename_prefix"]
-                        filename = f"{filename_prefix}_{str_id}.html"
+                        filename_prefix = config.get("filename_prefix", "unknown")
+                        filename = self._generate_filename(url, str_id, filename_prefix)
                         
-                        # Handle change.php specifically for pid
-                        if "change.php" in url:
-                            pid_match = re.search(r'pid=(\d+)', url)
-                            if pid_match:
-                                pid = pid_match.group(1)
-                                filename = f"{filename_prefix}_{str_id}_{pid}.html"
+                        # Check file existence (Avoid re-crawling if file exists)
+                        file_exists = self.storage.check_file_exists(str_id, filename, date_str)
+                        if not force and file_exists:
+                            await self._log("INFO", f"Skipping existing file {filename} for {str_id}")
+                            skipped += 1
+                            self.stats["skipped"] += 1
+                            self.stats["processed"] += 1
+                            continue
+                        elif not force:
+                            await self._log("INFO", f"File check missing: {filename} for {str_id}. Queuing download.")
                         
                         # Check duplicate
                         if not force and await self.storage.is_duplicate(url):
@@ -498,7 +658,8 @@ class OkoooScheduler:
                         
                         # Queue task with explicit filename
                         # Tuple: (url, match_id, page_type, date_str, force, filename)
-                        self.queue.put_nowait((url, str_id, config["page_type"], date_str, force, filename))
+                        # put_nowait might raise QueueFull if bounded, so use put (await)
+                        await self.queue.put((url, str_id, config["page_type"], date_str, force, filename))
                         count += 1
                 else:
                     # Fallback to legacy behavior
@@ -508,6 +669,20 @@ class OkoooScheduler:
                     for p_type in page_types:
                         url = self.url_builder.build_match_url(str_id, p_type)
                         
+                        # Generate filename for check and queue
+                        # Note: Legacy path doesn't have explicit prefix config, so we infer or pass unknown
+                        filename = self._generate_filename(url, str_id, "unknown")
+                        
+                        # Check file existence (Avoid re-crawling if file exists)
+                        if not force and self.storage.check_file_exists(str_id, filename, date_str):
+                            await self._log("INFO", f"Skipping existing file {filename} for {str_id}")
+                            skipped += 1
+                            self.stats["skipped"] += 1
+                            self.stats["processed"] += 1
+                            continue
+                        elif not force:
+                             await self._log("INFO", f"File check missing: {filename} for {str_id}. Queuing download.")
+                        
                         if not force and await self.storage.is_duplicate(url):
                             await self._log("INFO", f"Skipping duplicate {url}")
                             skipped += 1
@@ -515,7 +690,8 @@ class OkoooScheduler:
                             self.stats["processed"] += 1
                             continue
                         
-                        self.queue.put_nowait((url, str_id, p_type, date_str, force))
+                        # Use 6-tuple to pass filename
+                        await self.queue.put((url, str_id, p_type, date_str, force, filename))
                         count += 1
                 
             await self._log("INFO", f"Queued {count} tasks. Skipped {skipped} duplicates.")

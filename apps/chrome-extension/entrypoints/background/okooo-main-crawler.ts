@@ -10,6 +10,7 @@ interface CrawlerTask {
   url: string;
   status: 'pending' | 'success' | 'error';
   error?: string;
+  filenamePrefix?: string;
 }
 
 interface CrawlerStats {
@@ -36,6 +37,7 @@ export class OkoooMainCrawler {
   private currentTaskIndex: number = 0;
   private stats: CrawlerStats = this.getInitialStats();
   private readonly MAX_LOGS = 100;
+  private eventSource: EventSource | null = null;  // SSE连接
 
   private getInitialStats(): CrawlerStats {
     return {
@@ -53,7 +55,7 @@ export class OkoooMainCrawler {
   private async addLog(message: string, level: string = 'info') {
     const timestamp = new Date().toLocaleTimeString();
     const logStr = `[${timestamp}] ${message}`;
-    
+
     // 1. 本地日志
     console.log(`[OkoooCrawler] ${message}`);
     this.stats.logs.unshift(logStr);
@@ -64,46 +66,117 @@ export class OkoooMainCrawler {
     // 2. 发送给 Sidepanel (通过 Runtime Message，可选)
     // chrome.runtime.sendMessage({ type: 'OKOOO_LOG', data: { message, level, timestamp } }).catch(() => {});
 
-    // 3. 发送给 Backend (SSE 广播)
-    try {
-      await fetch(`${BACKEND_CONFIG.baseUrl}/api/v1/okooo/log`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: message,
-          level: level,
-          timestamp: timestamp
-        })
-      });
-    } catch (e) {
-      console.error('Failed to send log to backend:', e);
+    // 注意: 不再发送 HTTP 请求，改为通过 SSE 接收后端推送的日志
+  }
+
+  /**
+   * 建立 SSE 连接接收后端日志
+   */
+  private connectSSE(): void {
+    // 关闭已有连接
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+
+    // 建立新连接
+    this.eventSource = new EventSource(`${BACKEND_CONFIG.baseUrl}/api/sse/subscribe`);
+
+    // 监听 okooo_log 事件
+    this.eventSource.addEventListener('okooo_log', (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        // 将接收到的日志添加到本地
+        const timestamp = new Date().toLocaleTimeString();
+        const logStr = `[${timestamp}] ${data.message}`;
+
+        this.stats.logs.unshift(logStr);
+        if (this.stats.logs.length > this.MAX_LOGS) {
+          this.stats.logs.pop();
+        }
+
+        console.log(`[OkoooSSE] ${data.message}`);
+      } catch (e) {
+        console.error('Failed to parse SSE log:', e);
+      }
+    });
+
+    // 监听连接错误
+    this.eventSource.onerror = (error) => {
+      console.error('SSE connection error:', error);
+    };
+
+    // 监听连接打开
+    this.eventSource.onopen = () => {
+      console.log('SSE connection established');
+    };
+  }
+
+  /**
+   * 关闭 SSE 连接
+   */
+  private disconnectSSE(): void {
+    if (this.eventSource) {
+      this.eventSource.close();
+      this.eventSource = null;
+      console.log('SSE connection closed');
     }
   }
 
   async start(): Promise<{ success: boolean; message: string }> {
-    this.addLog('🚀 爬虫启动 - 任务队列模式');
+    this.addLog('🚀 爬虫启动 - 任务队列模式 (多入口)');
     this.reset();
-    
+
+    // 建立 SSE 连接
+    this.connectSSE();
+
     try {
       this.stats.phase = 'initializing';
       this.isRunning = true;
       this.stats.isRunning = true;
 
-      // 1. 获取入口页面，解析 MatchID
-      this.addLog('正在打开入口页面解析 MatchID...');
-      this.tabId = await this.getOrCreateTab(OKOOO_CRAWLER_CONFIG.ENTRY_URL);
-      if (!this.tabId) {
-        throw new Error('无法创建标签页');
+      // 1. 获取所有入口点配置
+      this.addLog('正在获取爬虫入口配置...');
+      const entryPoints = await this.fetchEntryPoints();
+      if (entryPoints.length === 0) {
+        // Fallback to default if fetch fails or returns empty
+        this.addLog('⚠️ 未获取到入口配置，使用默认入口', 'warning');
+        entryPoints.push({ name: '默认', url: OKOOO_CRAWLER_CONFIG.ENTRY_URL });
+      } else {
+        this.addLog(`获取到 ${entryPoints.length} 个入口: ${entryPoints.map(e => e.name).join(', ')}`);
       }
 
-      await this.wait(3000); // 等待页面加载
-      const matches = await this.extractMatchInfo();
-      if (matches.length === 0) {
+      // 2. 遍历每个入口，收集所有 MatchID
+      const allMatchesMap = new Map<string, {id: string, home: string, away: string}>();
+      
+      for (const entry of entryPoints) {
+          if (!this.isRunning) break;
+          this.addLog(`正在扫描入口: ${entry.name} (${entry.url}) ...`);
+          
+          this.tabId = await this.getOrCreateTab(entry.url);
+          if (!this.tabId) {
+            this.addLog(`❌ 无法打开入口: ${entry.name}`, 'error');
+            continue;
+          }
+
+          await this.wait(3000); // 等待页面加载
+          const matches = await this.extractMatchInfo();
+          this.addLog(`入口 [${entry.name}] 解析到 ${matches.length} 场比赛`);
+          
+          matches.forEach(m => {
+              // 优先保留有名字的记录
+              if (!allMatchesMap.has(m.id) || (m.home !== '主队' && m.home !== '未知主队')) {
+                  allMatchesMap.set(m.id, m);
+              }
+          });
+      }
+
+      const allMatches = Array.from(allMatchesMap.values());
+      if (allMatches.length === 0) {
         throw new Error('未解析到任何比赛ID');
       }
-      this.addLog(`解析到 ${matches.length} 场比赛`);
+      this.addLog(`汇总: 共解析到 ${allMatches.length} 场比赛`);
 
-      // 2. 从后端获取页面模板
+      // 3. 从后端获取页面模板
       this.addLog('正在从后端获取页面模板...');
       const templates = await this.fetchTemplatesFromBackend();
       if (templates.length === 0) {
@@ -111,11 +184,11 @@ export class OkoooMainCrawler {
       }
       this.addLog(`获取到 ${templates.length} 个页面模板`);
 
-      // 3. 生成任务队列
-      this.generateTaskQueue(matches, templates);
+      // 4. 生成任务队列
+      this.generateTaskQueue(allMatches, templates);
       this.addLog(`生成任务队列完成，共 ${this.taskQueue.length} 个任务`);
 
-      // 4. 开始执行队列
+      // 5. 开始执行队列
       this.stats.phase = 'crawling';
       this.processTaskQueue();
 
@@ -129,6 +202,21 @@ export class OkoooMainCrawler {
       return { success: false, message: msg };
     }
   }
+
+  private async fetchEntryPoints(): Promise<{name: string, url: string}[]> {
+      try {
+        const response = await fetch(`${BACKEND_CONFIG.baseUrl}/api/v1/okooo/entry-points`);
+        const data = await response.json();
+        if (data.success && Array.isArray(data.data)) {
+            return data.data;
+        }
+        return [];
+      } catch (e) {
+          this.addLog(`获取入口配置失败: ${e}`, 'error');
+          return [];
+      }
+  }
+
 
   async startWithIds(ids: string[]): Promise<{ success: boolean; message: string }> {
     this.addLog(`🚀 修复模式启动 - 处理 ${ids.length} 个比赛`);
@@ -177,33 +265,59 @@ export class OkoooMainCrawler {
     }
   }
 
-  async startWithTasks(tasks: CrawlerTask[]): Promise<{ success: boolean; message: string }> {
+  async startWithTasks(tasks: any[]): Promise<{ success: boolean; message: string }> {
     this.addLog(`🚀 修复模式启动 (Direct Tasks) - 接收到 ${tasks.length} 个任务`);
+
+    // 1. 预检查文件是否存在
+    this.addLog('正在检查文件是否存在...');
+    const checkResult = await this.checkFilesExist(tasks);
+
+    // 过滤出需要爬取的任务
+    const tasksToCrawl = checkResult.filter((r: any) => !r.skip);
+    const skippedTasks = checkResult.filter((r: any) => r.skip);
+
+    this.addLog(`预检查完成: ${skippedTasks.length} 个文件已存在，${tasksToCrawl.length} 个需要爬取`);
+
+    // 显示跳过的文件
+    skippedTasks.forEach((task: any) => {
+      this.addLog(`⏭️ 跳过已存在: ${task.filename} (${task.size} bytes)`);
+    });
+
+    if (tasksToCrawl.length === 0) {
+      return { success: true, message: '所有文件已存在，无需爬取' };
+    }
+
     this.reset();
-    
+
     try {
+      // 2. 建立 SSE 连接
+      this.connectSSE();
+
       this.stats.phase = 'initializing';
       this.isRunning = true;
       this.stats.isRunning = true;
 
-      // 1. 获取入口页面（实际上只是为了拿 Tab ID）
+      // 3. 获取入口页面（实际上只是为了拿 Tab ID）
       this.addLog('正在打开/获取标签页...');
       this.tabId = await this.getOrCreateTab(OKOOO_CRAWLER_CONFIG.ENTRY_URL);
       if (!this.tabId) {
         throw new Error('无法创建标签页');
       }
 
-      // 2. 直接使用传入的任务队列
-      this.taskQueue = tasks.map(t => ({
-          ...t,
-          status: 'pending',
-          homeTeam: t.homeTeam || '未知主队',
-          awayTeam: t.awayTeam || '未知客队'
+      // 4. 使用过滤后的任务队列
+      this.taskQueue = tasksToCrawl.map((t: any) => ({
+          matchId: t.match_id,
+          homeTeam: '未知主队',
+          awayTeam: '未知客队',
+          pageType: t.page_type,
+          url: t.url,
+          filenamePrefix: t.filename_prefix,
+          status: 'pending'
       }));
       this.stats.totalTasks = this.taskQueue.length;
-      this.addLog(`任务队列准备就绪，共 ${this.taskQueue.length} 个任务`);
+      this.addLog(`任务队列准备就绪，共 ${this.taskQueue.length} 个任务需要爬取`);
 
-      // 3. 开始执行队列
+      // 5. 开始执行队列
       this.stats.phase = 'crawling';
       this.processTaskQueue();
 
@@ -215,6 +329,43 @@ export class OkoooMainCrawler {
       const msg = error instanceof Error ? error.message : String(error);
       this.addLog(`❌ 启动失败: ${msg}`, 'error');
       return { success: false, message: msg };
+    }
+  }
+
+  /**
+   * 检查文件是否存在
+   */
+  private async checkFilesExist(tasks: any[]): Promise<any[]> {
+    try {
+      const requestBody = {
+        tasks: tasks.map(t => ({
+          match_id: t.match_id,
+          page_type: t.page_type,
+          url: t.url,
+          filename_prefix: t.filename_prefix
+        })),
+        date: new Date().toISOString().split('T')[0]  // 当前日期
+      };
+      console.log('[OkoooCrawler] checkFilesExist request:', JSON.stringify(requestBody, null, 2));
+      
+      const response = await fetch(`${BACKEND_CONFIG.baseUrl}/api/v1/okooo/check-files-exist`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody)
+      });
+
+      const data = await response.json();
+      console.log('[OkoooCrawler] checkFilesExist response:', JSON.stringify(data, null, 2));
+      
+      if (data.success) {
+        return data.data;
+      }
+      // 如果检查失败，返回所有任务都需要爬取
+      return tasks.map(t => ({ ...t, skip: false }));
+    } catch (e) {
+      console.error('Failed to check files exist:', e);
+      // 如果检查失败，返回所有任务都需要爬取
+      return tasks.map(t => ({ ...t, skip: false }));
     }
   }
 
@@ -238,11 +389,18 @@ export class OkoooMainCrawler {
               let away = '客队';
               
               // 简单尝试获取文本
-              const text = link.textContent || '';
-              if (text.includes('vs')) {
-                 const parts = text.split('vs');
-                 home = parts[0].trim();
-                 away = parts[1].trim();
+              let text = link.textContent || '';
+              // 移除 [1] [3] 这种排名
+              text = text.replace(/\[\d+\]/g, '').trim();
+              
+              // 检查 VS (支持大小写)
+              const vsMatch = text.match(/\s*(vs|VS)\s*/i);
+              if (vsMatch) {
+                 const parts = text.split(vsMatch[0]);
+                 if (parts.length >= 2) {
+                     home = parts[0].trim();
+                     away = parts[1].trim();
+                 }
               }
               
               matches.push({ id: match[1], home, away });
@@ -301,8 +459,16 @@ export class OkoooMainCrawler {
       for (const t of templates) {
         let url = t.url;
         // 构造 URL
-        if (url && url.includes('{MatchID}')) {
-          url = url.replace('{MatchID}', match.id);
+        if (url && (url.includes('{MatchID}') || url.includes('{id}'))) {
+          url = url.replace(/{MatchID}|{id}/g, match.id);
+        } else if (url && (url.match(/MatchID=\d+/) || url.match(/mid=\d+/))) {
+           // 如果 URL 中已经包含 MatchID=数字 或 mid=数字，直接替换
+           if (url.includes('MatchID=')) {
+             url = url.replace(/MatchID=\d+/g, `MatchID=${match.id}`);
+           }
+           if (url.includes('mid=')) {
+             url = url.replace(/mid=\d+/g, `mid=${match.id}`);
+           }
         } else if (t.name === '欧赔' || (t.url && t.url.includes('op'))) {
             url = `https://m.okooo.com/match/op.php?MatchID=${match.id}`;
         } else if (t.name === '亚盘' || (t.url && t.url.includes('yp'))) {
@@ -358,6 +524,13 @@ export class OkoooMainCrawler {
       await this.wait(2000); // 基础等待
       await this.waitForPageLoad(this.tabId!);
       
+      // 调试: 检查URL是否发生跳转
+      const currentUrl = await this.getCurrentUrl();
+      this.addLog(`URL检查: 目标=${task.url} 实际=${currentUrl}`);
+      if (currentUrl && task.url && currentUrl.split('?')[0] !== task.url.split('?')[0]) {
+         this.addLog(`⚠️ 检测到URL跳转/不一致: \n目标: ${task.url}\n实际: ${currentUrl}`, 'warning');
+      }
+      
       // 3. 检查验证码
       await this.checkCaptchaAndPause();
       if (!this.isRunning) return; // 如果在暂停期间被停止
@@ -365,7 +538,8 @@ export class OkoooMainCrawler {
       // 4. 再次确认内容加载 (防止空白页)
       const hasContent = await this.checkPageHasContent();
       if (!hasContent) {
-        this.addLog(`⚠️ 页面内容为空，重试一次...`, 'warning');
+        const urlNow = await this.getCurrentUrl();
+        this.addLog(`⚠️ 页面内容为空，重试一次... (当前URL: ${urlNow})`, 'warning');
         await chrome.tabs.reload(this.tabId!);
         await this.wait(3000);
         await this.checkCaptchaAndPause();
@@ -457,6 +631,8 @@ export class OkoooMainCrawler {
     if (task.pageType.includes('历史') || task.pageType.includes('战绩') || task.pageType === 'history') {
       apiUrl = '/api/v1/okooo/save-history-html';
       body.parent_match_id = task.matchId; 
+    } else if (task.pageType.includes('亚盘') || task.pageType === 'handicap' || task.pageType.includes('yp')) {
+      apiUrl = '/api/v1/okooo/save-handicap-html';
     } else if (task.pageType.includes('列表') || task.pageType === 'list') {
       apiUrl = '/api/v1/okooo/save-list-html';
     }
@@ -486,6 +662,7 @@ export class OkoooMainCrawler {
     this.stats.isRunning = false;
     this.stats.phase = 'idle';
     this.addLog('⏹️ 爬虫已停止');
+    this.disconnectSSE();
   }
 
   getStatus(): CrawlerStats {
@@ -504,6 +681,7 @@ export class OkoooMainCrawler {
     this.taskQueue = [];
     this.currentTaskIndex = 0;
     this.stats = this.getInitialStats();
+    this.disconnectSSE();
   }
 
   private async getOrCreateTab(url: string): Promise<number | null> {
@@ -541,6 +719,13 @@ export class OkoooMainCrawler {
       });
       return (res as any)?.result || false;
     } catch { return false; }
+  }
+
+  private async getCurrentUrl(): Promise<string> {
+    try {
+      const tab = await chrome.tabs.get(this.tabId!);
+      return tab.url || '';
+    } catch { return ''; }
   }
 }
 

@@ -51,8 +51,8 @@ class OkoooStorage:
         :param date_str: 日期字符串 (YYYY-MM-DD)，如果提供，将保存到该日期的子目录中
         """
         try:
-            # 使用项目根目录下的 data/okooo/batch_html/
-            base_dir = os.path.abspath(os.path.join(os.getcwd(), "data", "okooo", "batch_html"))
+            # 使用项目根目录下的 data/okooo/matches/
+            base_dir = os.path.abspath(os.path.join(os.getcwd(), "data", "okooo", "matches"))
             
             if date_str:
                 match_dir = os.path.join(base_dir, date_str, match_id)
@@ -81,7 +81,50 @@ class OkoooStorage:
                     f.write(content)
                 return True
             except Exception as e2:
-                 logger.error(f"Fallback save failed: {e2}")
+                logger.error(f"Fallback save failed: {e2}")
+            return False
+
+    async def check_db_match_exists(self, match_id: str) -> bool:
+        """
+        检查数据库中是否存在该比赛ID (忽略日期)
+        """
+        try:
+            async with self.db_manager.get_session() as session:
+                # 使用 limit 1 优化查询
+                stmt = select(OkoooMatch.id).where(OkoooMatch.match_id == match_id).limit(1)
+                result = await session.execute(stmt)
+                return result.scalar() is not None
+        except Exception as e:
+            logger.error(f"Check db match exists error: {e}")
+            return False
+
+    def check_file_exists(self, match_id: str, file_name: str, date_str: Optional[str] = None) -> bool:
+        """
+        检查文件是否存在且有效
+        """
+        try:
+            base_dir = os.path.abspath(os.path.join(os.getcwd(), "data", "okooo", "matches"))
+            if date_str:
+                match_dir = os.path.join(base_dir, date_str, match_id)
+            else:
+                match_dir = os.path.join(base_dir, match_id)
+            
+            file_path = os.path.join(match_dir, file_name)
+            
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                # logger.debug(f"File not found: {file_path}")
+                return False
+                
+            # 检查文件大小 > 2KB (避免无效文件)
+            file_size = os.path.getsize(file_path)
+            if file_size <= 2048:
+                logger.info(f"File exists but too small ({file_size} bytes): {file_path}")
+                return False
+                
+            return True
+        except Exception as e:
+            logger.error(f"Check file exists error: {e}")
             return False
 
     async def save_basic_match_info(self, match_data: Dict[str, Any], date_str: Optional[str] = None) -> bool:

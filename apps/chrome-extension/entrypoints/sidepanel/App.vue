@@ -218,206 +218,240 @@
         </div>
       </div>
 
-      <!-- MCP测试Tab -->
+      <!-- MCP测试Tab - 新版MCP与Skill集成测试 -->
       <div v-if="activeTab === 'mcp'" class="tab-content">
         <div class="section">
           <div class="config-card">
             <div class="section-header">
-              <h3>🔧 MCP调试工具</h3>
-              <p>Chrome扩展MCP功能测试平台</p>
+              <h3>🤖 MCP与Skill集成测试</h3>
+              <p>基于WebSocket的AI平台交互测试</p>
             </div>
 
-            <!-- 状态指示器 -->
+            <!-- 连接状态指示器 -->
             <div class="mcp-status-bar">
               <div class="status-item">
-                <div class="status-indicator" :class="mcpStatus.connected ? 'connected' : 'disconnected'"></div>
-                <span>{{ mcpStatus.text }}</span>
+                <div class="status-indicator" :class="wsStatus.connected ? 'connected' : 'disconnected'"></div>
+                <span>{{ wsStatus.text }}</span>
               </div>
               <div class="status-item">
-                <div class="status-indicator" :class="extensionStatus.connected ? 'connected' : 'disconnected'"></div>
-                <span>Chrome扩展</span>
+                <div class="status-indicator" :class="kimiStatus.ready ? 'connected' : 'disconnected'"></div>
+                <span>Kimi网页</span>
               </div>
               <div class="status-item">
-                <div class="status-indicator" :class="nativeStatus.connected ? 'connected' : 'disconnected'"></div>
-                <span>Native Host</span>
+                <div class="status-indicator" :class="deepseekStatus.ready ? 'connected' : 'disconnected'"></div>
+                <span>DeepSeek网页</span>
+              </div>
+              <div class="status-item">
+                <div class="status-indicator" :class="backendStatus.connected ? 'connected' : 'disconnected'"></div>
+                <span>后端服务</span>
               </div>
             </div>
 
-            <!-- 快速测试场景 -->
+            <!-- 平台选择 -->
             <div class="mcp-section">
-              <h4>🚀 快速测试场景</h4>
-              <div class="scenario-grid">
-                <div class="scenario-card" @click="executeScenario('navigate')">
-                  <div class="scenario-title">
-                    <span>🌐</span>
-                    打开澳客网
-                  </div>
-                  <div class="scenario-description">
-                    打开 m.okooo.com 页面进行测试
-                  </div>
-                  <div class="scenario-params">
-                    工具: chrome_navigate | URL: m.okooo.com
-                  </div>
-                </div>
-
-                <div class="scenario-card" @click="executeScenario('alert')">
-                  <div class="scenario-title">
-                    <span>⚡</span>
-                    插入Alert脚本
-                  </div>
-                  <div class="scenario-description">
-                    在页面中插入并执行alert脚本
-                  </div>
-                  <div class="scenario-params">
-                    工具: chrome_inject_script | 脚本: alert('测试')
-                  </div>
-                </div>
-
-                <div class="scenario-card" @click="executeScenario('get-title')">
-                  <div class="scenario-title">
-                    <span>📄</span>
-                    获取页面标题
-                  </div>
-                  <div class="scenario-description">
-                    获取当前页面的标题信息
-                  </div>
-                  <div class="scenario-params">
-                    工具: chrome_get_page_title
-                  </div>
-                </div>
-
-                <div class="scenario-card" @click="executeScenario('get-tabs')">
-                  <div class="scenario-title">
-                    <span>🗂️</span>
-                    获取所有标签页
-                  </div>
-                  <div class="scenario-description">
-                    获取所有浏览器标签页信息
-                  </div>
-                  <div class="scenario-params">
-                    工具: get_windows_and_tabs
-                  </div>
-                </div>
+              <h4>🎯 选择AI平台</h4>
+              <div class="platform-selector">
+                <button 
+                  class="platform-btn" 
+                  :class="{ active: selectedPlatform === 'kimi' }"
+                  @click="selectPlatform('kimi')"
+                >
+                  <span class="platform-icon">🌙</span>
+                  <span class="platform-name">Kimi</span>
+                  <span class="platform-url">kimi.com</span>
+                </button>
+                <button 
+                  class="platform-btn" 
+                  :class="{ active: selectedPlatform === 'deepseek' }"
+                  @click="selectPlatform('deepseek')"
+                >
+                  <span class="platform-icon">🐋</span>
+                  <span class="platform-name">DeepSeek</span>
+                  <span class="platform-url">deepseek.com</span>
+                </button>
               </div>
             </div>
 
-            <!-- 参数配置区域 -->
+            <!-- 图片上传区域 -->
             <div class="mcp-section">
-              <h4>⚙️ 参数配置</h4>
-              <div class="parameter-form">
-                <div class="form-group">
-                  <label class="form-label">
-                    <span>🔧</span>
-                    工具名称
-                  </label>
-                  <input 
-                    type="text" 
-                    class="form-input" 
-                    v-model="mcpToolName" 
-                    placeholder="例如: chrome_navigate"
-                  />
+              <h4>🖼️ 图片上传</h4>
+              <div 
+                class="image-upload-area"
+                :class="{ 'drag-over': isDragging }"
+                @dragover.prevent="isDragging = true"
+                @dragleave.prevent="isDragging = false"
+                @drop.prevent="handleImageDrop"
+                @click="triggerImageSelect"
+              >
+                <input 
+                  ref="imageInput"
+                  type="file" 
+                  accept="image/*" 
+                  style="display: none"
+                  @change="handleImageSelect"
+                />
+                <div v-if="!uploadedImage" class="upload-placeholder">
+                  <span class="upload-icon">📤</span>
+                  <p>点击或拖拽上传图片</p>
+                  <p class="upload-hint">支持 JPG, PNG, GIF 格式</p>
                 </div>
-
-                <div class="form-group">
-                  <label class="form-label">
-                    <span>📝</span>
-                    参数 (JSON格式)
-                  </label>
-                  <textarea 
-                    class="form-input form-textarea" 
-                    v-model="mcpToolParams" 
-                    placeholder='{"url": "https://example.com"}'
-                    rows="4"
-                  ></textarea>
-                  <div v-if="mcpJsonError" class="json-error">{{ mcpJsonError }}</div>
+                <div v-else class="image-preview">
+                  <img :src="uploadedImage" alt="预览" />
+                  <button class="remove-image" @click.stop="removeImage">✕</button>
                 </div>
               </div>
             </div>
 
-            <!-- 执行按钮区域 -->
+            <!-- 消息输入 -->
             <div class="mcp-section">
-              <div class="execute-buttons">
-                <button 
-                  class="ths-btn ths-btn-primary" 
-                  @click="executeMCPTool" 
-                  :disabled="mcpLoading"
-                >
-                  <span>🚀</span>
-                  {{ mcpLoading ? '执行中...' : '执行工具' }}
+              <h4>💬 发送消息</h4>
+              <div class="message-input-area">
+                <textarea 
+                  v-model="messageText"
+                  class="message-textarea"
+                  placeholder="输入要发送给AI的消息..."
+                  rows="3"
+                ></textarea>
+                <div class="message-actions">
+                  <button 
+                    class="ths-btn ths-btn-secondary"
+                    @click="newChat"
+                    :disabled="skillLoading"
+                  >
+                    <span>🆕</span> 新对话
+                  </button>
+                  <button 
+                    class="ths-btn ths-btn-primary"
+                    @click="sendMessage"
+                    :disabled="skillLoading || !messageText.trim()"
+                  >
+                    <span>📤</span> {{ skillLoading ? '发送中...' : '发送' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Skill快速测试 -->
+            <div class="mcp-section">
+              <h4>🚀 Skill快速测试</h4>
+              <div class="skill-grid">
+                <div class="skill-card" @click="testSkill('kimi_chat')">
+                  <div class="skill-icon">🌙</div>
+                  <div class="skill-name">Kimi对话</div>
+                  <div class="skill-desc">与Kimi AI进行对话</div>
+                </div>
+                <div class="skill-card" @click="testSkill('deepseek_chat')">
+                  <div class="skill-icon">🐋</div>
+                  <div class="skill-name">DeepSeek对话</div>
+                  <div class="skill-desc">与DeepSeek AI对话</div>
+                </div>
+                <div class="skill-card" @click="testSkill('upload_image')">
+                  <div class="skill-icon">🖼️</div>
+                  <div class="skill-name">上传图片</div>
+                  <div class="skill-desc">上传图片到AI平台</div>
+                </div>
+                <div class="skill-card" @click="testSkill('analyze_image')">
+                  <div class="skill-icon">🔍</div>
+                  <div class="skill-name">分析图片</div>
+                  <div class="skill-desc">OCR或视觉分析</div>
+                </div>
+                <div class="skill-card" @click="testSkill('get_chat_history')">
+                  <div class="skill-icon">📜</div>
+                  <div class="skill-name">获取历史</div>
+                  <div class="skill-desc">获取对话历史记录</div>
+                </div>
+                <div class="skill-card" @click="testSkill('get_prompt')">
+                  <div class="skill-icon">📝</div>
+                  <div class="skill-name">获取提示词</div>
+                  <div class="skill-desc">获取提示词模板</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- DeepSeek专项测试 -->
+            <div class="mcp-section" v-if="selectedPlatform === 'deepseek'">
+              <h4>🐋 DeepSeek专项测试</h4>
+              <div class="deepseek-tests">
+                <button class="ths-btn ths-btn-secondary" @click="openDeepSeek">
+                  <span>🌐</span> 打开DeepSeek
                 </button>
-                <button 
-                  class="ths-btn ths-btn-secondary" 
-                  @click="connectMCP" 
-                  :disabled="mcpLoading"
-                >
-                  <span>🔌</span>
-                  连接MCP
+                <button class="ths-btn ths-btn-secondary" @click="checkDeepSeekReady">
+                  <span>✅</span> 检查页面状态
                 </button>
-                <button 
-                  class="ths-btn ths-btn-success" 
-                  @click="validateMCPParams" 
-                  :disabled="mcpLoading"
-                >
-                  <span>✅</span>
-                  验证参数
-                </button>
-                <button 
-                  class="ths-btn ths-btn-info" 
-                  @click="testMCPPing" 
-                  :disabled="mcpLoading"
-                >
-                  <span>📡</span>
-                  Ping测试
-                </button>
-                <button 
-                  class="ths-btn ths-btn-warning" 
-                  @click="getMCPToolsList" 
-                  :disabled="mcpLoading"
-                >
-                  <span>📋</span>
-                  获取工具列表
+                <button class="ths-btn ths-btn-info" @click="testDeepSeekWithImage">
+                  <span>🖼️</span> 图片+消息测试
                 </button>
               </div>
             </div>
 
-            <!-- 结果显示区域 -->
-            <div v-if="mcpResult" class="mcp-section">
+            <!-- 执行结果 -->
+            <div v-if="skillResult" class="mcp-section">
               <h4>📊 执行结果</h4>
-              <div class="mcp-result">
+              <div class="skill-result">
                 <div class="result-header">
-                  <span class="result-status" :class="mcpResult.success ? 'success' : 'error'">
-                    {{ mcpResult.success ? '✅ 成功' : '❌ 失败' }}
+                  <span class="result-status" :class="skillResult.success ? 'success' : 'error'">
+                    {{ skillResult.success ? '✅ 成功' : '❌ 失败' }}
                   </span>
-                  <span class="result-time">{{ new Date(mcpResult.timestamp).toLocaleTimeString() }}</span>
+                  <span class="result-time">{{ formatTime(skillResult.timestamp) }}</span>
                 </div>
                 <div class="result-content">
-                  <pre>{{ formatMCPResult(mcpResult.data) }}</pre>
+                  <div v-if="skillResult.data?.reply" class="reply-content">
+                    <strong>AI回复:</strong>
+                    <pre>{{ skillResult.data.reply }}</pre>
+                  </div>
+                  <div v-else-if="skillResult.data?.text" class="ocr-content">
+                    <strong>OCR结果:</strong>
+                    <pre>{{ skillResult.data.text }}</pre>
+                  </div>
+                  <div v-else>
+                    <pre>{{ JSON.stringify(skillResult.data, null, 2) }}</pre>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <!-- 工具列表显示 -->
-            <div v-if="mcpToolsList.length > 0" class="mcp-section">
-              <h4>🛠️ 可用工具列表</h4>
-              <div class="tools-list">
-                <div 
-                  v-for="tool in mcpToolsList" 
-                  :key="tool.name" 
-                  class="tool-card"
-                  @click="selectTool(tool)"
-                >
-                  <div class="tool-name">{{ tool.name }}</div>
-                  <div class="tool-description">{{ tool.description }}</div>
-                  <details v-if="tool.inputSchema">
-                    <summary>参数说明</summary>
-                    <pre>{{ JSON.stringify(tool.inputSchema, null, 2) }}</pre>
-                  </details>
+            <!-- 流式响应显示 -->
+            <div v-if="streamChunks.length > 0" class="mcp-section">
+              <h4>🌊 流式响应</h4>
+              <div class="stream-content">
+                <div v-for="(chunk, index) in streamChunks" :key="index" class="stream-chunk">
+                  {{ chunk }}
                 </div>
+                <div v-if="isStreaming" class="stream-loading">接收中...</div>
               </div>
             </div>
 
             <!-- 错误消息 -->
-            <div v-if="mcpError" class="mcp-error">{{ mcpError }}</div>
+            <div v-if="skillError" class="mcp-error">
+              <span>❌</span> {{ skillError }}
+            </div>
+
+            <!-- 连接控制 -->
+            <div class="mcp-section">
+              <h4>🔌 连接控制</h4>
+              <div class="connection-controls">
+                <button 
+                  class="ths-btn ths-btn-primary"
+                  @click="connectWebSocket"
+                  :disabled="wsStatus.connected"
+                >
+                  <span>🔌</span> 连接WebSocket
+                </button>
+                <button 
+                  class="ths-btn ths-btn-secondary"
+                  @click="disconnectWebSocket"
+                  :disabled="!wsStatus.connected"
+                >
+                  <span>🔌</span> 断开连接
+                </button>
+                <button 
+                  class="ths-btn ths-btn-info"
+                  @click="checkBackendStatus"
+                >
+                  <span>📡</span> 检查后端状态
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -541,13 +575,37 @@
               </div>
             </div>
 
-            <!-- 修复详情区域 -->
-            <div v-if="okoooState.repair.repairDetails.length > 0" class="repair-details-section">
-              <h4>⚠️ 发现 {{ okoooState.repair.repairDetails.length }} 个数据异常</h4>
+            <!-- 修复任务与进度列表 -->
+            <div v-if="unifiedRepairList.length > 0" class="repair-details-section">
+              <div class="section-header">
+                <h4>⚠️ 待修复任务 ({{ unifiedRepairList.length }})</h4>
+                <button 
+                  @click="startRepair(false)" 
+                  class="ths-btn ths-btn-warning ths-btn-sm"
+                  :disabled="isSyncing"
+                >
+                  🛠️ 立即修复
+                </button>
+              </div>
               <div class="repair-list">
-                <div v-for="item in okoooState.repair.repairDetails" :key="item.id" class="repair-item">
-                  <span class="match-id">ID: {{ item.id }}</span>
-                  <span class="error-reason">{{ item.reason }}</span>
+                <div 
+                  v-for="item in unifiedRepairList" 
+                  :key="item.id" 
+                  class="repair-item"
+                  :class="{'item-success': item.status === 'success', 'item-running': item.status !== 'success' && item.current > 0}"
+                >
+                  <div class="repair-item-left">
+                    <span class="match-id">ID: {{ item.id }}</span>
+                    <span class="error-reason">{{ item.reason }}</span>
+                  </div>
+                  <div class="repair-item-right">
+                    <span v-if="item.status === 'success'" class="status-success">✅ 完成</span>
+                    <span v-else-if="item.current > 0 || item.status === 'pending'" class="status-running">
+                      {{ item.current }}/{{ item.total }}
+                      <span v-if="item.current > 0" class="loading-dots">...</span>
+                    </span>
+                    <span v-else class="status-pending">等待中</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -581,23 +639,7 @@
                 </div>
               </details>
             </div>
-            
-            <!-- 结果列表 -->
-            <div v-if="aggregatedResults.length > 0" class="results-section">
-              <h4>爬取结果 ({{ aggregatedResults.length }})</h4>
-              <div class="results-scroll">
-                <div 
-                  v-for="(result, index) in aggregatedResults" 
-                  :key="result.matchId"
-                  :class="['result-item', `result-${result.status}`]"
-                >
-                  <span class="match-id">#{{ result.matchId }}</span>
-                  <span class="status-icon">
-                     ({{ result.current }}/{{ result.total }}) {{ result.status === 'success' ? '✓' : '...' }}
-                  </span>
-                </div>
-              </div>
-            </div>
+
 
             <!-- 实时日志 -->
             <div class="log-section">
@@ -620,6 +662,32 @@
         </div>
       </div>
 
+    </div>
+
+    <!-- 修复任务通知 -->
+    <div v-if="repairNotification.visible" class="modal-overlay notification-overlay" @click="repairNotification.visible = false">
+      <div class="modal-content notification-content" @click.stop>
+        <div class="modal-header">
+          <h3>🛠️ 发现需要修复的比赛</h3>
+          <button @click="repairNotification.visible = false" class="close-btn">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="notification-info">
+            <p><strong>日期:</strong> {{ repairNotification.date }}</p>
+            <p><strong>比赛数量:</strong> {{ repairNotification.totalMatches }} 场</p>
+            <p><strong>任务数量:</strong> {{ repairNotification.totalTasks }} 个</p>
+            <p class="notification-message">{{ repairNotification.message }}</p>
+          </div>
+          <div class="notification-actions">
+            <button @click="startRepairFromNotification" class="ths-btn ths-btn-primary">
+              立即修复
+            </button>
+            <button @click="repairNotification.visible = false" class="ths-btn ths-btn-secondary">
+              稍后处理
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- 数据详情模态框 -->
@@ -720,7 +788,7 @@ const isPushing = ref<boolean>(false);
 const isClearing = ref<boolean>(false);
 const pushStatus = ref<any>(null);
 
-// MCP测试相关响应式数据
+// MCP测试相关响应式数据 (旧版兼容)
 const mcpToolName = ref<string>('');
 const mcpToolParams = ref<string>('{}');
 const mcpJsonError = ref<string>('');
@@ -734,6 +802,40 @@ const nativeStatus = ref({ connected: false, text: 'Native Host' });
 
 // MCP服务器配置
 const MCP_SERVER_URL = 'http://localhost:56889';
+
+// ==================== 新版MCP与Skill集成测试数据 ====================
+
+// WebSocket连接状态
+const wsStatus = ref<{ connected: boolean; text: string }>({ connected: false, text: 'WebSocket未连接' });
+const wsConnection = ref<WebSocket | null>(null);
+
+// 平台状态
+const kimiStatus = ref<{ ready: boolean; tabId: number | null }>({ ready: false, tabId: null });
+const deepseekStatus = ref<{ ready: boolean; tabId: number | null }>({ ready: false, tabId: null });
+const backendStatus = ref<{ connected: boolean; url: string }>({ connected: false, url: 'http://localhost:8000' });
+
+// 当前选择的平台
+const selectedPlatform = ref<'kimi' | 'deepseek'>('deepseek');
+
+// 图片上传
+const uploadedImage = ref<string>('');
+const isDragging = ref<boolean>(false);
+const imageInput = ref<HTMLInputElement | null>(null);
+
+// 消息输入
+const messageText = ref<string>('');
+
+// Skill执行
+const skillLoading = ref<boolean>(false);
+const skillError = ref<string>('');
+const skillResult = ref<any>(null);
+
+// 流式响应
+const streamChunks = ref<string[]>([]);
+const isStreaming = ref<boolean>(false);
+
+// WebSocket配置
+const WS_SERVER_URL = 'ws://localhost:8765';
 
 // Okooo Sync State
 interface CrawlerStatus {
@@ -807,7 +909,7 @@ const okoooState = ref<OkoooSyncState>({
 
 // Unified Sync Status
 const isSyncing = computed(() => {
-  return okoooState.value.list.isCapturing || (okoooState.value.repair.isRunning && okoooState.value.repair.isDryRun);
+  return okoooState.value.list.isCapturing || okoooState.value.repair.isRunning;
 });
 
 const syncStatusMessage = computed(() => {
@@ -906,28 +1008,58 @@ const startRepair = async (isDryRun: boolean = false) => {
       
       if (data.data.repairing_count > 0 && !isDryRun) {
         okoooState.value.crawler.isRunning = true;
-        // 触发 Chrome Extension 爬取
-        chrome.runtime.sendMessage({
-          type: 'OKOOO_START_REPAIR',
-          ids: data.data.ids
-        }).then(response => {
-          if (response.success) {
-            startCrawlerStatusPolling();
-          } else {
-             okoooState.value.crawler.isRunning = false;
-             okoooState.value.repair.message = '修复启动失败: ' + response.message;
-          }
-        }).catch((err: any) => {
-             okoooState.value.crawler.isRunning = false;
-             okoooState.value.repair.message = '修复启动异常: ' + err;
-        });
+        
+        // 获取生成的任务详情
+        const tasksResponse = await fetch(`${backendUrl.value}/api/v1/okooo/repair-tasks`);
+        const tasksResult = await tasksResponse.json();
+        
+        if (tasksResult.success && tasksResult.data && tasksResult.data.length > 0) {
+            // 触发 Chrome Extension 爬取 (使用直接任务模式)
+            chrome.runtime.sendMessage({
+              type: 'OKOOO_START_REPAIR_TASKS',
+              tasks: tasksResult.data
+            }).then(response => {
+              if (response.success) {
+                startCrawlerStatusPolling();
+              } else {
+                 okoooState.value.crawler.isRunning = false;
+                 okoooState.value.repair.isRunning = false;
+                 okoooState.value.repair.message = '修复启动失败: ' + response.message;
+              }
+            }).catch((err: any) => {
+                 okoooState.value.crawler.isRunning = false;
+                 okoooState.value.repair.isRunning = false;
+                 okoooState.value.repair.message = '修复启动异常: ' + err;
+            });
+        } else {
+            // Fallback to IDs if tasks not found (though unlikely)
+            chrome.runtime.sendMessage({
+              type: 'OKOOO_START_REPAIR',
+              ids: data.data.ids
+            }).then(response => {
+              if (response.success) {
+                startCrawlerStatusPolling();
+              } else {
+                 okoooState.value.crawler.isRunning = false;
+                 okoooState.value.repair.isRunning = false;
+                 okoooState.value.repair.message = '修复启动失败(ID模式): ' + response.message;
+              }
+            }).catch((err: any) => {
+                 okoooState.value.crawler.isRunning = false;
+                 okoooState.value.repair.isRunning = false;
+                 okoooState.value.repair.message = '修复启动异常(ID模式): ' + err;
+            });
+        }
+      } else {
+        // 没有需要修复的任务或是 dry_run 模式，立即重置状态
+        okoooState.value.repair.isRunning = false;
       }
     } else {
       okoooState.value.repair.message = '失败: ' + data.message;
+      okoooState.value.repair.isRunning = false;
     }
   } catch (e: any) {
     okoooState.value.repair.message = '错误: ' + e.message;
-  } finally {
     okoooState.value.repair.isRunning = false;
   }
 };
@@ -1045,21 +1177,30 @@ const setupSSE = () => {
         console.log('File saved confirmation:', data);
         
         const matchId = data.match_id;
-        if (!serverConfirmedProgress.value[matchId]) {
-          serverConfirmedProgress.value[matchId] = {
+        // 创建新对象以触发Vue响应式更新
+        const progress = { ...serverConfirmedProgress.value };
+        if (!progress[matchId]) {
+          progress[matchId] = {
             current: 0,
             total: 8, // 假设每场比赛8个任务
             status: 'pending'
           };
         }
         
-        serverConfirmedProgress.value[matchId].current++;
+        progress[matchId] = {
+          ...progress[matchId],
+          current: progress[matchId].current + 1
+        };
         
         // 自动计算总数（如果任务数动态变化）
-        // 暂时假设8个
-        if (serverConfirmedProgress.value[matchId].current >= serverConfirmedProgress.value[matchId].total) {
-          serverConfirmedProgress.value[matchId].status = 'success';
+        if (progress[matchId].current >= progress[matchId].total) {
+          progress[matchId] = {
+            ...progress[matchId],
+            status: 'success'
+          };
         }
+        
+        serverConfirmedProgress.value = progress;
 
       } catch (e) {
         console.error('解析文件保存通知失败:', e);
@@ -1123,6 +1264,49 @@ const aggregatedResults = computed(() => {
   });
 
   return Object.values(map);
+});
+
+// 计算属性：统一的修复任务列表（合并异常列表和爬取进度）
+const unifiedRepairList = computed(() => {
+  const map = new Map<string, { 
+    id: string; 
+    reason: string; 
+    current: number; 
+    total: number; 
+    status: string 
+  }>();
+
+  // 1. 先添加异常列表中的任务
+  okoooState.value.repair.repairDetails.forEach(item => {
+    map.set(item.id, {
+      id: item.id,
+      reason: item.reason,
+      current: 0,
+      total: 8, // 默认为8，后续会更新
+      status: 'pending'
+    });
+  });
+
+  // 2. 合并爬取进度
+  aggregatedResults.value.forEach(res => {
+    if (map.has(res.matchId)) {
+      const item = map.get(res.matchId)!;
+      item.current = res.current;
+      item.total = res.total;
+      item.status = res.status;
+    } else {
+      // 如果任务不在异常列表中（可能是手动添加的任务），也加入列表
+      map.set(res.matchId, {
+        id: res.matchId,
+        reason: '手动任务',
+        current: res.current,
+        total: res.total,
+        status: res.status
+      });
+    }
+  });
+
+  return Array.from(map.values());
 });
 
 // 调试模式配置 - 设为false可大幅减少console.log输出
@@ -3213,12 +3397,17 @@ const startOkoooCrawler = async () => {
 };
 
 const stopOkoooCrawler = async () => {
-  await chrome.runtime.sendMessage({
-    type: 'OKOOO_STOP_CRAWLER'
-  });
+  try {
+    await chrome.runtime.sendMessage({
+      type: 'OKOOO_STOP_CRAWLER'
+    });
+  } catch (e) {
+    console.log('Stop crawler message failed:', e);
+  }
 
   okoooState.value.crawler.isRunning = false;
   okoooState.value.crawler.phase = 'idle';
+  okoooState.value.repair.isRunning = false; // 同时重置修复状态
   stopCrawlerStatusPolling();
 };
 
@@ -3324,11 +3513,27 @@ const openAndCaptureList = async () => {
       okoooState.value.list.lastResult = null;
       okoooState.value.list.progress = '0/3';
 
-      const captureSteps = [
-        { name: '竞彩足球', url: 'https://m.okooo.com/jczq/' },
-        { name: '北京单场', url: 'https://m.okooo.com/bjdc/' },
-        { name: '胜负彩', url: 'https://m.okooo.com/sfc/' }
-      ];
+      // 动态获取入口配置
+      let captureSteps: {name: string, url: string}[] = [];
+      
+      try {
+        okoooState.value.list.progress = '获取配置...';
+        const entryRes = await fetch(`${backendUrl.value}/api/v1/okooo/entry-points`);
+        const entryData = await entryRes.json();
+        if (entryData.success && Array.isArray(entryData.data) && entryData.data.length > 0) {
+            captureSteps = entryData.data;
+        } else {
+            // Fallback
+            captureSteps = [
+                { name: '竞彩足球', url: 'https://m.okooo.com/jczq/' }
+            ];
+        }
+      } catch (e) {
+         console.error('获取入口失败，使用默认配置', e);
+         captureSteps = [
+            { name: '竞彩足球', url: 'https://m.okooo.com/jczq/' }
+         ];
+      }
 
       try {
         let successCount = 0;
@@ -3454,7 +3659,336 @@ onUnmounted(() => {
     eventSource.close();
     isLogStreamActive.value = false;
   }
+  // 断开WebSocket连接
+  disconnectWebSocket();
 });
+
+// ==================== 新版MCP与Skill集成测试方法 ====================
+
+// 平台选择
+const selectPlatform = (platform: 'kimi' | 'deepseek') => {
+  selectedPlatform.value = platform;
+  skillResult.value = null;
+  skillError.value = '';
+};
+
+// 图片上传处理
+const triggerImageSelect = () => {
+  imageInput.value?.click();
+};
+
+const handleImageSelect = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  if (input.files && input.files[0]) {
+    const file = input.files[0];
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      uploadedImage.value = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+};
+
+const handleImageDrop = (event: DragEvent) => {
+  isDragging.value = false;
+  const files = event.dataTransfer?.files;
+  if (files && files[0]) {
+    const file = files[0];
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        uploadedImage.value = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+};
+
+const removeImage = () => {
+  uploadedImage.value = '';
+  if (imageInput.value) {
+    imageInput.value.value = '';
+  }
+};
+
+// WebSocket连接管理
+const connectWebSocket = () => {
+  try {
+    wsConnection.value = new WebSocket(WS_SERVER_URL);
+    
+    wsConnection.value.onopen = () => {
+      wsStatus.value = { connected: true, text: 'WebSocket已连接' };
+      console.log('WebSocket连接成功');
+    };
+    
+    wsConnection.value.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      handleWebSocketMessage(data);
+    };
+    
+    wsConnection.value.onerror = (error) => {
+      console.error('WebSocket错误:', error);
+      wsStatus.value = { connected: false, text: 'WebSocket错误' };
+    };
+    
+    wsConnection.value.onclose = () => {
+      wsStatus.value = { connected: false, text: 'WebSocket已断开' };
+      console.log('WebSocket连接关闭');
+    };
+  } catch (error) {
+    console.error('WebSocket连接失败:', error);
+    wsStatus.value = { connected: false, text: '连接失败' };
+  }
+};
+
+const disconnectWebSocket = () => {
+  wsConnection.value?.close();
+  wsConnection.value = null;
+  wsStatus.value = { connected: false, text: 'WebSocket未连接' };
+};
+
+const handleWebSocketMessage = (data: any) => {
+  if (data.type === 'skill_response') {
+    skillResult.value = data;
+    skillLoading.value = false;
+  } else if (data.type === 'skill_stream') {
+    streamChunks.value.push(data.chunk);
+    if (data.is_complete) {
+      isStreaming.value = false;
+    }
+  }
+};
+
+// Skill执行
+const testSkill = async (skillName: string) => {
+  skillLoading.value = true;
+  skillError.value = '';
+  skillResult.value = null;
+  streamChunks.value = [];
+  
+  try {
+    let params: any = {};
+    
+    switch (skillName) {
+      case 'kimi_chat':
+      case 'deepseek_chat':
+        params = {
+          message: messageText.value || '你好',
+          image: uploadedImage.value || undefined,
+          new_chat: false
+        };
+        break;
+      case 'upload_image':
+        params = {
+          platform: selectedPlatform.value,
+          image_data: uploadedImage.value
+        };
+        break;
+      case 'analyze_image':
+        params = {
+          image_data: uploadedImage.value,
+          mode: 'ocr'
+        };
+        break;
+      case 'get_chat_history':
+        params = {
+          platform: selectedPlatform.value
+        };
+        break;
+      case 'get_prompt':
+        params = {
+          name: 'default'
+        };
+        break;
+    }
+    
+    // 通过Chrome Runtime发送消息到Background Script
+    const response = await chrome.runtime.sendMessage({
+      type: 'EXECUTE_SKILL',
+      skill: skillName,
+      params
+    });
+    
+    if (response.success) {
+      skillResult.value = {
+        success: true,
+        data: response.data,
+        timestamp: new Date().toISOString()
+      };
+    } else {
+      throw new Error(response.error);
+    }
+  } catch (error) {
+    skillError.value = error instanceof Error ? error.message : String(error);
+    skillResult.value = {
+      success: false,
+      error: skillError.value,
+      timestamp: new Date().toISOString()
+    };
+  } finally {
+    skillLoading.value = false;
+  }
+};
+
+// 发送消息
+const sendMessage = async () => {
+  if (!messageText.value.trim()) return;
+  
+  const skillName = selectedPlatform.value === 'kimi' ? 'kimi_chat' : 'deepseek_chat';
+  await testSkill(skillName);
+};
+
+// 新建对话
+const newChat = async () => {
+  skillLoading.value = true;
+  skillError.value = '';
+  
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'EXECUTE_SKILL',
+      skill: 'new_chat',
+      params: {
+        platform: selectedPlatform.value
+      }
+    });
+    
+    if (response.success) {
+      skillResult.value = {
+        success: true,
+        data: { message: '新对话已创建' },
+        timestamp: new Date().toISOString()
+      };
+      messageText.value = '';
+      uploadedImage.value = '';
+    } else {
+      throw new Error(response.error);
+    }
+  } catch (error) {
+    skillError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    skillLoading.value = false;
+  }
+};
+
+// DeepSeek专项测试
+const openDeepSeek = async () => {
+  try {
+    const tab = await chrome.tabs.create({
+      url: 'https://chat.deepseek.com/',
+      active: true
+    });
+    deepseekStatus.value = { ready: true, tabId: tab.id || null };
+  } catch (error) {
+    skillError.value = '打开DeepSeek失败: ' + (error instanceof Error ? error.message : String(error));
+  }
+};
+
+const checkDeepSeekReady = async () => {
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://chat.deepseek.com/*' });
+    if (tabs.length > 0 && tabs[0].id) {
+      const response = await chrome.tabs.sendMessage(tabs[0].id, {
+        action: 'is_ready'
+      });
+      deepseekStatus.value = { 
+        ready: response.ready, 
+        tabId: tabs[0].id 
+      };
+      skillResult.value = {
+        success: true,
+        data: { ready: response.ready, tabId: tabs[0].id },
+        timestamp: new Date().toISOString()
+      };
+    } else {
+      skillResult.value = {
+        success: false,
+        error: 'DeepSeek页面未打开',
+        timestamp: new Date().toISOString()
+      };
+    }
+  } catch (error) {
+    skillError.value = '检查失败: ' + (error instanceof Error ? error.message : String(error));
+  }
+};
+
+const testDeepSeekWithImage = async () => {
+  if (!uploadedImage.value) {
+    skillError.value = '请先上传图片';
+    return;
+  }
+  
+  skillLoading.value = true;
+  skillError.value = '';
+  
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'EXECUTE_SKILL',
+      skill: 'deepseek_chat',
+      params: {
+        message: messageText.value || '分析这张图片',
+        image: uploadedImage.value,
+        new_chat: false
+      }
+    });
+    
+    if (response.success) {
+      skillResult.value = {
+        success: true,
+        data: response.data,
+        timestamp: new Date().toISOString()
+      };
+    } else {
+      throw new Error(response.error);
+    }
+  } catch (error) {
+    skillError.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    skillLoading.value = false;
+  }
+};
+
+// 检查后端状态
+const checkBackendStatus = async () => {
+  try {
+    const response = await fetch(`${backendStatus.value.url}/api/health`);
+    backendStatus.value.connected = response.ok;
+    skillResult.value = {
+      success: response.ok,
+      data: { backend: 'available', status: response.status },
+      timestamp: new Date().toISOString()
+    };
+  } catch (error) {
+    backendStatus.value.connected = false;
+    skillResult.value = {
+      success: false,
+      error: '后端服务不可用',
+      timestamp: new Date().toISOString()
+    };
+  }
+};
+
+// 格式化时间
+const formatTime = (timestamp: string) => {
+  return new Date(timestamp).toLocaleTimeString();
+};
+
+// 监听平台标签页变化
+const checkPlatformTabs = async () => {
+  const kimiTabs = await chrome.tabs.query({ url: 'https://www.kimi.com/*' });
+  kimiStatus.value = { 
+    ready: kimiTabs.length > 0, 
+    tabId: kimiTabs[0]?.id || null 
+  };
+  
+  const deepseekTabs = await chrome.tabs.query({ url: 'https://chat.deepseek.com/*' });
+  deepseekStatus.value = { 
+    ready: deepseekTabs.length > 0, 
+    tabId: deepseekTabs[0]?.id || null 
+  };
+};
+
+// 定期检查平台标签页
+setInterval(checkPlatformTabs, 5000);
 </script>
 
 <style scoped>
@@ -4087,6 +4621,17 @@ onUnmounted(() => {
   color: #1890ff;
   border-top: 1px solid var(--border-color);
   padding-top: 10px;
+}
+
+.notification-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+  justify-content: center;
+}
+
+.notification-actions .ths-btn {
+  min-width: 100px;
 }
 
 @keyframes pulse {
@@ -4795,10 +5340,61 @@ onUnmounted(() => {
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
 }
+
+/* Repair Section Styles */
+.repair-details-section {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.repair-details-section .section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-md);
+}
+
+.repair-details-section h4 {
+  margin: 0;
+  color: #d97706; /* Warning color */
+}
+
+.repair-list {
+  max-height: 200px;
+  overflow-y: auto;
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.repair-item {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+  font-size: 12px;
+}
+
+.repair-item:last-child {
+  border-bottom: none;
+}
+
+.match-id {
+  font-family: monospace;
+  font-weight: 500;
+}
+
+.error-reason {
+  color: #ef4444;
+}
+
 
 .stat-item.success .stat-value { color: #166534; }
 .stat-item.error .stat-value { color: #991b1b; }

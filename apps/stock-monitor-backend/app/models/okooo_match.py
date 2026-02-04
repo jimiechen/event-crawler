@@ -36,6 +36,8 @@ class OkoooMatch(Base):
     data: Mapped[dict] = mapped_column(JSON, comment="分析结果", nullable=True)
     analysis: Mapped[dict] = mapped_column(JSON, comment="爬虫数据聚合", nullable=True)
     
+    is_caw: Mapped[int] = mapped_column(Integer, default=1, comment="是否爬取：1-是，0-否")
+    
     updated_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), comment="更新时间")
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now(), comment="创建时间")
 

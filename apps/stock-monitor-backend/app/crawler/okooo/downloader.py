@@ -71,6 +71,23 @@ class OkoooDownloader:
             elif not self.context:
                 self.context = await self._create_context(self.browser)
 
+    async def _log(self, level: str, message: str):
+        """日志记录"""
+        # Call callback if available
+        if self.log_callback:
+            try:
+                await self.log_callback(level, message)
+            except Exception:
+                pass
+        
+        # Also log to standard logger
+        if level == "INFO":
+            logger.info(message)
+        elif level == "WARNING":
+            logger.warning(message)
+        elif level == "ERROR":
+            logger.error(message)
+
     async def download(self, url: str) -> Optional[str]:
         """别名方法"""
         return await self.download_html(url)

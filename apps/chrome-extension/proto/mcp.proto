@@ -1,0 +1,124 @@
+syntax = "proto3";
+
+package mcp;
+
+// ============================================================
+// 基础消息类型
+// ============================================================
+
+// WebSocket 消息包装器
+message WSMessage {
+  string message_id = 1;
+  MessageType type = 2;
+  bytes payload = 3;  // 序列化的具体消息
+  int64 timestamp = 4;
+}
+
+enum MessageType {
+  UNKNOWN = 0;
+  
+  // 连接管理
+  CONNECT = 1;
+  CONNECT_ACK = 2;
+  HEARTBEAT = 3;
+  HEARTBEAT_ACK = 4;
+  DISCONNECT = 5;
+  
+  // Skill 调用
+  SKILL_REQUEST = 10;
+  SKILL_RESPONSE = 11;
+  SKILL_STREAM = 12;
+  
+  // 后端服务调用
+  BACKEND_REQUEST = 20;
+  BACKEND_RESPONSE = 21;
+}
+
+// ============================================================
+// Skill 相关消息
+// ============================================================
+
+// Skill 调用请求
+message SkillRequest {
+  string request_id = 1;
+  string skill_name = 2;
+  string platform = 3;  // "kimi" | "deepseek"
+  map<string, string> parameters = 4;
+  bytes image_data = 5;  // 可选的图片数据
+  string mime_type = 6;
+}
+
+// Skill 调用响应
+message SkillResponse {
+  string request_id = 1;
+  bool success = 2;
+  string result = 3;  // JSON 序列化的结果
+  string error = 4;
+  int64 processing_time_ms = 5;
+}
+
+// 流式响应块
+message SkillStreamChunk {
+  string request_id = 1;
+  string chunk = 2;
+  bool is_complete = 3;
+  int32 chunk_index = 4;
+}
+
+// ============================================================
+// 后端服务相关消息
+// ============================================================
+
+// 后端服务请求
+message BackendRequest {
+  string request_id = 1;
+  BackendService service = 2;
+  string action = 3;
+  bytes payload = 4;  // JSON 序列化的参数
+}
+
+enum BackendService {
+  SESSION = 0;      // 会话管理
+  PROMPT = 1;       // 提示词管理
+  OCR = 2;          // OCR服务
+  STORAGE = 3;      // 数据存储
+  INTEGRATION = 4;  // 第三方集成
+}
+
+// 后端服务响应
+message BackendResponse {
+  string request_id = 1;
+  bool success = 2;
+  bytes data = 3;  // JSON 序列化的返回数据
+  string error = 4;
+}
+
+// ============================================================
+// 连接管理消息
+// ============================================================
+
+// 连接请求
+message ConnectRequest {
+  string client_id = 1;
+  string client_version = 2;
+  map<string, string> capabilities = 3;
+}
+
+// 连接确认
+message ConnectAck {
+  string server_id = 1;
+  string session_id = 2;
+  int32 heartbeat_interval_ms = 3;
+}
+
+// 心跳
+message Heartbeat {
+  string client_id = 1;
+  int64 timestamp = 2;
+}
+
+// 心跳确认
+message HeartbeatAck {
+  string server_id = 1;
+  int64 timestamp = 2;
+}

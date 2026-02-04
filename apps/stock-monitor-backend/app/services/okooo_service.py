@@ -3,7 +3,7 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, update, delete
 from app.models.okooo_match import OkoooMatch
 from app.database import db_manager
 from app.services.redis_cache_service import RedisCacheService
@@ -28,13 +28,39 @@ class OkoooService:
             cls._instance.is_running = False
             cls._instance._crawl_task = None
             cls._instance.repair_tasks = []
+            cls._instance.redis_service = RedisCacheService()
         return cls._instance
 
     def __init__(self):
         # 已经在__new__中初始化，避免重复初始化
         pass
 
-    async def get_db_matches(self, date_str: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def get_crawl_entry_points(self) -> List[Dict[str, Any]]:
+        """
+        从数据库获取爬虫入口配置
+        select name, url, parent_id, is_active FROM test_pages WHERE parent_id is null and platform = 'okooo' and is_active = 1
+        """
+        try:
+            from sqlalchemy import text
+            async with db_manager.get_session() as session:
+                stmt = text("select name, url, parent_id, is_active FROM test_pages WHERE parent_id is null and platform = 'okooo' and is_active = 1")
+                result = await session.execute(stmt)
+                rows = result.fetchall()
+                
+                entry_points = []
+                for row in rows:
+                    entry_points.append({
+                        "name": row[0],
+                        "url": row[1],
+                        "parent_id": row[2],
+                        "is_active": row[3]
+                    })
+                return entry_points
+        except Exception as e:
+            logger.error(f"Error getting crawl entry points: {e}")
+            return []
+
+    async def get_db_matches(self, date_str: Optional[str] = None, match_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         从数据库获取比赛列表
         """
@@ -45,6 +71,9 @@ class OkoooService:
                 if date_str:
                     stmt = stmt.where(OkoooMatch.match_date == date_str)
                 
+                if match_type:
+                    stmt = stmt.where(OkoooMatch.match_type == match_type)
+                
                 # Order by match time or ID
                 stmt = stmt.order_by(desc(OkoooMatch.match_date), desc(OkoooMatch.id))
                 
@@ -54,16 +83,47 @@ class OkoooService:
                 return [{
                     "id": m.id,
                     "match_id": m.match_id,
+                    "match_type": m.match_type,
                     "league": m.league_name,
                     "home_team": m.home_team,
                     "away_team": m.away_team,
                     "match_time": m.match_time_text,
                     "match_date": m.match_date,
-                    "history_data": m.history_data
+                    "history_data": m.history_data,
+                    "is_caw": m.is_caw if hasattr(m, 'is_caw') else 1
                 } for m in matches]
         except Exception as e:
             logger.error(f"Error getting db matches: {e}")
             return []
+
+    async def update_match_caw_status(self, match_id: int, is_caw: int) -> bool:
+        """
+        更新比赛爬取状态
+        """
+        try:
+            async with db_manager.get_session() as session:
+                stmt = update(OkoooMatch).where(OkoooMatch.id == match_id).values(is_caw=is_caw)
+                await session.execute(stmt)
+                await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error updating match caw status: {e}")
+            return False
+
+    async def delete_match(self, match_id: int) -> bool:
+        """
+        删除比赛
+        """
+        try:
+            async with db_manager.get_session() as session:
+                stmt = delete(OkoooMatch).where(OkoooMatch.id == match_id)
+                await session.execute(stmt)
+                await session.commit()
+                return True
+        except Exception as e:
+            logger.error(f"Error deleting match: {e}")
+            return False
+
 
     async def get_matches_dates(self) -> List[str]:
         """
@@ -109,8 +169,14 @@ class OkoooService:
             "message": message,
             "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        await manager.broadcast(log_data)
-        await sse_service.broadcast("okooo_log", log_data)
+        try:
+            await manager.broadcast(log_data)
+        except Exception as e:
+            logger.debug(f"WebSocket broadcast failed: {e}")
+        try:
+            await sse_service.broadcast("okooo_log", log_data)
+        except Exception as e:
+            logger.debug(f"SSE broadcast failed: {e}")
 
     async def _on_progress(self, processed: int, total: int):
         """进度回调"""
@@ -120,8 +186,14 @@ class OkoooService:
             "total": total,
             "percentage": round(processed / total * 100, 2) if total > 0 else 0
         }
-        await manager.broadcast(progress_data)
-        await sse_service.broadcast("okooo_progress", progress_data)
+        try:
+            await manager.broadcast(progress_data)
+        except Exception as e:
+            logger.debug(f"WebSocket broadcast failed: {e}")
+        try:
+            await sse_service.broadcast("okooo_progress", progress_data)
+        except Exception as e:
+            logger.debug(f"SSE broadcast failed: {e}")
 
     async def _on_match_list(self, matches: list):
         """比赛列表回调"""
@@ -129,8 +201,31 @@ class OkoooService:
             "type": "okooo_matches",
             "matches": matches
         }
-        await manager.broadcast(data)
-        await sse_service.broadcast("okooo_matches", data)
+        try:
+            await manager.broadcast(data)
+        except Exception as e:
+            logger.debug(f"WebSocket broadcast failed: {e}")
+        try:
+            await sse_service.broadcast("okooo_matches", data)
+        except Exception as e:
+            logger.debug(f"SSE broadcast failed: {e}")
+
+    def _replace_match_id(self, template: str, match_id: str) -> str:
+        """替换 URL 模板中的 match_id"""
+        import re
+        # 优先处理占位符
+        if "{match_id}" in template or "{id}" in template:
+            return template.replace("{match_id}", str(match_id)).replace("{id}", str(match_id))
+        
+        # 其次处理已存在的 MatchID 参数
+        if "MatchID=" in template:
+            template = re.sub(r'MatchID=\d+', f'MatchID={match_id}', template)
+
+        # 处理 mid 参数 (用于 change.php 等)
+        if "mid=" in template:
+            template = re.sub(r'mid=\d+', f'mid={match_id}', template)
+            
+        return template
 
     async def repair_daily_data(self, date_str: str, dry_run: bool = False) -> Dict[str, Any]:
         """
@@ -154,12 +249,29 @@ class OkoooService:
         base_dir = os.path.join(os.getcwd(), "data", "okooo", "matches", date_str)
         ids_to_crawl = []
         repair_details = []
+        match_missing_types = {}  # 记录每个比赛缺失的文件类型 {match_id: [type_keys]}
         
-        # Expected file count is 8
+        # Expected file prefixes based on test_pages config
+        # Map key (display name) to list of possible prefixes or check function
+        expected_checks = {
+            "history": {"name": "澳客历史", "prefixes": ["history_"]},
+            "odds": {"name": "澳客欧赔", "prefixes": ["odds_"]},
+            "handicap": {"name": "澳客亚盘", "prefixes": ["handicap_"]},
+            "exchanges": {"name": "澳客盈亏", "prefixes": ["exchanges_"]},
+            "form": {"name": "澳客阵容", "prefixes": ["form_"]},
+            "game": {"name": "澳客积分", "prefixes": ["game_", "table_"]},  # 兼容 table_ 前缀
+            "macao_change": {"name": "澳客澳门亚盘变化", "prefixes": ["macao_change_", "odds_change_"]},  # 兼容旧文件名
+            "bifa_change": {"name": "澳客必发指数变化", "prefixes": ["bifa_change_", "odds_change_"]}
+        }
         
         for i, m in enumerate(matches):
             mid = m.get('match_id')
             if not mid: continue
+            
+            # Skip if crawling is disabled for this match
+            if m.get('is_caw') == 0:
+                await self._on_log("INFO", f"Match {mid}: Crawling disabled (is_caw=0), skipping")
+                continue
             
             if i % 10 == 0:
                  # Periodic progress log
@@ -170,68 +282,86 @@ class OkoooService:
             # If directory doesn't exist, definitely re-crawl
             if not os.path.exists(match_dir):
                 ids_to_crawl.append(mid)
-                repair_details.append({"id": mid, "reason": "目录缺失"})
+                match_missing_types[mid] = list(expected_checks.keys())  # 所有类型都缺失
+                repair_details.append({"id": mid, "reason": "目录缺失", "missing_files": [v["name"] for v in expected_checks.values()]})
                 await self._on_log("WARNING", f"Match {mid}: Directory missing")
                 continue
                 
-            # Check file count
+            # Get all HTML files
             files = os.listdir(match_dir)
             html_files = [f for f in files if f.endswith('.html')]
             
-            if len(html_files) < 8:
-                 ids_to_crawl.append(mid)
-                 repair_details.append({"id": mid, "reason": f"文件缺失 ({len(html_files)}/8)"})
-                 await self._on_log("WARNING", f"Match {mid}: Files missing ({len(html_files)}/8)")
-                 continue
-                 
-            # Check for invalid files (small size)
-            has_invalid = False
-            invalid_file = ""
-            for f in html_files:
-                fpath = os.path.join(match_dir, f)
-                # Check size < 2KB (empty or error page)
-                if os.path.getsize(fpath) < 2048: 
-                    has_invalid = True
-                    invalid_file = f
-                    break
+            # Check each expected file prefix exists and is valid
+            missing_names = []
+            missing_types = []  # 记录缺失的类型key
+            invalid_files = []
             
-            if has_invalid:
+            for key, check in expected_checks.items():
+                name = check["name"]
+                prefixes = check["prefixes"]
+                
+                # Find files matching any of the prefixes
+                matching_files = [f for f in html_files if any(f.startswith(p) for p in prefixes)]
+                
+                # Special handling to avoid overlap:
+                # 'handicap' category should NOT match 'handicap-change' files
+                if key == "handicap":
+                    matching_files = [f for f in matching_files if not f.startswith("handicap-change")]
+                
+                if not matching_files:
+                    missing_names.append(name)
+                    missing_types.append(key)  # 记录缺失的类型
+                else:
+                    # Check file size for all matching files
+                    for f in matching_files:
+                        fpath = os.path.join(match_dir, f)
+                        if os.path.getsize(fpath) < 2048:  # 2KB
+                            invalid_files.append(f"{name}({f})")
+                            if key not in missing_types:
+                                missing_types.append(key)  # 文件无效也需要重新爬取
+            
+            if missing_names or invalid_files:
                 ids_to_crawl.append(mid)
-                repair_details.append({"id": mid, "reason": f"无效文件: {invalid_file}"})
-                await self._on_log("WARNING", f"Match {mid}: Invalid file ({invalid_file})")
+                match_missing_types[mid] = missing_types  # 保存该比赛缺失的类型
+                reasons = []
+                if missing_names:
+                    reasons.append(f"缺失: {', '.join(missing_names)}")
+                if invalid_files:
+                    reasons.append(f"无效: {', '.join(invalid_files)}")
+                repair_details.append({
+                    "id": mid,
+                    "reason": "; ".join(reasons),
+                    "file_count": f"{len(html_files)}/{len(expected_checks)}"
+                })
+                await self._on_log("WARNING", f"Match {mid}: {'; '.join(reasons)}")
+                # 发送SSE日志到浏览器插件
+                await sse_service.broadcast("okooo_log", {
+                    "level": "WARNING",
+                    "message": f"⚠️ Match {mid}: {'; '.join(reasons)}",
+                    "match_id": mid,
+                    "timestamp": datetime.now().isoformat()
+                })
                 continue
 
         # 3. Start crawling if needed and not dry_run
         if ids_to_crawl and not dry_run:
-            # 获取爬虫配置
-            scheduler = await self.get_scheduler()
-            configs = await scheduler.get_db_crawl_configs()
-            
-            # 生成任务队列
+            # 生成任务队列 - 根据每个比赛缺失的具体文件类型生成任务
             tasks = []
             for match_id in ids_to_crawl:
-                # 如果没有配置，使用默认配置
-                if not configs:
-                    # 默认只爬取历史页面
-                    url = f"http://m.okooo.com/match/{match_id}/history/"
-                    tasks.append({
-                        'match_id': match_id,
-                        'url': url,
-                        'page_type': 'history',
-                        'filename_prefix': 'history'
-                    })
-                else:
-                    for config in configs:
-                        url = self._replace_match_id(config['url_template'], match_id)
-                        tasks.append({
-                            'match_id': match_id,
-                            'url': url,
-                            'page_type': config['page_type'],
-                            'filename_prefix': config['filename_prefix']
-                        })
+                missing_types = match_missing_types.get(match_id, [])
+                
+                for type_key in missing_types:
+                    task = self._generate_repair_task(match_id, type_key)
+                    if task:
+                        tasks.append(task)
             
             # 保存任务队列
             self.repair_tasks = tasks
+            self._save_repair_tasks_to_redis(tasks)
+            
+            # 保存任务队列
+            self.repair_tasks = tasks
+            self._save_repair_tasks_to_redis(tasks)
             
             await self._on_log("INFO", f"Generated {len(tasks)} repair tasks for {len(ids_to_crawl)} matches.")
             
@@ -252,6 +382,156 @@ class OkoooService:
             "repair_details": repair_details,
             "message": f"Found {len(ids_to_crawl)} matches to repair out of {len(matches)}"
         }
+
+    def _generate_repair_task(self, match_id: str, type_key: str) -> Optional[Dict[str, Any]]:
+        """
+        根据文件类型生成修复任务
+        
+        Args:
+            match_id: 比赛ID
+            type_key: 文件类型key (history, odds, handicap, exchanges, form, game, macao_change, bifa_change)
+            
+        Returns:
+            任务字典或None
+        """
+        # URL模板映射
+        url_templates = {
+            "history": f"https://m.okooo.com/match/history.php?MatchID={match_id}",
+            "odds": f"https://m.okooo.com/match/odds.php?MatchID={match_id}&from=",
+            "handicap": f"https://m.okooo.com/match/handicap.php?MatchID={match_id}&from=",
+            "exchanges": f"https://m.okooo.com/match/exchanges.php?MatchID={match_id}",
+            "form": f"https://m.okooo.com/match/form.php?MatchID={match_id}",
+            "game": f"https://m.okooo.com/match/game.php?MatchID={match_id}",
+            # 澳门亚盘变化 - 使用mid参数，PID=84, Type=handicap
+            "macao_change": f"https://m.okooo.com/match/change.php?mid={match_id}&PID=84&Type=handicap",
+            # 必发指数变化 - 使用mid参数，PID=0, Type=odds
+            "bifa_change": f"https://m.okooo.com/match/change.php?mid={match_id}&PID=0&Type=odds"
+        }
+        
+        # page_type映射
+        page_type_map = {
+            "history": "mobile_history",
+            "odds": "mobile_odds",
+            "handicap": "mobile_handicap",
+            "exchanges": "mobile_exchanges",
+            "form": "mobile_form",
+            "game": "mobile_game",
+            "macao_change": "mobile_change",
+            "bifa_change": "mobile_change"
+        }
+        
+        # filename_prefix映射
+        prefix_map = {
+            "history": "history",
+            "odds": "odds",
+            "handicap": "handicap",
+            "exchanges": "exchanges",
+            "form": "form",
+            "game": "game",
+            "macao_change": "macao_change",
+            "bifa_change": "bifa_change"
+        }
+        
+        if type_key not in url_templates:
+            logger.warning(f"Unknown repair type: {type_key} for match {match_id}")
+            return None
+            
+        return {
+            'match_id': match_id,
+            'url': url_templates[type_key],
+            'page_type': page_type_map.get(type_key, 'unknown'),
+            'filename_prefix': prefix_map.get(type_key, 'unknown')
+        }
+
+    def _save_repair_tasks_to_redis(self, tasks: List[Dict[str, Any]]):
+        """保存修复任务到Redis"""
+        import json
+        try:
+            # key: okooo:repair_tasks
+            # expire: 24h
+            self.redis_service.client.set("okooo:repair_tasks", json.dumps(tasks), ex=86400)
+        except Exception as e:
+            logger.error(f"Error saving repair tasks to redis: {e}")
+
+    async def get_repair_tasks(self) -> List[Dict[str, Any]]:
+        """
+        获取当前的修复任务列表
+        优先从内存获取，如果没有则从Redis获取
+        """
+        # 1. 先从内存获取
+        if hasattr(self, 'repair_tasks') and self.repair_tasks:
+            return self.repair_tasks
+        
+        # 2. 从Redis获取
+        try:
+            import json
+            tasks_json = self.redis_service.client.get("okooo:repair_tasks")
+            if tasks_json:
+                return json.loads(tasks_json)
+        except Exception as e:
+            logger.error(f"Error getting repair tasks from redis: {e}")
+        
+        # 3. 返回空列表
+        return []
+
+    async def check_files_exist(self, tasks: List[Dict[str, Any]], date_str: str) -> List[Dict[str, Any]]:
+        """
+        批量检查文件是否存在且有效
+        """
+        import os
+        
+        results = []
+        base_dir = os.path.join(os.getcwd(), "data", "okooo", "matches", date_str)
+        
+        for task in tasks:
+            match_id = task.get('match_id')
+            page_type = task.get('page_type')
+            filename_prefix = task.get('filename_prefix')
+            
+            if not match_id:
+                continue
+            
+            # 生成文件名 - 优先使用 filename_prefix
+            if filename_prefix:
+                filename = f"{filename_prefix}_{match_id}.html"
+            else:
+                filename = self._get_filename_by_type(page_type, match_id)
+            
+            # 检查文件是否存在
+            match_dir = os.path.join(base_dir, match_id)
+            save_path = os.path.join(match_dir, filename)
+            
+            if os.path.exists(save_path):
+                file_size = os.path.getsize(save_path)
+                if file_size >= 2048:
+                    results.append({
+                        "match_id": match_id,
+                        "page_type": page_type,
+                        "filename": filename,
+                        "exists": True,
+                        "size": file_size,
+                        "skip": True
+                    })
+                else:
+                    results.append({
+                        "match_id": match_id,
+                        "page_type": page_type,
+                        "filename": filename,
+                        "exists": True,
+                        "size": file_size,
+                        "skip": False,
+                        "reason": "文件太小"
+                    })
+            else:
+                results.append({
+                    "match_id": match_id,
+                    "page_type": page_type,
+                    "filename": filename,
+                    "exists": False,
+                    "skip": False
+                })
+        
+        return results
 
     async def start_crawl(self, start_id: int, end_id: int) -> bool:
         """启动爬虫任务"""
@@ -301,6 +581,36 @@ class OkoooService:
         if self.is_running:
             logger.warning("Okooo crawler is already running")
             return False
+
+        # Filter out disabled matches
+        try:
+            async with db_manager.get_session() as session:
+                # Ensure match_ids are integers for DB query
+                valid_int_ids = []
+                for mid in match_ids:
+                    try:
+                        valid_int_ids.append(int(mid))
+                    except (ValueError, TypeError):
+                        pass
+                
+                if valid_int_ids:
+                    stmt = select(OkoooMatch.match_id).where(OkoooMatch.match_id.in_(valid_int_ids)).where(OkoooMatch.is_caw == 0)
+                    result = await session.execute(stmt)
+                    disabled_ids = result.scalars().all()
+                    
+                    if disabled_ids:
+                        disabled_set = set(str(id) for id in disabled_ids)
+                        original_count = len(match_ids)
+                        match_ids = [mid for mid in match_ids if str(mid) not in disabled_set]
+                        logger.info(f"Filtered out {original_count - len(match_ids)} disabled matches: {disabled_set}")
+                        
+                        if not match_ids:
+                            logger.warning("No valid matches to crawl after filtering disabled ones")
+                            return False
+        except Exception as e:
+            logger.error(f"Error filtering disabled matches: {e}")
+            # Continue with original list if check fails, or return False? 
+            # Safer to continue or fail? Let's log and continue to avoid blocking due to DB error.
 
         scheduler = await self.get_scheduler()
         
@@ -553,18 +863,30 @@ class OkoooService:
         if "页面找不到了" in html or "404/search_children.js" in html:
             raise ValueError("页面为404错误页")
 
-    def _get_filename_by_type(self, page_type: Optional[str], match_id: str) -> str:
+    def _get_filename_by_type(self, page_type: Optional[str], match_id: str, pid: Optional[str] = None) -> str:
         """根据页面类型生成文件名"""
         filename_map = {
+            # 中文类型（前端传入）
             "澳客欧赔": "odds",
             "澳客亚盘": "handicap",
             "澳客历史": "history",
             "澳客阵容": "form",
             "澳客盈亏": "exchanges",
-            "澳客积分": "table",
-            "澳客澳门亚盘变化": "odds_change"
+            "澳客积分": "game",  # 使用 game 而不是 table
+            "澳客澳门亚盘变化": "macao_change",  # 亚盘变化
+            "澳客必发指数变化": "bifa_change",   # 必发变化
+            # 英文类型（数据库/Redis存储）
+            "mobile_odds": "odds",
+            "mobile_handicap": "handicap",
+            "mobile_history": "history",
+            "mobile_form": "form",
+            "mobile_exchanges": "exchanges",
+            "mobile_game": "game",
+            "mobile_macao_change": "macao_change",
+            "mobile_bifa_change": "bifa_change"
         }
         prefix = filename_map.get(page_type, "index") if page_type else "index"
+        
         return f"{prefix}_{match_id}.html"
 
     async def save_match_html(
@@ -574,11 +896,14 @@ class OkoooService:
         match_id: str,
         captured_at: str,
         date: str,
-        page_type: Optional[str] = None
+        page_type: Optional[str] = None,
+        pid: Optional[str] = None,
+        force: bool = False
     ) -> Dict[str, Any]:
         """
         保存比赛详情页面 HTML
         保存到 data/okooo/matches/[date]/[match_id]/
+        如果文件已存在且有效，则跳过（除非force=True）
         """
         import os
         import aiofiles
@@ -594,22 +919,67 @@ class OkoooService:
             os.makedirs(save_dir, exist_ok=True)
 
             # 生成文件名
-            filename = self._get_filename_by_type(page_type, match_id)
+            filename = self._get_filename_by_type(page_type, match_id, pid)
             save_path = os.path.join(save_dir, filename)
+
+            # 检查文件是否已存在且有效（大小>=2KB）
+            if not force and os.path.exists(save_path):
+                file_size = os.path.getsize(save_path)
+                if file_size >= 2048:  # 2KB
+                    logger.info(f"[OkoooMatch] 文件已存在且有效，跳过: {save_path} ({file_size} bytes)")
+                    await self._on_log("INFO", f"Skipping existing file: {filename} ({file_size} bytes)")
+                    # 发送SSE日志到浏览器插件
+                    await sse_service.broadcast("okooo_log", {
+                        "level": "INFO",
+                        "message": f"⏭️ 跳过已存在: {filename} ({file_size} bytes)",
+                        "match_id": match_id,
+                        "page_type": page_type,
+                        "timestamp": captured_at
+                    })
+                    return {
+                        "success": True,
+                        "match_id": match_id,
+                        "url": url,
+                        "filename": filename,
+                        "save_path": save_path,
+                        "skipped": True,
+                        "reason": "File already exists and is valid"
+                    }
+                else:
+                    logger.warning(f"[OkoooMatch] 文件存在但无效（太小），重新下载: {save_path} ({file_size} bytes)")
+                    # 发送SSE日志到浏览器插件
+                    await sse_service.broadcast("okooo_log", {
+                        "level": "WARNING",
+                        "message": f"🔄 重新下载(文件太小): {filename} ({file_size} bytes)",
+                        "match_id": match_id,
+                        "page_type": page_type,
+                        "timestamp": captured_at
+                    })
 
             # 保存 HTML 文件
             async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
                 await f.write(html)
 
-            logger.info(f"[OkoooMatch] 保存成功: {save_path}")
-            await self._on_log("INFO", f"Saved match file: {filename}")
+            file_size = len(html)
+            logger.info(f"[OkoooMatch] 保存成功: {save_path} ({file_size} bytes)")
+            await self._on_log("INFO", f"Saved match file: {filename} ({file_size} bytes)")
+
+            # 发送SSE日志到浏览器插件
+            await sse_service.broadcast("okooo_log", {
+                "level": "SUCCESS",
+                "message": f"✅ 保存成功: {filename} ({file_size} bytes)",
+                "match_id": match_id,
+                "page_type": page_type,
+                "timestamp": captured_at
+            })
 
             # 发送 SSE 通知
             await sse_service.broadcast("okooo_file_saved", {
                 "match_id": match_id,
                 "page_type": page_type or "index",
                 "filename": filename,
-                "path": save_path
+                "path": save_path,
+                "size": file_size
             })
 
             return {
@@ -620,7 +990,8 @@ class OkoooService:
                 "html_size": len(html),
                 "captured_at": captured_at,
                 "date": date,
-                "page_type": page_type
+                "page_type": page_type,
+                "skipped": False
             }
 
         except Exception as e:
@@ -795,52 +1166,24 @@ class OkoooService:
         url: str,
         match_id: str,
         captured_at: str,
-        date: str
+        date: str,
+        force: bool = False
     ) -> Dict[str, Any]:
         """
-        保存让球盘页面 HTML（由浏览器扩展直接获取 HTML）
-        保存到 data/okooo/matches/[date]/[match_id]/handicap.html
+        保存让球盘页面 HTML
+        统一到 save_match_html 方法，确保文件名格式一致
         """
-        import os
-        import re
-        import aiofiles
-
         try:
-            # 验证内容
-            self._validate_html_content(html)
-
-            # 构建保存路径 (统一到 matches 目录)
-            save_dir = os.path.abspath(os.path.join(
-                os.getcwd(), "data", "okooo", "matches", date, match_id
-            ))
-            os.makedirs(save_dir, exist_ok=True)
-
-            # 保存 HTML 文件
-            save_path = os.path.join(save_dir, "handicap.html")
-            async with aiofiles.open(save_path, 'w', encoding='utf-8') as f:
-                await f.write(html)
-
-            logger.info(f"[OkoooHandicap] 保存成功: {save_path}")
-            await self._on_log("INFO", f"Saved handicap file: handicap.html")
-
-            # 发送 SSE 通知
-            await sse_service.broadcast("okooo_file_saved", {
-                "match_id": match_id,
-                "page_type": "handicap",
-                "filename": "handicap.html",
-                "path": save_path
-            })
-
-            return {
-                "success": True,
-                "match_id": match_id,
-                "url": url,
-                "save_path": save_path,
-                "html_size": len(html),
-                "captured_at": captured_at,
-                "date": date
-            }
-
+            # 调用统一的保存方法
+            return await self.save_match_html(
+                html=html,
+                url=url,
+                match_id=match_id,
+                captured_at=captured_at,
+                date=date,
+                page_type="澳客亚盘",
+                force=force
+            )
         except Exception as e:
             logger.error(f"[OkoooHandicap] 保存失败 {match_id}: {e}")
             raise

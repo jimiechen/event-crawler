@@ -35,17 +35,19 @@ class SSEService:
         """
         Broadcast message to all connected clients
         """
+        # sse_starlette expects the data to be a dict with 'event' and 'data' keys
+        # where 'data' is the actual payload (will be JSON serialized automatically)
         message = {
             "event": event_type,
-            "data": json.dumps(data)
+            "data": json.dumps(data)  # Serialize data to JSON string
         }
-        
+
         # Remove dead clients (optional, handled in generator usually)
         # But here we just put to queue
         for queue in self.clients:
             await queue.put(message)
-            
-        logger.debug(f"Broadcasted event {event_type} to {len(self.clients)} clients")
+
+        logger.info(f"📡 Broadcasted event '{event_type}' to {len(self.clients)} clients")
 
 # Global instance
 sse_service = SSEService()
