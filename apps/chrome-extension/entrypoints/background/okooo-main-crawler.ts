@@ -272,9 +272,22 @@ export class OkoooMainCrawler {
     this.addLog('正在检查文件是否存在...');
     const checkResult = await this.checkFilesExist(tasks);
 
-    // 过滤出需要爬取的任务
-    const tasksToCrawl = checkResult.filter((r: any) => !r.skip);
-    const skippedTasks = checkResult.filter((r: any) => r.skip);
+    // 过滤出需要爬取的任务，并保留原始任务的URL
+    const tasksToCrawl: any[] = [];
+    const skippedTasks: any[] = [];
+    
+    checkResult.forEach((result: any, index: number) => {
+      const originalTask = tasks[index];
+      if (result.skip) {
+        skippedTasks.push(result);
+      } else {
+        // 合并检查结果和原始任务，保留URL
+        tasksToCrawl.push({
+          ...result,
+          url: originalTask.url  // 保留原始URL
+        });
+      }
+    });
 
     this.addLog(`预检查完成: ${skippedTasks.length} 个文件已存在，${tasksToCrawl.length} 个需要爬取`);
 
@@ -310,7 +323,7 @@ export class OkoooMainCrawler {
           homeTeam: '未知主队',
           awayTeam: '未知客队',
           pageType: t.page_type,
-          url: t.url,
+          url: t.url,  // 现在URL已正确保留
           filenamePrefix: t.filename_prefix,
           status: 'pending'
       }));
