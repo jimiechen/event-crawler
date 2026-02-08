@@ -23,10 +23,11 @@ from .task_execution_detail import TaskExecutionDetail
 from .ai_decision import AIDecisionResult
 from .arena_models import PromptTemplate, SignalDefinition, SignalPool
 from .okooo_match import OkoooMatch
+from .screenshot_analysis import ScreenshotAnalysis
 
 __all__ = [
     "Base",
-    "StockInfo", 
+    "StockInfo",
     "StockData",
     "MonitorList",
     "DataDedupLog",
@@ -62,5 +63,6 @@ __all__ = [
     "PromptTemplate",
     "SignalDefinition",
     "SignalPool",
-    "OkoooMatch"
+    "OkoooMatch",
+    "ScreenshotAnalysis"
 ]

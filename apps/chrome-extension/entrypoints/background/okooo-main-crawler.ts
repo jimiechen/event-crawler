@@ -8,9 +8,11 @@ interface CrawlerTask {
   awayTeam?: string;
   pageType: string;
   url: string;
-  status: 'pending' | 'success' | 'error';
+  status: 'pending' | 'success' | 'error' | 'skipped';
   error?: string;
   filenamePrefix?: string;
+  skipped?: boolean;
+  skipReason?: string;
 }
 
 interface CrawlerStats {
@@ -20,12 +22,13 @@ interface CrawlerStats {
   currentTaskIndex: number;
   successCount: number;
   errorCount: number;
+  skippedCount: number;
   currentTask?: CrawlerTask;
   logs: string[];
   results?: Array<{
     matchId: string;
     url: string;
-    status: 'pending' | 'success' | 'error';
+    status: 'pending' | 'success' | 'error' | 'skipped';
   }>;
 }
 
@@ -47,6 +50,7 @@ export class OkoooMainCrawler {
       currentTaskIndex: 0,
       successCount: 0,
       errorCount: 0,
+      skippedCount: 0,
       logs: [],
       results: []
     };
@@ -514,11 +518,14 @@ export class OkoooMainCrawler {
   private async processTaskQueue() {
     if (!this.isRunning) return;
 
+    // 任务完成检查
     if (this.currentTaskIndex >= this.taskQueue.length) {
       this.stats.phase = 'completed';
       this.isRunning = false;
       this.stats.isRunning = false;
       this.addLog('🏁 所有任务完成');
+      // 广播完成状态
+      this.broadcastStatus();
       return;
     }
 
@@ -526,10 +533,31 @@ export class OkoooMainCrawler {
     this.stats.currentTask = task;
     this.stats.currentTaskIndex = this.currentTaskIndex;
     
+    // 广播状态更新
+    this.broadcastStatus();
+    
     const teamInfo = task.homeTeam && task.awayTeam ? `(${task.homeTeam} VS ${task.awayTeam})` : '';
     this.addLog(`▶️ [${this.currentTaskIndex + 1}/${this.stats.totalTasks}] ID:${task.matchId} ${teamInfo} - 爬取 [${task.pageType}]`);
 
     try {
+      // 0. 检查文件是否已存在（防重复）
+      const exists = await this.checkFileExists(task.matchId, task.pageType);
+      if (exists) {
+        this.addLog(`⏭️ 跳过已存在: ${task.matchId} [${task.pageType}]`);
+        task.status = 'skipped';
+        task.skipped = true;
+        task.skipReason = '文件已存在';
+        this.stats.skippedCount++;
+        
+        // 继续下一个任务
+        this.currentTaskIndex++;
+        this.broadcastStatus();
+        if (this.isRunning) {
+          setTimeout(() => this.processTaskQueue(), 100);
+        }
+        return;
+      }
+
       // 1. 打开 URL
       await chrome.tabs.update(this.tabId!, { url: task.url });
       
@@ -573,11 +601,51 @@ export class OkoooMainCrawler {
       this.addLog(`❌ 任务失败: ${error}`, 'error');
     }
 
+    // 广播状态更新
+    this.broadcastStatus();
+
     // 继续下一个
     this.currentTaskIndex++;
     if (this.isRunning) {
       setTimeout(() => this.processTaskQueue(), 1500); // 间隔1.5秒
     }
+  }
+
+  /**
+   * 检查文件是否已存在
+   */
+  private async checkFileExists(matchId: string, pageType: string): Promise<boolean> {
+    try {
+      const response = await fetch(
+        `${BACKEND_CONFIG.baseUrl}/api/v1/okooo/check-file?match_id=${matchId}&page_type=${encodeURIComponent(pageType)}`
+      );
+      if (response.ok) {
+        const data = await response.json();
+        return data.exists === true;
+      }
+    } catch (e) {
+      console.error('检查文件存在性失败:', e);
+    }
+    return false;
+  }
+
+  /**
+   * 广播状态更新到所有监听者
+   */
+  private broadcastStatus(): void {
+    const status = this.getStatus();
+    
+    // 1. 发送给 Sidepanel
+    chrome.runtime.sendMessage({
+      type: 'OKOOO_STATUS_UPDATE',
+      data: status
+    }).catch(() => {});
+
+    // 2. 发送给 Popup
+    chrome.runtime.sendMessage({
+      type: 'OKOOO_CRAWLER_STATUS',
+      data: status
+    }).catch(() => {});
   }
 
   private async checkCaptchaAndPause() {

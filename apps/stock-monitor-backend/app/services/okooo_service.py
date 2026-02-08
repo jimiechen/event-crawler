@@ -251,17 +251,17 @@ class OkoooService:
         repair_details = []
         match_missing_types = {}  # 记录每个比赛缺失的文件类型 {match_id: [type_keys]}
         
-        # Expected file prefixes based on test_pages config
-        # Map key (display name) to list of possible prefixes or check function
+        # Expected file prefixes based on test_pages table configuration
+        # 根据test_pages表配置定义检查规则（8个类型）
         expected_checks = {
-            "history": {"name": "澳客历史", "prefixes": ["history_"]},
-            "odds": {"name": "澳客欧赔", "prefixes": ["odds_"]},
-            "handicap": {"name": "澳客亚盘", "prefixes": ["handicap_"]},
-            "exchanges": {"name": "澳客盈亏", "prefixes": ["exchanges_"]},
-            "form": {"name": "澳客阵容", "prefixes": ["form_"]},
-            "game": {"name": "澳客积分", "prefixes": ["game_", "table_"]},  # 兼容 table_ 前缀
-            "macao_change": {"name": "澳客澳门亚盘变化", "prefixes": ["macao_change_", "odds_change_"]},  # 兼容旧文件名
-            "bifa_change": {"name": "澳客必发指数变化", "prefixes": ["bifa_change_", "odds_change_"]}
+            "history": {"name": "澳客历史", "prefixes": ["history_"], "required": True},
+            "exchanges": {"name": "澳客盈亏", "prefixes": ["exchanges_"], "required": True},
+            "form": {"name": "澳客阵容", "prefixes": ["form_"], "required": True},
+            "handicap": {"name": "澳客亚盘", "prefixes": ["handicap_"], "required": True},
+            "odds": {"name": "澳客欧赔", "prefixes": ["odds_"], "required": True},
+            "game": {"name": "澳客积分", "prefixes": ["game_"], "required": True},
+            "macao_change": {"name": "澳客澳门亚盘变化", "prefixes": ["macao_change_"], "required": True},
+            "bifa_change": {"name": "澳客必发指数变化", "prefixes": ["bifa_change_"], "required": True},
         }
         
         for i, m in enumerate(matches):
@@ -389,47 +389,45 @@ class OkoooService:
         
         Args:
             match_id: 比赛ID
-            type_key: 文件类型key (history, odds, handicap, exchanges, form, game, macao_change, bifa_change)
+            type_key: 文件类型key (history, exchanges, form, handicap, odds, game, macao_change, bifa_change)
             
         Returns:
             任务字典或None
         """
-        # URL模板映射
+        # URL模板映射 - 根据test_pages表配置（8个类型）
         url_templates = {
-            "history": f"https://m.okooo.com/match/history.php?MatchID={match_id}",
-            "odds": f"https://m.okooo.com/match/odds.php?MatchID={match_id}&from=",
-            "handicap": f"https://m.okooo.com/match/handicap.php?MatchID={match_id}&from=",
-            "exchanges": f"https://m.okooo.com/match/exchanges.php?MatchID={match_id}",
-            "form": f"https://m.okooo.com/match/form.php?MatchID={match_id}",
-            "game": f"https://m.okooo.com/match/game.php?MatchID={match_id}",
-            # 澳门亚盘变化 - 使用mid参数，PID=84, Type=handicap
-            "macao_change": f"https://m.okooo.com/match/change.php?mid={match_id}&PID=84&Type=handicap",
-            # 必发指数变化 - 使用mid参数，PID=0, Type=odds
-            "bifa_change": f"https://m.okooo.com/match/change.php?mid={match_id}&PID=0&Type=odds"
+            "history": f"https://m.okooo.com/match/history.php?MatchID={match_id}&from=%2Fjczq%2F",
+            "exchanges": f"https://m.okooo.com/match/exchanges.php?MatchID={match_id}&from=%2Fjczq%2F",
+            "form": f"https://m.okooo.com/match/form.php?MatchID={match_id}&from=%2Fjczq%2F",
+            "handicap": f"https://m.okooo.com/match/handicap.php?MatchID={match_id}&from=%2Fjczq%2F",
+            "odds": f"https://m.okooo.com/match/odds.php?MatchID={match_id}&from=%2Fjczq%2F",
+            "game": f"https://m.okooo.com/match/game.php?MatchID={match_id}&from=%2Fjczq%2F",
+            "macao_change": f"https://m.okooo.com/match/change.php?mid={match_id}&pid=84&Type=Handicap",
+            "bifa_change": f"https://m.okooo.com/match/change.php?mid={match_id}&pid=19&Type=odds",
         }
         
         # page_type映射
         page_type_map = {
             "history": "mobile_history",
-            "odds": "mobile_odds",
-            "handicap": "mobile_handicap",
             "exchanges": "mobile_exchanges",
             "form": "mobile_form",
+            "handicap": "mobile_handicap",
+            "odds": "mobile_odds",
             "game": "mobile_game",
-            "macao_change": "mobile_change",
-            "bifa_change": "mobile_change"
+            "macao_change": "mobile_macao_change",
+            "bifa_change": "mobile_bifa_change",
         }
         
         # filename_prefix映射
         prefix_map = {
             "history": "history",
-            "odds": "odds",
-            "handicap": "handicap",
             "exchanges": "exchanges",
             "form": "form",
+            "handicap": "handicap",
+            "odds": "odds",
             "game": "game",
             "macao_change": "macao_change",
-            "bifa_change": "bifa_change"
+            "bifa_change": "bifa_change",
         }
         
         if type_key not in url_templates:
@@ -532,6 +530,52 @@ class OkoooService:
                 })
         
         return results
+
+    async def check_single_file_exists(self, match_id: str, page_type: str) -> bool:
+        """
+        检查单个文件是否已存在且有效
+        用于爬虫防重复机制
+        """
+        import os
+        
+        try:
+            # 获取今天的日期
+            from datetime import datetime
+            date_str = datetime.now().strftime("%Y-%m-%d")
+            
+            # 生成文件名
+            filename = self._get_filename_by_type(page_type, match_id)
+            
+            # 构建文件路径
+            base_dir = os.path.join(os.getcwd(), "data", "okooo", "matches", date_str)
+            match_dir = os.path.join(base_dir, match_id)
+            save_path = os.path.join(match_dir, filename)
+            
+            # 检查文件是否存在且大小 >= 2KB
+            if os.path.exists(save_path):
+                file_size = os.path.getsize(save_path)
+                if file_size >= 2048:
+                    logger.info(f"[OkoooCheck] 文件已存在: {save_path} ({file_size} bytes)")
+                    return True
+                else:
+                    logger.warning(f"[OkoooCheck] 文件存在但太小: {save_path} ({file_size} bytes)")
+                    return False
+            
+            # 也检查 processed 目录
+            processed_dir = os.path.join(os.getcwd(), "data", "okooo", "processed", date_str)
+            processed_path = os.path.join(processed_dir, f"{match_id}.json")
+            
+            if os.path.exists(processed_path):
+                file_size = os.path.getsize(processed_path)
+                if file_size >= 1024:  # processed 文件可以小一些
+                    logger.info(f"[OkoooCheck] processed文件已存在: {processed_path}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"[OkoooCheck] 检查文件存在性失败: {e}")
+            return False
 
     async def start_crawl(self, start_id: int, end_id: int) -> bool:
         """启动爬虫任务"""
@@ -866,27 +910,27 @@ class OkoooService:
     def _get_filename_by_type(self, page_type: Optional[str], match_id: str, pid: Optional[str] = None) -> str:
         """根据页面类型生成文件名"""
         filename_map = {
-            # 中文类型（前端传入）
-            "澳客欧赔": "odds",
-            "澳客亚盘": "handicap",
+            # 中文类型（前端传入）- 根据test_pages表配置（8个类型）
             "澳客历史": "history",
-            "澳客阵容": "form",
             "澳客盈亏": "exchanges",
-            "澳客积分": "game",  # 使用 game 而不是 table
-            "澳客澳门亚盘变化": "macao_change",  # 亚盘变化
-            "澳客必发指数变化": "bifa_change",   # 必发变化
+            "澳客阵容": "form",
+            "澳客亚盘": "handicap",
+            "澳客欧赔": "odds",
+            "澳客积分": "game",
+            "澳客澳门亚盘变化": "macao_change",
+            "澳客必发指数变化": "bifa_change",
             # 英文类型（数据库/Redis存储）
-            "mobile_odds": "odds",
-            "mobile_handicap": "handicap",
             "mobile_history": "history",
-            "mobile_form": "form",
             "mobile_exchanges": "exchanges",
+            "mobile_form": "form",
+            "mobile_handicap": "handicap",
+            "mobile_odds": "odds",
             "mobile_game": "game",
             "mobile_macao_change": "macao_change",
-            "mobile_bifa_change": "bifa_change"
+            "mobile_bifa_change": "bifa_change",
         }
         prefix = filename_map.get(page_type, "index") if page_type else "index"
-        
+
         return f"{prefix}_{match_id}.html"
 
     async def save_match_html(

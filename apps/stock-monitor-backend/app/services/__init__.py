@@ -14,10 +14,11 @@ from .task_execution_detail_service import TaskExecutionDetailService
 from .scheduler_service import SchedulerService, scheduler_service
 from .task_executor import TaskExecutor, task_executor
 from .notification_service import NotificationService
+from .screenshot_analysis_service import ScreenshotAnalysisService
 
 __all__ = [
     'StockService',
-    'MonitorService', 
+    'MonitorService',
     'DataDedupService',
     'GenericTaskService',
     'TaskExecutionDetailService',
@@ -25,5 +26,6 @@ __all__ = [
     'scheduler_service',
     'TaskExecutor',
     'task_executor',
-    'NotificationService'
+    'NotificationService',
+    'ScreenshotAnalysisService'
 ]

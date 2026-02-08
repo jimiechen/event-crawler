@@ -272,6 +272,23 @@ async def check_files_exist(request: CheckFilesExistRequest):
         return BaseResponse(success=False, message=str(e))
 
 
+@router.get("/check-file", summary="检查单个文件是否存在")
+async def check_file(
+    match_id: str = Query(..., description="比赛ID"),
+    page_type: str = Query(..., description="页面类型")
+):
+    """
+    检查单个文件是否已存在
+    用于爬虫防重复机制
+    """
+    try:
+        exists = await okooo_service.check_single_file_exists(match_id, page_type)
+        return BaseResponse(success=True, data={"exists": exists, "match_id": match_id, "page_type": page_type})
+    except Exception as e:
+        logger.error(f"❌ check_file error: {e}")
+        return BaseResponse(success=False, message=str(e))
+
+
 class OkoooListHtmlRequest(BaseModel):
     html: str = Field(..., description="比赛列表页面 HTML")
     url: str = Field(..., description="页面 URL")

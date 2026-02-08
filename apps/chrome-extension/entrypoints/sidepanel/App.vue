@@ -1005,7 +1005,14 @@ const startRepair = async (isDryRun: boolean = false) => {
       okoooState.value.repair.ids = data.data.ids;
       okoooState.value.repair.repairDetails = data.data.repair_details || [];
       okoooState.value.repair.message = data.data.message;
-      
+
+      // 如果没有需要修复的，清空之前的待修复列表
+      if (data.data.repairing_count === 0) {
+        okoooState.value.repair.repairDetails = [];
+        okoooState.value.repair.isRunning = false;
+        return;
+      }
+
       if (data.data.repairing_count > 0 && !isDryRun) {
         okoooState.value.crawler.isRunning = true;
         
@@ -1099,6 +1106,46 @@ let eventSource: EventSource | null = null;
 
 const clearOkoooLogs = () => {
   okoooLogs.value = [];
+};
+
+// 刷新爬虫状态
+const refreshOkoooStatus = async () => {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_GET_STATUS'
+    });
+
+    if (response.success) {
+      const data = response.data;
+      okoooState.value.crawler.isRunning = data.isRunning;
+      okoooState.value.crawler.phase = data.phase;
+      okoooState.value.crawler.totalMatches = data.totalTasks || data.totalMatches || 0;
+      okoooState.value.crawler.currentMatchIndex = data.currentTaskIndex || data.currentMatchIndex || 0;
+      okoooState.value.crawler.successCount = data.successCount || 0;
+      okoooState.value.crawler.errorCount = data.errorCount || 0;
+      okoooState.value.crawler.results = data.results || [];
+      
+      // 更新日志
+      if (data.logs && data.logs.length > 0) {
+        data.logs.forEach((log: string) => {
+          const exists = okoooLogs.value.some(l => l.message === log);
+          if (!exists) {
+            okoooLogs.value.unshift({
+              message: log,
+              level: 'info',
+              timestamp: new Date().toLocaleTimeString()
+            });
+          }
+        });
+        // 保持日志数量在合理范围
+        if (okoooLogs.value.length > 200) {
+          okoooLogs.value = okoooLogs.value.slice(0, 200);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('刷新爬虫状态失败:', error);
+  }
 };
 
 const setupSSE = () => {
@@ -1204,6 +1251,48 @@ const setupSSE = () => {
 
       } catch (e) {
         console.error('解析文件保存通知失败:', e);
+      }
+    });
+
+    // 监听爬虫状态更新
+    eventSource.addEventListener('okooo_status', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到爬虫状态更新:', data);
+        
+        // 更新爬虫状态
+        if (data.is_running !== undefined) {
+          okoooState.value.crawler.isRunning = data.is_running;
+        }
+        if (data.phase) {
+          okoooState.value.crawler.phase = data.phase;
+          
+          // 如果任务完成，清空待修复列表
+          if (data.phase === 'completed') {
+            okoooState.value.repair.repairDetails = [];
+            okoooState.value.repair.repairingCount = 0;
+          }
+        }
+        
+        // 刷新完整状态
+        refreshOkoooStatus();
+      } catch (e) {
+        console.error('解析爬虫状态更新失败:', e);
+      }
+    });
+
+    // 监听进度更新
+    eventSource.addEventListener('okooo_progress', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到进度更新:', data);
+        
+        if (data.processed !== undefined && data.total !== undefined) {
+          okoooState.value.crawler.currentMatchIndex = data.processed;
+          okoooState.value.crawler.totalMatches = data.total;
+        }
+      } catch (e) {
+        console.error('解析进度更新失败:', e);
       }
     });
     
