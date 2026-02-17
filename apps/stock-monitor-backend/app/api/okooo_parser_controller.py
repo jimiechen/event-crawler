@@ -98,3 +98,61 @@ async def get_available_dates():
         return BaseResponse(success=True, data=dates, message=f"共 {len(dates)} 个日期")
     except Exception as e:
         return BaseResponse(success=False, message=str(e))
+
+
+@router.get("/parse/result/{date}/{match_id}", summary="获取已解析的比赛数据", response_model=BaseResponse)
+async def get_parsed_result(
+    date: str,
+    match_id: str
+):
+    """
+    获取指定日期和比赛ID的解析结果
+    - date: 日期 (YYYY-MM-DD)
+    - match_id: 比赛ID
+    
+    如果数据不存在，返回404状态码
+    """
+    try:
+        result = await okooo_parser_service.get_parsed_result(date, match_id)
+        if result["success"]:
+            return BaseResponse(
+                success=True,
+                data=result["data"],
+                message="获取解析数据成功"
+            )
+        else:
+            # 数据不存在，返回404
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=404,
+                detail=f"比赛 {match_id} 在 {date} 的解析数据不存在，请先完成爬虫和解析"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取解析数据失败: {e}")
+        return BaseResponse(success=False, message=str(e))
+
+
+@router.post("/parse/match/{date}/{match_id}", summary="解析单个比赛", response_model=BaseResponse)
+async def parse_single_match(
+    date: str,
+    match_id: str
+):
+    """
+    解析指定日期和比赛ID的比赛数据
+    - date: 日期 (YYYY-MM-DD)
+    - match_id: 比赛ID
+    
+    该API用于实时解析：当一个比赛的所有页面爬取完成后立即调用
+    """
+    try:
+        result = await okooo_parser_service.parse_specific_match(date, match_id)
+        return BaseResponse(
+            success=result["success"],
+            data=result,
+            message="解析成功" if result["success"] else result.get("error", "解析失败")
+        )
+    except Exception as e:
+        logger.error(f"解析单个比赛失败: {e}")
+        return BaseResponse(success=False, message=str(e))

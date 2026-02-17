@@ -756,6 +756,53 @@ class OkoooParser:
 
         return combined_data
 
+    # 业务必需的15个一级字段
+    REQUIRED_FIELDS = [
+        'match_id', 'match_info', 'home_history', 'away_history',
+        'head_to_head', 'future_matches', 'handicap', 'euro_odds',
+        'form_analysis', 'game_points', 'game_points_recent',
+        'game_points_total', 'exchanges', 'bifaIndex', 'macaoIndex'
+    ]
+
+    def validate_parsed_data(self, data: Dict[str, Any]) -> tuple[bool, List[str]]:
+        """
+        验证解析结果是否包含所有必需字段
+        
+        Returns:
+            (是否完整, 缺少的字段列表)
+        """
+        missing = [f for f in self.REQUIRED_FIELDS if f not in data]
+        return len(missing) == 0, missing
+
+    def ensure_all_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        确保数据包含所有必需字段，缺少的字段用默认值填充
+        """
+        defaults = {
+            'match_id': '',
+            'match_info': {},
+            'home_history': [],
+            'away_history': [],
+            'head_to_head': [],
+            'future_matches': {'home': [], 'away': []},
+            'handicap': [],
+            'euro_odds': [],
+            'form_analysis': {},
+            'game_points': [],
+            'game_points_recent': [],
+            'game_points_total': [],
+            'exchanges': {},
+            'bifaIndex': [],
+            'macaoIndex': []
+        }
+        
+        for field, default_value in defaults.items():
+            if field not in data:
+                data[field] = default_value
+                logger.warning(f"字段缺失，使用默认值: {field}")
+        
+        return data
+
     def process_date_match(self, date_str: str, match_id: str) -> Dict[str, Any]:
         """
         处理指定日期和比赛ID的目录（支持 matches/{日期}/{比赛ID}/ 结构）
@@ -765,7 +812,7 @@ class OkoooParser:
             match_id: 比赛ID
         
         Returns:
-            解析后的数据字典
+            解析后的数据字典（包含所有15个必需字段）
         """
         dir_path = os.path.join(self.data_dir, date_str, match_id)
         logger.info(f"Processing: {date_str}/{match_id}")
@@ -841,7 +888,7 @@ class OkoooParser:
         else:
             combined_data["macaoIndex"] = []
         
-        # 7. Parse table - 支持 table_{match_id}.html 或 table.html
+        # 8. Parse table - 支持 table_{match_id}.html 或 table.html
         table_path = find_file(f"table_{match_id}.html", "table.html")
         if table_path:
             with open(table_path, 'r', encoding='utf-8', errors='ignore') as f:
@@ -853,6 +900,16 @@ class OkoooParser:
             combined_data["game_points"] = []
             combined_data["game_points_recent"] = []
             combined_data["game_points_total"] = []
+        
+        # 确保所有必需字段都存在
+        combined_data = self.ensure_all_fields(combined_data)
+        
+        # 验证字段完整性
+        is_complete, missing_fields = self.validate_parsed_data(combined_data)
+        if not is_complete:
+            logger.warning(f"比赛 {match_id} 缺少字段: {missing_fields}")
+        else:
+            logger.info(f"比赛 {match_id} 解析完成，所有字段完整")
         
         return combined_data
     

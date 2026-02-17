@@ -149,6 +149,34 @@ async def capture_history_request(request: OkoooHistoryCaptureRequest):
     except Exception as e:
         return BaseResponse(success=False, message=str(e))
 
+
+class FilterNewMatchesRequest(BaseModel):
+    date: str = Field(..., description="日期 (YYYY-MM-DD)")
+    match_ids: list[str] = Field(..., description="今日抓取的比赛ID列表")
+    check_days: int = Field(7, description="检查历史天数，默认7天")
+
+
+@router.post("/filter-new-matches", summary="筛选新比赛", response_model=BaseResponse)
+async def filter_new_matches(request: FilterNewMatchesRequest):
+    """
+    筛选出新比赛（今天抓取但历史日期不存在的）
+    用于避免重复抓取昨天已存在的比赛
+    """
+    try:
+        result = await okooo_service.filter_new_matches(
+            date=request.date,
+            match_ids=request.match_ids,
+            check_days=request.check_days
+        )
+        return BaseResponse(
+            success=True,
+            data=result,
+            message=f"筛选完成: 新比赛 {result['new_count']} 个, 已存在 {result['existing_count']} 个"
+        )
+    except Exception as e:
+        logger.error(f"❌ filter_new_matches error: {e}")
+        return BaseResponse(success=False, message=str(e))
+
 class OkoooHistoryWithTabRequest(BaseModel):
     html: str = Field(..., description="历史记录页面 HTML")
     url: str = Field(..., description="页面 URL")
@@ -317,6 +345,7 @@ class OkoooMatchHtmlRequest(BaseModel):
     url: str = Field(..., description="页面 URL")
     match_id: str = Field(..., description="比赛 ID")
     page_type: Optional[str] = Field(None, description="页面类型")
+    filename_prefix: Optional[str] = Field(None, description="文件名前缀")
     captured_at: str = Field(..., description="捕获时间")
     date: str = Field(..., description="日期")
 
@@ -333,7 +362,8 @@ async def save_match_html(request: OkoooMatchHtmlRequest):
             match_id=request.match_id,
             page_type=request.page_type,
             captured_at=request.captured_at,
-            date=request.date
+            date=request.date,
+            filename_prefix=request.filename_prefix
         )
         return BaseResponse(success=True, data=result)
     except Exception as e:

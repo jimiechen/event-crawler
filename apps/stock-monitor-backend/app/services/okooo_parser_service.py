@@ -129,6 +129,44 @@ class OkoooParserService:
 
         return sorted(dates, reverse=True)
 
+    async def get_parsed_result(self, date_str: str, match_id: str) -> Dict[str, Any]:
+        """
+        获取指定日期和比赛ID的解析结果
+
+        Args:
+            date_str: 日期 (YYYY-MM-DD)
+            match_id: 比赛ID
+
+        Returns:
+            {"success": True, "data": {...}} 或 {"success": False, "error": "..."}
+        """
+        try:
+            # 构建解析结果文件路径
+            result_file = os.path.join(self.processed_dir, date_str, f"{match_id}.json")
+
+            if not os.path.exists(result_file):
+                return {
+                    "success": False,
+                    "error": f"解析数据不存在: {result_file}"
+                }
+
+            # 读取JSON文件
+            import json
+            with open(result_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            return {
+                "success": True,
+                "data": data
+            }
+
+        except Exception as e:
+            logger.error(f"获取解析数据失败: {e}")
+            return {
+                "success": False,
+                "error": str(e)
+            }
+
 
 # 全局服务实例
 okooo_parser_service = OkoooParserService()

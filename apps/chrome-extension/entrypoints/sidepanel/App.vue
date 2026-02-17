@@ -588,9 +588,9 @@
                 </button>
               </div>
               <div class="repair-list">
-                <div 
-                  v-for="item in unifiedRepairList" 
-                  :key="item.id" 
+                <div
+                  v-for="item in unifiedRepairList"
+                  :key="item.id"
                   class="repair-item"
                   :class="{'item-success': item.status === 'success', 'item-running': item.status !== 'success' && item.current > 0}"
                 >
@@ -599,6 +599,15 @@
                     <span class="error-reason">{{ item.reason }}</span>
                   </div>
                   <div class="repair-item-right">
+                    <!-- 查看数据按钮 -->
+                    <button
+                      v-if="item.status === 'success'"
+                      class="view-data-btn"
+                      @click="openMatchDataModal(item.id)"
+                      title="查看解析数据"
+                    >
+                      📋 数据
+                    </button>
                     <span v-if="item.status === 'success'" class="status-success">✅ 完成</span>
                     <span v-else-if="item.current > 0 || item.status === 'pending'" class="status-running">
                       {{ item.current }}/{{ item.total }}
@@ -610,34 +619,167 @@
               </div>
             </div>
 
-            <!-- 手动控制面板 -->
-            <div class="manual-controls-section">
-              <details>
-                <summary>🛠️ 手动控制选项</summary>
-                <div class="manual-buttons">
+            <!-- 步骤化工作流控制面板 -->
+            <div class="workflow-section">
+              <div class="section-header-small">
+                <h4>📋 数据抓取工作流</h4>
+                <button @click="resetWorkflowState" class="text-btn">重置</button>
+              </div>
+
+              <!-- 步骤1: 抓取比赛列表 -->
+              <div class="workflow-step" :class="workflowState.step1_captureList.status">
+                <div class="step-header">
+                  <span class="step-number">1</span>
+                  <span class="step-title">抓取比赛列表</span>
+                  <span class="step-status" :class="workflowState.step1_captureList.status">
+                    {{ workflowState.step1_captureList.status === 'idle' ? '待执行' : 
+                       workflowState.step1_captureList.status === 'running' ? '执行中...' :
+                       workflowState.step1_captureList.status === 'completed' ? '✅ 完成' : '❌ 失败' }}
+                  </span>
+                </div>
+                <div class="step-content">
+                  <div v-if="workflowState.step1_captureList.matchIds.length > 0" class="step-result">
+                    今日比赛: {{ workflowState.step1_captureList.matchIds.length }} 个
+                  </div>
                   <button 
-                    @click="startRepair(true)" 
-                    :disabled="isSyncing"
-                    class="ths-btn ths-btn-secondary"
+                    @click="startStep1CaptureList" 
+                    :disabled="workflowState.step1_captureList.status === 'running' || !currentUrl?.includes('m.okooo.com')"
+                    class="ths-btn ths-btn-primary step-btn"
                   >
-                    🔍 仅检查完整性
-                  </button>
-                  <button 
-                    @click="startRepair(false)" 
-                    :disabled="isSyncing"
-                    class="ths-btn ths-btn-warning"
-                  >
-                    🔧 强制修复
-                  </button>
-                  <button 
-                    @click="stopOkoooCrawler"
-                    :disabled="!okoooState.crawler.isRunning"
-                    class="ths-btn ths-btn-danger"
-                  >
-                    🛑 停止爬虫
+                    {{ workflowState.step1_captureList.status === 'completed' ? '重新抓取' : '开始抓取' }}
                   </button>
                 </div>
-              </details>
+              </div>
+
+              <!-- 步骤2: 筛选新比赛 -->
+              <div class="workflow-step" :class="workflowState.step2_filterMatches.status">
+                <div class="step-header">
+                  <span class="step-number">2</span>
+                  <span class="step-title">筛选新比赛</span>
+                  <span class="step-status" :class="workflowState.step2_filterMatches.status">
+                    {{ workflowState.step2_filterMatches.status === 'idle' ? '待执行' : 
+                       workflowState.step2_filterMatches.status === 'running' ? '执行中...' :
+                       workflowState.step2_filterMatches.status === 'completed' ? '✅ 完成' : '❌ 失败' }}
+                  </span>
+                </div>
+                <div class="step-content">
+                  <div v-if="workflowState.step2_filterMatches.status !== 'idle'" class="step-result">
+                    <span class="stat new">新: {{ workflowState.step2_filterMatches.newMatches.length }}</span>
+                    <span class="stat existing">已存在: {{ workflowState.step2_filterMatches.existingMatches.length }}</span>
+                  </div>
+                  <button 
+                    @click="startStep2FilterMatches" 
+                    :disabled="workflowState.step2_filterMatches.status === 'running' || workflowState.step1_captureList.matchIds.length === 0"
+                    class="ths-btn ths-btn-primary step-btn"
+                  >
+                    {{ workflowState.step2_filterMatches.status === 'completed' ? '重新筛选' : '开始筛选' }}
+                  </button>
+                </div>
+              </div>
+
+              <!-- 步骤3: 下载比赛数据 -->
+              <div class="workflow-step" :class="workflowState.step3_downloadData.status">
+                <div class="step-header">
+                  <span class="step-number">3</span>
+                  <span class="step-title">下载比赛数据</span>
+                  <span class="step-status" :class="workflowState.step3_downloadData.status">
+                    {{ workflowState.step3_downloadData.status === 'idle' ? '待执行' : 
+                       workflowState.step3_downloadData.status === 'running' ? '执行中...' :
+                       workflowState.step3_downloadData.status === 'completed' ? '✅ 完成' : '❌ 失败' }}
+                  </span>
+                </div>
+                <div class="step-content">
+                  <div v-if="workflowState.step3_downloadData.status !== 'idle'" class="step-result">
+                    <div class="progress-bar">
+                      <div class="progress-fill" :style="{ width: workflowState.step3_downloadData.totalTasks > 0 ? (workflowState.step3_downloadData.completedTasks / workflowState.step3_downloadData.totalTasks * 100) + '%' : '0%' }"></div>
+                    </div>
+                    <div class="progress-text">
+                      {{ workflowState.step3_downloadData.completedTasks }}/{{ workflowState.step3_downloadData.totalTasks }}
+                      <span v-if="workflowState.step3_downloadData.skippedTasks > 0" class="skipped">(跳过 {{ workflowState.step3_downloadData.skippedTasks }})</span>
+                    </div>
+                  </div>
+                  <button 
+                    @click="startStep3DownloadData" 
+                    :disabled="workflowState.step3_downloadData.status === 'running' || workflowState.step2_filterMatches.newMatches.length === 0"
+                    class="ths-btn ths-btn-primary step-btn"
+                  >
+                    {{ workflowState.step3_downloadData.status === 'completed' ? '重新下载' : '开始下载' }}
+                  </button>
+                  <div v-if="workflowState.step3_downloadData.status === 'running'" class="captcha-notice">
+                    🛑 如遇验证码请手动处理，处理完成后自动继续
+                  </div>
+                </div>
+              </div>
+
+              <!-- 步骤4: 解析比赛数据 -->
+              <div class="workflow-step" :class="workflowState.step4_parseData.status">
+                <div class="step-header">
+                  <span class="step-number">4</span>
+                  <span class="step-title">解析比赛数据</span>
+                  <span class="step-status" :class="workflowState.step4_parseData.status">
+                    {{ workflowState.step4_parseData.status === 'idle' ? '待执行' : 
+                       workflowState.step4_parseData.status === 'running' ? '执行中...' :
+                       workflowState.step4_parseData.status === 'completed' ? '✅ 完成' : '❌ 失败' }}
+                  </span>
+                </div>
+                <div class="step-content">
+                  <div v-if="workflowState.step4_parseData.status !== 'idle'" class="step-result">
+                    <div class="progress-bar">
+                      <div class="progress-fill" :style="{ width: workflowState.step4_parseData.totalMatches > 0 ? (workflowState.step4_parseData.parsedMatches / workflowState.step4_parseData.totalMatches * 100) + '%' : '0%' }"></div>
+                    </div>
+                    <div class="progress-text">
+                      {{ workflowState.step4_parseData.parsedMatches }}/{{ workflowState.step4_parseData.totalMatches }}
+                    </div>
+                  </div>
+                  <button 
+                    @click="startStep4ParseData" 
+                    :disabled="workflowState.step4_parseData.status === 'running' || workflowState.step3_downloadData.status !== 'completed'"
+                    class="ths-btn ths-btn-primary step-btn"
+                  >
+                    {{ workflowState.step4_parseData.status === 'completed' ? '重新解析' : '开始解析' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 状态显示区域 -->
+            <div class="status-bar">
+              <div class="status-item">
+                <span class="label">插件状态:</span>
+                <span class="value" :class="pluginStatus.isRunning ? 'running' : 'idle'">
+                  {{ pluginStatus.isRunning ? '运行中' + (pluginStatus.currentTask ? ' - ' + pluginStatus.currentTask : '') : '空闲' }}
+                </span>
+              </div>
+              <div class="status-item">
+                <span class="label">服务端状态:</span>
+                <span class="value" :class="serverStatus.isProcessing ? 'running' : 'idle'">
+                  {{ serverStatus.isProcessing ? '处理中' + (serverStatus.currentMatch ? ' - ' + serverStatus.currentMatch : '') : '空闲' }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 手动控制面板 (保留作为备用) -->
+            <div class="manual-controls-section" style="margin-top: 20px; padding-top: 20px; border-top: 1px dashed #ccc;">
+              <div class="section-header-small">
+                <h4>🔧 手动控制 (备用)</h4>
+              </div>
+              <div class="manual-buttons">
+                <button 
+                  v-if="!okoooState.crawler.isRunning"
+                  @click="startOkoooCrawler" 
+                  :disabled="isSyncing || !currentUrl?.includes('m.okooo.com')"
+                  class="ths-btn ths-btn-secondary"
+                >
+                  🚀 传统模式-开始爬虫
+                </button>
+                <button 
+                  v-else
+                  @click="stopOkoooCrawler"
+                  class="ths-btn ths-btn-danger"
+                >
+                  🛑 停止爬虫
+                </button>
+              </div>
             </div>
 
 
@@ -655,6 +797,173 @@
                 <div v-for="(log, index) in okoooLogs" :key="index" :class="['log-item', log.level]">
                   <span class="log-time">[{{ log.timestamp }}]</span>
                   <span class="log-msg">{{ log.message }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 解析结果展示 -->
+            <div v-if="parseResults.length > 0 || parseWarnings.length > 0 || parseErrors.length > 0" class="parse-results-section">
+              <div class="section-header-small">
+                <h4>📊 解析结果</h4>
+                <button @click="clearParseResults" class="text-btn">清空</button>
+              </div>
+              
+              <!-- 解析进度 -->
+              <div v-if="parseProgress.total > 0" class="parse-progress">
+                <div class="progress-bar">
+                  <div 
+                    class="progress-fill parse"
+                    :style="{ width: `${(parseProgress.current / parseProgress.total) * 100}%` }"
+                  ></div>
+                </div>
+                <div class="progress-text">
+                  解析进度: {{ parseProgress.current }}/{{ parseProgress.total }}
+                </div>
+              </div>
+
+              <!-- 解析总结 -->
+              <div v-if="parseSummary" class="parse-summary">
+                <div class="summary-card" :class="{ 'has-warning': parseSummary.incomplete > 0, 'has-error': parseSummary.failed > 0 }">
+                  <div class="summary-title">📋 解析总结</div>
+                  <div class="summary-stats">
+                    <span class="stat success">✅ {{ parseSummary.parsed }}</span>
+                    <span v-if="parseSummary.incomplete > 0" class="stat warning">⚠️ {{ parseSummary.incomplete }}</span>
+                    <span v-if="parseSummary.failed > 0" class="stat error">❌ {{ parseSummary.failed }}</span>
+                  </div>
+                  <div class="summary-message">{{ parseSummary.message }}</div>
+                </div>
+              </div>
+
+              <!-- 解析错误 -->
+              <div v-if="parseErrors.length > 0" class="parse-errors">
+                <div class="subsection-header">
+                  <h5>❌ 解析失败 ({{ parseErrors.length }})</h5>
+                </div>
+                <div class="error-list">
+                  <div v-for="(error, index) in parseErrors" :key="index" class="error-item">
+                    <span class="match-id">ID: {{ error.matchId }}</span>
+                    <span class="error-msg">{{ error.error }}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 解析告警 -->
+              <div v-if="parseWarnings.length > 0" class="parse-warnings">
+                <div class="subsection-header">
+                  <h5>⚠️ 字段不完整 ({{ parseWarnings.length }})</h5>
+                </div>
+                <div class="warning-list">
+                  <div v-for="(warning, index) in parseWarnings" :key="index" class="warning-item">
+                    <div class="warning-header">
+                      <span class="match-id">ID: {{ warning.matchId }}</span>
+                      <span class="warning-time">{{ warning.timestamp }}</span>
+                    </div>
+                    <div class="missing-fields">
+                      缺少: {{ warning.missingFields.join(', ') }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 解析完成列表 -->
+              <div v-if="parseResults.length > 0" class="parse-complete-list">
+                <div class="subsection-header">
+                  <h5>✅ 解析完成 ({{ parseResults.length }})</h5>
+                </div>
+                <div class="result-list">
+                  <div
+                    v-for="(result, index) in parseResults"
+                    :key="index"
+                    class="result-item"
+                    :class="{ 'incomplete': !result.isComplete }"
+                  >
+                    <div class="result-header">
+                      <span class="match-id">ID: {{ result.matchId }}</span>
+                      <span class="result-status" :class="{ 'complete': result.isComplete, 'incomplete': !result.isComplete }">
+                        {{ result.isComplete ? '✅ 完整' : '⚠️ 缺字段' }}
+                      </span>
+                    </div>
+                    <div v-if="!result.isComplete && result.missingFields.length > 0" class="missing-fields">
+                      缺少: {{ result.missingFields.join(', ') }}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 任务流程展示 -->
+              <div v-if="Object.keys(matchTaskFlows).length > 0" class="task-flow-section">
+                <div class="subsection-header">
+                  <h5>📋 任务流程 ({{ Object.keys(matchTaskFlows).length }})</h5>
+                </div>
+                <div class="task-flow-list">
+                  <div
+                    v-for="(flow, matchId) in matchTaskFlows"
+                    :key="matchId"
+                    class="task-flow-item"
+                    :class="{ 'active': currentProcessingMatchId === matchId }"
+                  >
+                    <!-- 比赛ID -->
+                    <div class="task-flow-header">
+                      <span class="match-id">ID: {{ matchId }}</span>
+                      <span v-if="currentProcessingMatchId === matchId" class="processing-badge">处理中...</span>
+                    </div>
+
+                    <!-- 步骤1: 创建目录 -->
+                    <div class="task-step">
+                      <span class="step-icon" :class="flow.directory.status">
+                        {{ flow.directory.status === 'completed' ? '✅' : flow.directory.status === 'error' ? '❌' : '⏳' }}
+                      </span>
+                      <span class="step-name" :class="flow.directory.status">
+                        创建目录
+                      </span>
+                      <span v-if="flow.directory.exists" class="step-status success">已存在</span>
+                    </div>
+
+                    <!-- 步骤2: 下载8个文件 -->
+                    <div class="task-step">
+                      <span class="step-icon" :class="flow.files.completedCount === flow.files.totalCount ? 'completed' : 'processing'">
+                        {{ flow.files.completedCount === flow.files.totalCount ? '✅' : '⏳' }}
+                      </span>
+                      <span class="step-name" :class="flow.files.completedCount === flow.files.totalCount ? 'completed' : 'processing'">
+                        下载文件 ({{ flow.files.completedCount }}/{{ flow.files.totalCount }})
+                      </span>
+                    </div>
+
+                    <!-- 8个文件列表 -->
+                    <div v-if="Object.keys(flow.files.items).length > 0" class="file-list">
+                      <div
+                        v-for="(file, key) in flow.files.items"
+                        :key="key"
+                        class="file-item"
+                        :class="file.status"
+                      >
+                        <span class="file-status-icon">
+                          {{ file.status === 'completed' ? '🟢' : file.status === 'missing' ? '⚪' : '🔵' }}
+                        </span>
+                        <span class="file-name" :class="file.status">{{ file.name }}</span>
+                        <span class="file-filename">{{ file.filename }}</span>
+                      </div>
+                    </div>
+
+                    <!-- 步骤3: 解析JSON -->
+                    <div class="task-step">
+                      <span class="step-icon" :class="flow.parse.status">
+                        {{ flow.parse.status === 'completed' ? '✅' : flow.parse.status === 'error' ? '❌' : flow.parse.status === 'warning' ? '⚠️' : '⏳' }}
+                      </span>
+                      <span class="step-name" :class="flow.parse.status">
+                        解析JSON
+                      </span>
+                      <span v-if="flow.parse.isComplete" class="step-status success">完成</span>
+                      <span v-else-if="flow.parse.status === 'warning'" class="step-status warning">字段不完整</span>
+                    </div>
+
+                    <!-- 查看数据按钮 -->
+                    <div v-if="flow.parse.status === 'completed' || flow.parse.status === 'warning'" class="task-flow-actions">
+                      <button class="view-data-btn-small" @click="openMatchDataModal(matchId)">
+                        📋 查看数据
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -689,6 +998,14 @@
         </div>
       </div>
     </div>
+
+    <!-- 比赛数据弹窗 -->
+    <MatchDataModal
+      :visible="matchDataModalVisible"
+      :match-id="selectedMatchId"
+      :date="selectedMatchDate"
+      @close="closeMatchDataModal"
+    />
 
     <!-- 数据详情模态框 -->
     <div v-if="showModal" class="modal-overlay" @click="closeModal">
@@ -729,6 +1046,7 @@ import MonitoringStatusPanel from '../../components/MonitoringStatusPanel.vue';
 import SystemStatus from './components/SystemStatus.vue';
 import WencaiDataCapture from './components/WencaiDataCapture.vue';
 import SessionManager from './components/SessionManager.vue';
+import MatchDataModal from '../../components/MatchDataModal.vue';
 interface TemplateField {
   id: string;
   name: string;
@@ -866,7 +1184,13 @@ interface RepairStatus {
   totalChecked: number;
   repairingCount: number;
   ids: string[];
-  repairDetails: Array<{ id: string; reason: string }>;
+  repairDetails: Array<{
+    id: string;
+    reason: string;
+    status?: 'pending' | 'success' | 'error';
+    current?: number;
+    total?: number;
+  }>;
   message: string;
 }
 
@@ -902,6 +1226,123 @@ const okoooState = ref<OkoooSyncState>({
     repairDetails: [],
     message: ''
   }
+});
+
+// ==================== 步骤化工作流状态 ====================
+interface WorkflowStep {
+  status: 'idle' | 'running' | 'completed' | 'error';
+  message: string;
+  progress: { current: number; total: number };
+}
+
+interface WorkflowState {
+  step1_captureList: WorkflowStep & { matchIds: string[] };
+  step2_filterMatches: WorkflowStep & { 
+    newMatches: string[];
+    existingMatches: string[];
+    skippedMatches: string[];
+  };
+  step3_downloadData: WorkflowStep & {
+    totalTasks: number;
+    completedTasks: number;
+    skippedTasks: number;
+    errorTasks: number;
+    matchProgress: Record<string, { completed: number; total: number }>;
+  };
+  step4_parseData: WorkflowStep & {
+    totalMatches: number;
+    parsedMatches: number;
+    failedMatches: number;
+  };
+}
+
+const workflowState = ref<WorkflowState>({
+  step1_captureList: {
+    status: 'idle',
+    message: '等待开始',
+    progress: { current: 0, total: 0 },
+    matchIds: []
+  },
+  step2_filterMatches: {
+    status: 'idle',
+    message: '等待开始',
+    progress: { current: 0, total: 0 },
+    newMatches: [],
+    existingMatches: [],
+    skippedMatches: []
+  },
+  step3_downloadData: {
+    status: 'idle',
+    message: '等待开始',
+    progress: { current: 0, total: 0 },
+    totalTasks: 0,
+    completedTasks: 0,
+    skippedTasks: 0,
+    errorTasks: 0,
+    matchProgress: {}
+  },
+  step4_parseData: {
+    status: 'idle',
+    message: '等待开始',
+    progress: { current: 0, total: 0 },
+    totalMatches: 0,
+    parsedMatches: 0,
+    failedMatches: 0
+  }
+});
+
+// 重置工作流状态
+const resetWorkflowState = () => {
+  workflowState.value = {
+    step1_captureList: {
+      status: 'idle',
+      message: '等待开始',
+      progress: { current: 0, total: 0 },
+      matchIds: []
+    },
+    step2_filterMatches: {
+      status: 'idle',
+      message: '等待开始',
+      progress: { current: 0, total: 0 },
+      newMatches: [],
+      existingMatches: [],
+      skippedMatches: []
+    },
+    step3_downloadData: {
+      status: 'idle',
+      message: '等待开始',
+      progress: { current: 0, total: 0 },
+      totalTasks: 0,
+      completedTasks: 0,
+      skippedTasks: 0,
+      errorTasks: 0,
+      matchProgress: {}
+    },
+    step4_parseData: {
+      status: 'idle',
+      message: '等待开始',
+      progress: { current: 0, total: 0 },
+      totalMatches: 0,
+      parsedMatches: 0,
+      failedMatches: 0
+    }
+  };
+};
+
+// ==================== 状态来源区分 ====================
+// 插件端状态（来自background脚本）
+const pluginStatus = ref({
+  isRunning: false,
+  currentTask: null as string | null,
+  phase: 'idle' as string,
+  logs: [] as string[]
+});
+
+// 服务端状态（来自SSE）
+const serverStatus = ref({
+  isProcessing: false,
+  currentMatch: null as string | null,
+  progress: null as { current: number; total: number } | null
 });
 
 // Backward compatibility proxies for template (optional, but cleaner to update template)
@@ -1100,12 +1541,111 @@ interface LogEntry {
   timestamp: string;
 }
 
+// 解析结果相关类型
+interface ParseResult {
+  matchId: string;
+  date: string;
+  isComplete: boolean;
+  missingFields: string[];
+  outputPath: string;
+  timestamp: string;
+}
+
+interface ParseWarning {
+  matchId: string;
+  date: string;
+  missingFields: string[];
+  message: string;
+  timestamp: string;
+}
+
+interface ParseError {
+  matchId: string;
+  date: string;
+  error: string;
+  timestamp: string;
+}
+
+interface ParseSummary {
+  date: string;
+  total: number;
+  parsed: number;
+  failed: number;
+  incomplete: number;
+  message: string;
+}
+
+// 任务流程相关类型
+interface TaskFileStatus {
+  name: string;
+  filename: string;
+  exists: boolean;
+  status: 'pending' | 'processing' | 'completed' | 'missing' | 'error';
+}
+
+interface MatchTaskFlow {
+  matchId: string;
+  date: string;
+  directory: {
+    status: 'pending' | 'processing' | 'completed' | 'error';
+    exists: boolean;
+    path: string;
+  };
+  files: {
+    items: Record<string, TaskFileStatus>;
+    completedCount: number;
+    totalCount: number;
+  };
+  parse: {
+    status: 'pending' | 'processing' | 'completed' | 'incomplete' | 'error' | 'warning';
+    outputPath: string;
+    isComplete: boolean;
+    missingFields: string[];
+  };
+}
+
 const okoooLogs = ref<LogEntry[]>([]);
 const isLogStreamActive = ref(false);
 let eventSource: EventSource | null = null;
 
+// 解析结果相关状态
+const parseResults = ref<ParseResult[]>([]);
+const parseWarnings = ref<ParseWarning[]>([]);
+const parseErrors = ref<ParseError[]>([]);
+const parseSummary = ref<ParseSummary | null>(null);
+const parseProgress = ref<{ current: number; total: number }>({ current: 0, total: 0 });
+
+// 任务流程状态
+const matchTaskFlows = ref<Record<string, MatchTaskFlow>>({});
+const currentProcessingMatchId = ref<string>('');
+
+// 比赛数据弹窗状态
+const matchDataModalVisible = ref(false);
+const selectedMatchId = ref('');
+const selectedMatchDate = ref('');
+
+const openMatchDataModal = (matchId: string) => {
+  selectedMatchId.value = matchId;
+  // 使用当前日期，或者从其他状态获取
+  selectedMatchDate.value = new Date().toISOString().split('T')[0];
+  matchDataModalVisible.value = true;
+};
+
+const closeMatchDataModal = () => {
+  matchDataModalVisible.value = false;
+  selectedMatchId.value = '';
+};
+
 const clearOkoooLogs = () => {
   okoooLogs.value = [];
+};
+
+const clearParseResults = () => {
+  parseResults.value = [];
+  parseWarnings.value = [];
+  parseErrors.value = [];
+  parseSummary.value = null;
+  parseProgress.value = { current: 0, total: 0 };
 };
 
 // 刷新爬虫状态
@@ -1295,7 +1835,216 @@ const setupSSE = () => {
         console.error('解析进度更新失败:', e);
       }
     });
-    
+
+    // 监听解析完成事件
+    eventSource.addEventListener('okooo_parse_complete', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到解析完成通知:', data);
+        
+        // 添加到解析结果列表
+        const result: ParseResult = {
+          matchId: data.match_id,
+          date: data.date,
+          isComplete: data.is_complete,
+          missingFields: data.missing_fields || [],
+          outputPath: data.output_path,
+          timestamp: new Date().toLocaleTimeString()
+        };
+        
+        // 更新或添加解析结果
+        const existingIndex = parseResults.value.findIndex(r => r.matchId === result.matchId);
+        if (existingIndex >= 0) {
+          parseResults.value[existingIndex] = result;
+        } else {
+          parseResults.value.push(result);
+        }
+        
+        // 更新解析进度
+        parseProgress.value = {
+          current: data.progress?.current || 0,
+          total: data.progress?.total || 0
+        };
+      } catch (e) {
+        console.error('解析完成通知处理失败:', e);
+      }
+    });
+
+    // 监听解析告警事件
+    eventSource.addEventListener('okooo_parse_warning', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到解析告警:', data);
+        
+        // 添加到告警列表
+        parseWarnings.value.push({
+          matchId: data.match_id,
+          date: data.date,
+          missingFields: data.missing_fields || [],
+          message: data.message,
+          timestamp: new Date().toLocaleTimeString()
+        });
+      } catch (e) {
+        console.error('解析告警处理失败:', e);
+      }
+    });
+
+    // 监听解析错误事件
+    eventSource.addEventListener('okooo_parse_error', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到解析错误:', data);
+        
+        parseErrors.value.push({
+          matchId: data.match_id,
+          date: data.date,
+          error: data.error,
+          timestamp: new Date().toLocaleTimeString()
+        });
+      } catch (e) {
+        console.error('解析错误处理失败:', e);
+      }
+    });
+
+    // 监听解析总结事件
+    eventSource.addEventListener('okooo_parse_summary', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到解析总结:', data);
+
+        parseSummary.value = {
+          date: data.date,
+          total: data.total,
+          parsed: data.parsed,
+          failed: data.failed,
+          incomplete: data.incomplete,
+          message: data.message
+        };
+      } catch (e) {
+        console.error('解析总结处理失败:', e);
+      }
+    });
+
+    // 监听任务流程事件 - 目录状态
+    eventSource.addEventListener('okooo_task_directory_status', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到目录状态:', data);
+
+        const { match_id, date, exists, path, status } = data;
+
+        // 初始化或更新任务流程
+        if (!matchTaskFlows.value[match_id]) {
+          matchTaskFlows.value[match_id] = {
+            matchId: match_id,
+            date: date,
+            directory: { status: 'pending', exists: false, path: '' },
+            files: { items: {}, completedCount: 0, totalCount: 8 },
+            parse: { status: 'pending', outputPath: '', isComplete: false, missingFields: [] }
+          };
+        }
+
+        matchTaskFlows.value[match_id].directory = {
+          status,
+          exists,
+          path
+        };
+
+        currentProcessingMatchId.value = match_id;
+      } catch (e) {
+        console.error('目录状态处理失败:', e);
+      }
+    });
+
+    // 监听任务流程事件 - 文件状态
+    eventSource.addEventListener('okooo_task_files_status', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到文件状态:', data);
+
+        const { match_id, files, completed_count, total_count } = data;
+
+        if (!matchTaskFlows.value[match_id]) {
+          matchTaskFlows.value[match_id] = {
+            matchId: match_id,
+            date: data.date,
+            directory: { status: 'pending', exists: false, path: '' },
+            files: { items: {}, completedCount: 0, totalCount: 8 },
+            parse: { status: 'pending', outputPath: '', isComplete: false, missingFields: [] }
+          };
+        }
+
+        matchTaskFlows.value[match_id].files = {
+          items: files,
+          completedCount: completed_count,
+          totalCount: total_count
+        };
+
+        currentProcessingMatchId.value = match_id;
+      } catch (e) {
+        console.error('文件状态处理失败:', e);
+      }
+    });
+
+    // 监听任务流程事件 - 解析开始
+    eventSource.addEventListener('okooo_task_parse_start', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到解析开始:', data);
+
+        const { match_id, status } = data;
+
+        if (matchTaskFlows.value[match_id]) {
+          matchTaskFlows.value[match_id].parse.status = status;
+        }
+
+        currentProcessingMatchId.value = match_id;
+      } catch (e) {
+        console.error('解析开始处理失败:', e);
+      }
+    });
+
+    // 监听任务流程事件 - 解析完成
+    eventSource.addEventListener('okooo_task_parse_complete', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到解析完成:', data);
+
+        const { match_id, status, output_path, is_complete, missing_fields } = data;
+
+        if (matchTaskFlows.value[match_id]) {
+          matchTaskFlows.value[match_id].parse = {
+            status,
+            outputPath: output_path,
+            isComplete: is_complete,
+            missingFields: missing_fields || []
+          };
+        }
+
+        currentProcessingMatchId.value = match_id;
+      } catch (e) {
+        console.error('解析完成处理失败:', e);
+      }
+    });
+
+    // 监听任务流程事件 - 解析错误
+    eventSource.addEventListener('okooo_task_parse_error', (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('收到解析错误:', data);
+
+        const { match_id, error, status } = data;
+
+        if (matchTaskFlows.value[match_id]) {
+          matchTaskFlows.value[match_id].parse.status = status;
+        }
+
+        currentProcessingMatchId.value = match_id;
+      } catch (e) {
+        console.error('解析错误处理失败:', e);
+      }
+    });
+
     eventSource.onerror = (error) => {
       console.error('SSE连接错误:', error);
       isLogStreamActive.value = false;
@@ -3532,6 +4281,284 @@ const stopCrawlerStatusPolling = () => {
   }
 };
 
+// ==================== 步骤化工作流处理函数 ====================
+
+// 步骤1: 抓取比赛列表
+const startStep1CaptureList = async () => {
+  try {
+    workflowState.value.step1_captureList.status = 'running';
+    workflowState.value.step1_captureList.message = '正在抓取比赛列表...';
+
+    console.log('[步骤1] 开始抓取比赛列表...');
+
+    // 调用后端API获取比赛列表
+    const date = new Date().toISOString().split('T')[0];
+    const response = await fetch(`${backendUrl}/api/v1/okooo/matches?date=${date}`);
+    const result = await response.json();
+
+    console.log('[步骤1] 比赛列表API响应:', result);
+
+    if (result.success && result.data) {
+      // 提取比赛ID列表
+      const matches = result.data || [];
+      const matchIds = matches.map((m: any) => m.match_id || m.id).filter(Boolean);
+
+      workflowState.value.step1_captureList.matchIds = matchIds;
+      workflowState.value.step1_captureList.status = 'completed';
+      workflowState.value.step1_captureList.message = `抓取完成，共 ${matchIds.length} 个比赛`;
+
+      // 同步更新原有的修复列表状态
+      okoooState.value.repair.ids = matchIds;
+      okoooState.value.repair.totalChecked = matchIds.length;
+
+      okoooLogs.value.unshift({
+        message: `✅ 步骤1完成: 获取到 ${matchIds.length} 个比赛`,
+        level: 'success',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } else {
+      throw new Error(result.message || '获取比赛列表失败');
+    }
+  } catch (error) {
+    console.error('[步骤1] 抓取失败:', error);
+    workflowState.value.step1_captureList.status = 'error';
+    workflowState.value.step1_captureList.message = '抓取失败: ' + (error as Error).message;
+
+    okoooLogs.value.unshift({
+      message: `❌ 步骤1失败: ${(error as Error).message}`,
+      level: 'error',
+      timestamp: new Date().toLocaleTimeString()
+    });
+  }
+};
+
+// 步骤2: 筛选新比赛
+const startStep2FilterMatches = async () => {
+  try {
+    workflowState.value.step2_filterMatches.status = 'running';
+    workflowState.value.step2_filterMatches.message = '正在筛选新比赛...';
+
+    const date = new Date().toISOString().split('T')[0];
+    const matchIds = workflowState.value.step1_captureList.matchIds;
+
+    const response = await fetch(`${backendUrl}/api/v1/okooo/filter-new-matches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, match_ids: matchIds, check_days: 7 })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      workflowState.value.step2_filterMatches.newMatches = result.data.new_matches || [];
+      workflowState.value.step2_filterMatches.existingMatches = result.data.existing_matches || [];
+      workflowState.value.step2_filterMatches.status = 'completed';
+      workflowState.value.step2_filterMatches.message = `筛选完成: 新比赛 ${result.data.new_count} 个，已存在 ${result.data.existing_count} 个`;
+
+      okoooLogs.value.unshift({
+        message: `✅ 步骤2完成: 新比赛 ${result.data.new_count} 个，已存在 ${result.data.existing_count} 个`,
+        level: 'success',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    workflowState.value.step2_filterMatches.status = 'error';
+    workflowState.value.step2_filterMatches.message = '筛选失败: ' + (error as Error).message;
+
+    okoooLogs.value.unshift({
+      message: `❌ 步骤2失败: ${(error as Error).message}`,
+      level: 'error',
+      timestamp: new Date().toLocaleTimeString()
+    });
+  }
+};
+
+// 步骤3: 下载比赛数据
+const startStep3DownloadData = async () => {
+  try {
+    workflowState.value.step3_downloadData.status = 'running';
+    workflowState.value.step3_downloadData.message = '正在下载比赛数据...';
+
+    const newMatches = workflowState.value.step2_filterMatches.newMatches;
+    const date = new Date().toISOString().split('T')[0];
+
+    console.log('[步骤3] 开始下载比赛数据:', newMatches);
+
+    // 构建任务列表（8个页面类型）
+    const pageTypes = [
+      { type: '历史', prefix: 'history' },
+      { type: '欧赔', prefix: 'odds' },
+      { type: '亚盘', prefix: 'handicap' },
+      { type: '盈亏', prefix: 'exchanges' },
+      { type: '阵容', prefix: 'form' },
+      { type: '积分', prefix: 'game' },
+      { type: '澳门变化', prefix: 'macao_change' },
+      { type: '必发变化', prefix: 'bifa_change' }
+    ];
+
+    const tasks = newMatches.flatMap((matchId: string) =>
+      pageTypes.map(pt => ({
+        match_id: matchId,
+        page_type: pt.type,
+        filename_prefix: pt.prefix,
+        url: `https://m.okooo.com/match/${pt.prefix}.php?MatchID=${matchId}`,
+        date: date
+      }))
+    );
+
+    console.log('[步骤3] 生成任务数:', tasks.length);
+
+    // 发送消息到background脚本
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_START_REPAIR_TASKS',
+      tasks: tasks
+    });
+
+    console.log('[步骤3] 下载响应:', response);
+
+    if (response && response.success) {
+      workflowState.value.step3_downloadData.totalTasks = tasks.length;
+
+      // 启动状态轮询
+      startWorkflowStep3Polling();
+
+      okoooLogs.value.unshift({
+        message: `🚀 步骤3开始: 下载 ${newMatches.length} 个新比赛的 ${tasks.length} 个页面`,
+        level: 'info',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } else {
+      throw new Error(response?.message || '下载启动失败');
+    }
+  } catch (error) {
+    console.error('[步骤3] 下载失败:', error);
+    workflowState.value.step3_downloadData.status = 'error';
+    workflowState.value.step3_downloadData.message = '下载失败: ' + (error as Error).message;
+
+    okoooLogs.value.unshift({
+      message: `❌ 步骤3失败: ${(error as Error).message}`,
+      level: 'error',
+      timestamp: new Date().toLocaleTimeString()
+    });
+  }
+};
+
+let workflowStep3Timer: number | null = null;
+
+const startWorkflowStep3Polling = () => {
+  workflowStep3Timer = window.setInterval(async () => {
+    const response = await chrome.runtime.sendMessage({
+      type: 'OKOOO_GET_STATUS'
+    });
+
+    if (response.success) {
+      const data = response.data;
+
+      // 更新插件状态
+      pluginStatus.value.isRunning = data.isRunning;
+      pluginStatus.value.currentTask = data.currentTask;
+      pluginStatus.value.phase = data.phase;
+
+      // 更新步骤3状态
+      workflowState.value.step3_downloadData.completedTasks = data.completedTasks || 0;
+      workflowState.value.step3_downloadData.skippedTasks = data.skippedTasks || 0;
+      workflowState.value.step3_downloadData.errorTasks = data.errorTasks || 0;
+
+      if (!data.isRunning) {
+        // 下载完成
+        clearInterval(workflowStep3Timer!);
+        workflowStep3Timer = null;
+
+        workflowState.value.step3_downloadData.status = 'completed';
+        workflowState.value.step3_downloadData.message = `下载完成: ${workflowState.value.step3_downloadData.completedTasks} 成功, ${workflowState.value.step3_downloadData.skippedTasks} 跳过, ${workflowState.value.step3_downloadData.errorTasks} 失败`;
+
+        okoooLogs.value.unshift({
+          message: `✅ 步骤3完成: ${workflowState.value.step3_downloadData.completedTasks} 成功, ${workflowState.value.step3_downloadData.skippedTasks} 跳过`,
+          level: 'success',
+          timestamp: new Date().toLocaleTimeString()
+        });
+      }
+    }
+  }, 1000);
+};
+
+// 步骤4: 解析比赛数据
+const startStep4ParseData = async () => {
+  try {
+    workflowState.value.step4_parseData.status = 'running';
+    workflowState.value.step4_parseData.message = '正在解析比赛数据...';
+
+    const date = new Date().toISOString().split('T')[0];
+
+    // 调用后端API解析所有比赛
+    const response = await fetch(`${backendUrl}/api/v1/okooo/parse/daily`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ date, background: true })
+    });
+
+    const result = await response.json();
+
+    if (result.success) {
+      workflowState.value.step4_parseData.totalMatches = workflowState.value.step1_captureList.matchIds.length;
+
+      // 监听SSE事件获取解析进度
+      setupParseProgressListener();
+
+      okoooLogs.value.unshift({
+        message: `🚀 步骤4开始: 解析 ${workflowState.value.step4_parseData.totalMatches} 个比赛`,
+        level: 'info',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } else {
+      throw new Error(result.message);
+    }
+  } catch (error) {
+    workflowState.value.step4_parseData.status = 'error';
+    workflowState.value.step4_parseData.message = '解析失败: ' + (error as Error).message;
+
+    okoooLogs.value.unshift({
+      message: `❌ 步骤4失败: ${(error as Error).message}`,
+      level: 'error',
+      timestamp: new Date().toLocaleTimeString()
+    });
+  }
+};
+
+// 监听解析进度
+const setupParseProgressListener = () => {
+  // 使用现有的SSE连接监听解析事件
+  const handleParseProgress = (event: MessageEvent) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'okooo_parse_complete') {
+        workflowState.value.step4_parseData.parsedMatches++;
+
+        if (workflowState.value.step4_parseData.parsedMatches >= workflowState.value.step4_parseData.totalMatches) {
+          workflowState.value.step4_parseData.status = 'completed';
+          workflowState.value.step4_parseData.message = `解析完成: ${workflowState.value.step4_parseData.parsedMatches} 成功`;
+
+          okoooLogs.value.unshift({
+            message: `✅ 步骤4完成: 解析了 ${workflowState.value.step4_parseData.parsedMatches} 个比赛`,
+            level: 'success',
+            timestamp: new Date().toLocaleTimeString()
+          });
+        }
+      }
+    } catch (e) {
+      console.error('解析进度监听错误:', e);
+    }
+  };
+
+  // 注册到现有的SSE事件监听
+  if (eventSource) {
+    eventSource.addEventListener('okooo_parse_complete', handleParseProgress);
+  }
+};
+
 /*
 // 启动让球盘爬虫
 const startHandicapCrawler = async () => {
@@ -3707,6 +4734,116 @@ onMounted(async () => {
       showCaptchaAlert.value = true;
     } else if (message.type === 'OKOOO_CAPTCHA_SOLVED') {
       showCaptchaAlert.value = false;
+    } else if (message.type === 'OKOOO_MATCH_PARSED') {
+      // 单个比赛解析完成
+      const { matchId, date, data } = message.data;
+      console.log('收到比赛解析完成通知:', matchId);
+
+      // 添加到解析结果列表
+      const result: ParseResult = {
+        matchId: matchId,
+        date: date,
+        isComplete: true,
+        missingFields: [],
+        outputPath: data?.output_path || '',
+        timestamp: new Date().toLocaleTimeString()
+      };
+
+      // 更新或添加解析结果
+      const existingIndex = parseResults.value.findIndex(r => r.matchId === result.matchId);
+      if (existingIndex >= 0) {
+        parseResults.value[existingIndex] = result;
+      } else {
+        parseResults.value.push(result);
+      }
+
+      // 更新待修复列表中的状态
+      const repairItem = okoooState.value.repair.repairDetails.find((item: any) => item.id === matchId);
+      if (repairItem) {
+        repairItem.status = 'success';
+        repairItem.current = repairItem.total;
+      }
+
+      // 显示日志
+      okoooLogs.value.unshift({
+        message: `✅ 比赛 ${matchId} 解析完成`,
+        level: 'success',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } else if (message.type === 'OKOOO_MATCH_PARSE_ERROR') {
+      // 单个比赛解析失败
+      const { matchId, error } = message.data;
+      console.error('收到比赛解析失败通知:', matchId, error);
+
+      // 添加到解析错误列表
+      parseErrors.value.push({
+        matchId: matchId,
+        date: message.data.date,
+        error: error,
+        timestamp: new Date().toLocaleTimeString()
+      });
+
+      // 显示日志
+      okoooLogs.value.unshift({
+        message: `❌ 比赛 ${matchId} 解析失败: ${error}`,
+        level: 'error',
+        timestamp: new Date().toLocaleTimeString()
+      });
+    } else if (message.type === 'OKOOO_CRAWLER_COMPLETED') {
+      // 爬虫完成，清空所有相关状态
+      console.log('收到爬虫完成通知:', message.data);
+      
+      // 清空待修复列表
+      okoooState.value.repair.repairDetails = [];
+      okoooState.value.repair.repairingCount = 0;
+      okoooState.value.repair.ids = [];
+      
+      // 清空爬虫状态
+      okoooState.value.crawler.isRunning = false;
+      okoooState.value.crawler.phase = 'completed';
+      okoooState.value.crawler.currentMatchIndex = 0;
+      okoooState.value.crawler.totalMatches = 0;
+      okoooState.value.crawler.results = [];
+      
+      // 清空进度缓存
+      serverConfirmedProgress.value = {};
+      
+      // 显示完成提示
+      okoooLogs.value.unshift({
+        message: `✅ ${message.data.message} (成功: ${message.data.successCount}, 失败: ${message.data.errorCount})`,
+        level: 'success',
+        timestamp: new Date().toLocaleTimeString()
+      });
+      
+      // 延迟后自动刷新状态并重新检查物理文件
+      setTimeout(async () => {
+        await refreshOkoooStatus();
+        
+        // 自动触发完整性检查（验证物理文件）
+        okoooLogs.value.unshift({
+          message: '🔍 正在验证物理文件完整性...',
+          level: 'info',
+          timestamp: new Date().toLocaleTimeString()
+        });
+        
+        // 执行完整性检查
+        await startRepair(true);
+        
+        // 如果还有失败的任务，显示提示
+        if (okoooState.value.repair.repairDetails.length > 0) {
+          okoooLogs.value.unshift({
+            message: `⚠️ 发现 ${okoooState.value.repair.repairDetails.length} 个任务需要重新修复`,
+            level: 'warning',
+            timestamp: new Date().toLocaleTimeString()
+          });
+        } else {
+          okoooLogs.value.unshift({
+            message: '✅ 所有物理文件验证通过，数据一致性确认',
+            level: 'success',
+            timestamp: new Date().toLocaleTimeString()
+          });
+        }
+      }, 2000);
     }
   });
 
@@ -5088,6 +6225,382 @@ setInterval(checkPlatformTabs, 5000);
   border: 1px solid #bbf7d0;
 }
 
+/* 解析结果样式 */
+.parse-results-section {
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-lg);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+}
+
+.parse-progress {
+  margin-bottom: var(--spacing-md);
+}
+
+.parse-progress .progress-fill.parse {
+  background: linear-gradient(90deg, #8b5cf6, #a78bfa);
+}
+
+.parse-summary {
+  margin-bottom: var(--spacing-md);
+}
+
+.summary-card {
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.summary-card.has-warning {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.summary-card.has-error {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.summary-title {
+  font-weight: 600;
+  margin-bottom: var(--spacing-sm);
+  color: var(--text-primary);
+}
+
+.summary-stats {
+  display: flex;
+  gap: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+.summary-stats .stat {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.summary-stats .stat.success {
+  color: #16a34a;
+}
+
+.summary-stats .stat.warning {
+  color: #d97706;
+}
+
+.summary-stats .stat.error {
+  color: #dc2626;
+}
+
+.summary-message {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.parse-errors,
+.parse-warnings,
+.parse-complete-list {
+  margin-top: var(--spacing-md);
+}
+
+.subsection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-sm);
+}
+
+.subsection-header h5 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.error-list,
+.warning-list,
+.result-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.error-item,
+.warning-item,
+.result-item {
+  padding: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+}
+
+.error-item {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.warning-item {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+}
+
+.result-item {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+/* 任务流程样式 */
+.task-flow-section {
+  margin-top: var(--spacing-md);
+  border-top: 1px solid var(--border-color);
+  padding-top: var(--spacing-md);
+}
+
+.task-flow-list {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+.task-flow-item {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  transition: all 0.3s ease;
+}
+
+.task-flow-item.active {
+  border-color: #667eea;
+  box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2); }
+  50% { box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.3); }
+}
+
+.task-flow-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-sm);
+  padding-bottom: var(--spacing-sm);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.task-flow-header .match-id {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.processing-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+  animation: blink 1.5s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.task-step {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xs) 0;
+  font-size: 13px;
+}
+
+.step-icon {
+  font-size: 16px;
+  width: 24px;
+  text-align: center;
+}
+
+.step-icon.completed {
+  color: #16a34a;
+}
+
+.step-icon.processing {
+  color: #3b82f6;
+}
+
+.step-icon.error {
+  color: #ef4444;
+}
+
+.step-icon.warning {
+  color: #f59e0b;
+}
+
+.step-name {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.step-name.completed {
+  color: #16a34a;
+  font-weight: 500;
+}
+
+.step-name.processing {
+  color: #3b82f6;
+  font-weight: 500;
+}
+
+.step-name.error {
+  color: #ef4444;
+}
+
+.step-name.warning {
+  color: #f59e0b;
+}
+
+.step-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.step-status.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.step-status.warning {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* 文件列表 */
+.file-list {
+  margin-left: 32px;
+  margin-top: var(--spacing-xs);
+  margin-bottom: var(--spacing-xs);
+  padding: var(--spacing-sm);
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.file-status-icon {
+  font-size: 10px;
+  width: 16px;
+  text-align: center;
+}
+
+.file-name {
+  flex: 1;
+  color: var(--text-secondary);
+}
+
+.file-name.completed {
+  color: #16a34a;
+  font-weight: 500;
+}
+
+.file-name.missing {
+  color: #9ca3af;
+}
+
+.file-filename {
+  color: var(--text-tertiary);
+  font-family: monospace;
+  font-size: 11px;
+}
+
+/* 查看数据按钮 */
+.task-flow-actions {
+  margin-top: var(--spacing-sm);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border-light);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.view-data-btn-small {
+  padding: 4px 12px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-data-btn-small:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+}
+
+.result-item.incomplete {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #92400e;
+}
+
+.result-header,
+.warning-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-xs);
+}
+
+.match-id {
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.result-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+}
+
+.result-status.complete {
+  background: #16a34a;
+  color: white;
+}
+
+.result-status.incomplete {
+  background: #d97706;
+  color: white;
+}
+
+.missing-fields {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: var(--spacing-xs);
+}
+
+.error-msg {
+  color: #dc2626;
+}
+
+.warning-time {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
 .ths-status-message.error {
   background: #fee2e2;
   color: #991b1b;
@@ -5466,6 +6979,7 @@ setInterval(checkPlatformTabs, 5000);
 .repair-item {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   padding: var(--spacing-sm) var(--spacing-md);
   border-bottom: 1px solid var(--border-light);
   font-size: 12px;
@@ -5475,6 +6989,18 @@ setInterval(checkPlatformTabs, 5000);
   border-bottom: none;
 }
 
+.repair-item-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.repair-item-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .match-id {
   font-family: monospace;
   font-weight: 500;
@@ -5482,6 +7008,23 @@ setInterval(checkPlatformTabs, 5000);
 
 .error-reason {
   color: #ef4444;
+}
+
+/* 查看数据按钮 */
+.view-data-btn {
+  padding: 4px 8px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.view-data-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
 }
 
 
@@ -5729,6 +7272,217 @@ setInterval(checkPlatformTabs, 5000);
 
 .log-item.warning .log-msg {
   color: #f59e0b;
+}
+
+/* ==================== 步骤化工作流样式 ==================== */
+
+.workflow-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.workflow-step {
+  background: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-md);
+  transition: all 0.3s ease;
+}
+
+.workflow-step:last-child {
+  margin-bottom: 0;
+}
+
+.workflow-step.running {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.workflow-step.completed {
+  border-color: #10b981;
+}
+
+.workflow-step.error {
+  border-color: #ef4444;
+}
+
+.step-header {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-sm);
+}
+
+.step-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.step-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.step-status {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+
+.step-status.idle {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.step-status.running {
+  background: #dbeafe;
+  color: #1d4ed8;
+  animation: pulse 2s infinite;
+}
+
+.step-status.completed {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.step-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.step-content {
+  margin-left: 36px;
+}
+
+.step-result {
+  margin-bottom: var(--spacing-sm);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.step-result .stat {
+  margin-right: var(--spacing-md);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.step-result .stat.new {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.step-result .stat.existing {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.step-btn {
+  padding: 8px 16px;
+  font-size: 13px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #e5e7eb;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: var(--spacing-xs);
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.progress-text .skipped {
+  color: #f59e0b;
+  margin-left: var(--spacing-sm);
+}
+
+.captcha-notice {
+  margin-top: var(--spacing-sm);
+  font-size: 11px;
+  color: #f59e0b;
+  background: #fef3c7;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+/* 状态栏样式 */
+.status-bar {
+  display: flex;
+  gap: var(--spacing-lg);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--spacing-md);
+}
+
+.status-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.status-item .label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.status-item .value {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.status-item .value.idle {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-item .value.running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* 备用控制面板 */
+.manual-controls-section {
+  opacity: 0.8;
+}
+
+.manual-controls-section:hover {
+  opacity: 1;
 }
 
 </style>

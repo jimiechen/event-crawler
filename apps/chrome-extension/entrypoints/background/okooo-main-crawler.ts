@@ -13,6 +13,7 @@ interface CrawlerTask {
   filenamePrefix?: string;
   skipped?: boolean;
   skipReason?: string;
+  date?: string;  // 日期字段，用于历史数据检查
 }
 
 interface CrawlerStats {
@@ -41,6 +42,14 @@ export class OkoooMainCrawler {
   private stats: CrawlerStats = this.getInitialStats();
   private readonly MAX_LOGS = 100;
   private eventSource: EventSource | null = null;  // SSE连接
+
+  // 比赛完成状态跟踪
+  private matchCompletionTracker: Map<string, {
+    total: number;
+    completed: number;
+    date: string;
+    status: 'pending' | 'parsing' | 'completed' | 'error';
+  }> = new Map();
 
   private getInitialStats(): CrawlerStats {
     return {
@@ -285,9 +294,12 @@ export class OkoooMainCrawler {
       if (result.skip) {
         skippedTasks.push(result);
       } else {
-        // 合并检查结果和原始任务，保留URL
+        // 合并检查结果和原始任务，保留所有必要字段
         tasksToCrawl.push({
           ...result,
+          match_id: originalTask.match_id,
+          page_type: originalTask.page_type,
+          filename_prefix: originalTask.filename_prefix || originalTask.filenamePrefix,
           url: originalTask.url  // 保留原始URL
         });
       }
@@ -328,7 +340,7 @@ export class OkoooMainCrawler {
           awayTeam: '未知客队',
           pageType: t.page_type,
           url: t.url,  // 现在URL已正确保留
-          filenamePrefix: t.filename_prefix,
+          filenamePrefix: t.filename_prefix || t.filenamePrefix,
           status: 'pending'
       }));
       this.stats.totalTasks = this.taskQueue.length;
@@ -359,7 +371,7 @@ export class OkoooMainCrawler {
           match_id: t.match_id,
           page_type: t.page_type,
           url: t.url,
-          filename_prefix: t.filename_prefix
+          filename_prefix: t.filename_prefix || t.filenamePrefix  // 兼容两种命名
         })),
         date: new Date().toISOString().split('T')[0]  // 当前日期
       };
@@ -471,7 +483,7 @@ export class OkoooMainCrawler {
 
   private generateTaskQueue(matches: {id: string, home: string, away: string}[], templates: any[]) {
     this.taskQueue = [];
-    
+
     for (const match of matches) {
       for (const t of templates) {
         let url = t.url;
@@ -501,18 +513,89 @@ export class OkoooMainCrawler {
             }
         }
 
+        // 获取 filenamePrefix
+        const filenamePrefix = t.filename_prefix || this.getFilenamePrefix(t.name, t.url);
+
         this.taskQueue.push({
           matchId: match.id,
           homeTeam: match.home,
           awayTeam: match.away,
           pageType: t.name || '未知',
           url,
+          filenamePrefix,
           status: 'pending'
         });
       }
     }
-    
+
     this.stats.totalTasks = this.taskQueue.length;
+
+    // 初始化比赛完成状态跟踪
+    this.initMatchCompletionTracker();
+  }
+
+  /**
+   * 初始化比赛完成状态跟踪
+   */
+  private initMatchCompletionTracker() {
+    this.matchCompletionTracker.clear();
+
+    // 统计每个比赛的页面数量
+    const matchPageCount: Map<string, number> = new Map();
+    this.taskQueue.forEach(task => {
+      const count = matchPageCount.get(task.matchId) || 0;
+      matchPageCount.set(task.matchId, count + 1);
+    });
+
+    // 初始化跟踪器
+    const date = new Date().toISOString().split('T')[0];
+    matchPageCount.forEach((total, matchId) => {
+      this.matchCompletionTracker.set(matchId, {
+        total,
+        completed: 0,
+        date,
+        status: 'pending'
+      });
+    });
+
+    this.addLog(`📊 初始化比赛跟踪: ${this.matchCompletionTracker.size} 个比赛`);
+  }
+
+  /**
+   * 根据页面名称或URL获取文件名前缀
+   */
+  private getFilenamePrefix(name: string, url: string): string {
+    const nameMap: {[key: string]: string} = {
+      '历史': 'history',
+      '战绩': 'history',
+      '欧赔': 'odds',
+      '亚盘': 'handicap',
+      '盈亏': 'exchanges',
+      '阵容': 'form',
+      '积分': 'game',
+      '澳门亚盘变化': 'macao_change',
+      '必发指数变化': 'bifa_change'
+    };
+
+    // 先尝试匹配名称
+    if (name && nameMap[name]) {
+      return nameMap[name];
+    }
+
+    // 根据URL判断
+    if (url) {
+      if (url.includes('history')) return 'history';
+      if (url.includes('op.php') || url.includes('/odds')) return 'odds';
+      if (url.includes('yp.php') || url.includes('/handicap')) return 'handicap';
+      if (url.includes('exchanges')) return 'exchanges';
+      if (url.includes('form')) return 'form';
+      if (url.includes('game') || url.includes('table')) return 'game';
+      if (url.includes('change.php') && url.includes('PID=84')) return 'macao_change';
+      if (url.includes('change.php') && url.includes('PID=0')) return 'bifa_change';
+    }
+
+    // 默认使用页面名称的小写形式
+    return name ? name.toLowerCase().replace(/\s+/g, '_') : 'unknown';
   }
 
   private async processTaskQueue() {
@@ -526,6 +609,19 @@ export class OkoooMainCrawler {
       this.addLog('🏁 所有任务完成');
       // 广播完成状态
       this.broadcastStatus();
+      
+      // 发送完成事件，通知前端清空待修复列表
+      chrome.runtime.sendMessage({
+        type: 'OKOOO_CRAWLER_COMPLETED',
+        data: {
+          message: '所有任务完成',
+          completedAt: new Date().toISOString(),
+          totalTasks: this.stats.totalTasks,
+          successCount: this.stats.successCount,
+          errorCount: this.stats.errorCount
+        }
+      }).catch(() => {});
+      
       return;
     }
 
@@ -541,14 +637,17 @@ export class OkoooMainCrawler {
 
     try {
       // 0. 检查文件是否已存在（防重复）
-      const exists = await this.checkFileExists(task.matchId, task.pageType);
+      const exists = await this.checkFileExists(task.matchId, task.pageType, task.date);
       if (exists) {
         this.addLog(`⏭️ 跳过已存在: ${task.matchId} [${task.pageType}]`);
         task.status = 'skipped';
         task.skipped = true;
         task.skipReason = '文件已存在';
         this.stats.skippedCount++;
-        
+
+        // 关键修复：跳过任务也要计入完成度，触发解析
+        await this.updateMatchCompletion(task.matchId, 'skipped');
+
         // 继续下一个任务
         this.currentTaskIndex++;
         this.broadcastStatus();
@@ -558,48 +657,80 @@ export class OkoooMainCrawler {
         return;
       }
 
-      // 1. 打开 URL
-      await chrome.tabs.update(this.tabId!, { url: task.url });
-      
-      // 2. 等待加载
-      await this.wait(2000); // 基础等待
-      await this.waitForPageLoad(this.tabId!);
-      
+      this.addLog(`🚀 [任务开始] ${task.matchId} - ${task.pageType} - ${task.url}`);
+
+      // 1. 打开 URL 并等待页面完全加载
+      this.addLog('📡 开始导航...');
+      await this.navigateAndWaitForLoad(this.tabId!, task.url);
+      this.addLog('✅ 导航完成');
+
       // 调试: 检查URL是否发生跳转
       const currentUrl = await this.getCurrentUrl();
-      this.addLog(`URL检查: 目标=${task.url} 实际=${currentUrl}`);
+      this.addLog(`🔍 URL检查: 目标=${task.url} 实际=${currentUrl}`);
       if (currentUrl && task.url && currentUrl.split('?')[0] !== task.url.split('?')[0]) {
-         this.addLog(`⚠️ 检测到URL跳转/不一致: \n目标: ${task.url}\n实际: ${currentUrl}`, 'warning');
+         this.addLog(`⚠️ 检测到URL跳转/不一致`, 'warning');
       }
-      
+
       // 3. 检查验证码
+      this.addLog('🔐 检查验证码...');
       await this.checkCaptchaAndPause();
-      if (!this.isRunning) return; // 如果在暂停期间被停止
+      if (!this.isRunning) {
+        this.addLog('⏹️ 爬虫已停止，退出任务');
+        return;
+      }
 
       // 4. 再次确认内容加载 (防止空白页)
+      this.addLog('📄 检查页面内容...');
       const hasContent = await this.checkPageHasContent();
       if (!hasContent) {
-        const urlNow = await this.getCurrentUrl();
-        this.addLog(`⚠️ 页面内容为空，重试一次... (当前URL: ${urlNow})`, 'warning');
+        this.addLog(`⚠️ 页面内容为空，重试一次...`, 'warning');
         await chrome.tabs.reload(this.tabId!);
         await this.wait(3000);
         await this.checkCaptchaAndPause();
       }
 
-      // 5. 捕获并保存
+      // 5. 等待所有网络请求完成（再次确认）
+      this.addLog('⏳ 等待网络请求完成...');
+      await this.waitForNetworkIdle(this.tabId!, 5000);
+      this.addLog('✅ 网络请求完成');
+
+      // 6. 捕获并保存
+      this.addLog('📥 捕获页面HTML...');
       const html = await this.getPageHtml();
+      this.addLog(`📊 HTML大小: ${html.length} 字符`);
+
+      // 7. 验证HTML内容完整性
+      if (!html || html.length < 1000) {
+        this.addLog(`❌ HTML内容不完整: ${html?.length || 0} 字符`, 'error');
+        throw new Error('页面内容不完整，可能请求被取消');
+      }
+
+      // 8. 检查是否包含关键内容（根据页面类型）
+      this.addLog('🔍 验证页面内容...');
+      const isValidContent = await this.validatePageContent(task.pageType);
+      if (!isValidContent) {
+        this.addLog(`❌ 页面内容验证失败`, 'error');
+        throw new Error('页面内容验证失败，缺少关键数据');
+      }
+      this.addLog('✅ 页面内容验证通过');
+
+      // 9. 保存到后端
+      this.addLog('💾 保存到后端...');
       await this.saveHtmlToBackend(task, html);
       
       task.status = 'success';
       this.stats.successCount++;
-      // Log success is handled in saveHtmlToBackend
+      this.addLog(`✅ [任务完成] ${task.matchId} - ${task.pageType}`);
 
     } catch (error) {
       task.status = 'error';
       task.error = String(error);
       this.stats.errorCount++;
-      this.addLog(`❌ 任务失败: ${error}`, 'error');
+      this.addLog(`❌ [任务失败] ${task.matchId} - ${task.pageType}: ${error}`, 'error');
     }
+
+    // 更新比赛完成状态
+    await this.updateMatchCompletion(task.matchId, task.status);
 
     // 广播状态更新
     this.broadcastStatus();
@@ -607,17 +738,110 @@ export class OkoooMainCrawler {
     // 继续下一个
     this.currentTaskIndex++;
     if (this.isRunning) {
-      setTimeout(() => this.processTaskQueue(), 1500); // 间隔1.5秒
+      // 增加间隔时间，确保上一个页面的所有请求都已完成
+      this.addLog('⏳ 等待页面完全卸载...');
+      await this.wait(3000); // 等待3秒确保页面卸载完成
+      setTimeout(() => this.processTaskQueue(), 1500); // 额外间隔1.5秒
+    }
+  }
+
+  /**
+   * 更新比赛完成状态
+   * 当一个比赛的所有页面都完成时，触发解析
+   */
+  private async updateMatchCompletion(matchId: string, taskStatus: string) {
+    const tracker = this.matchCompletionTracker.get(matchId);
+    if (!tracker) return;
+
+    // 增加完成计数（无论成功、失败还是跳过，都算完成）
+    tracker.completed++;
+
+    this.addLog(`📊 比赛 ${matchId} 进度: ${tracker.completed}/${tracker.total}`);
+
+    // 检查是否所有页面都已完成
+    if (tracker.completed >= tracker.total) {
+      this.addLog(`✅ 比赛 ${matchId} 所有页面已完成，准备解析...`);
+      tracker.status = 'parsing';
+
+      // 触发解析
+      await this.triggerMatchParse(matchId, tracker.date);
+    }
+  }
+
+  /**
+   * 触发单个比赛的解析
+   */
+  private async triggerMatchParse(matchId: string, date: string) {
+    try {
+      this.addLog(`🔍 开始解析比赛 ${matchId}...`);
+
+      // 调用后端解析API
+      const response = await fetch(
+        `${BACKEND_CONFIG.baseUrl}/api/v1/okooo/parse/match/${date}/${matchId}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        this.addLog(`✅ 比赛 ${matchId} 解析完成`);
+
+        // 更新跟踪器状态
+        const tracker = this.matchCompletionTracker.get(matchId);
+        if (tracker) {
+          tracker.status = 'completed';
+        }
+
+        // 通知前端
+        chrome.runtime.sendMessage({
+          type: 'OKOOO_MATCH_PARSED',
+          data: {
+            matchId,
+            date,
+            success: true,
+            data: result.data
+          }
+        }).catch(() => {});
+      } else {
+        throw new Error(result.message || '解析失败');
+      }
+    } catch (error) {
+      this.addLog(`❌ 比赛 ${matchId} 解析失败: ${error}`, 'error');
+
+      // 更新跟踪器状态
+      const tracker = this.matchCompletionTracker.get(matchId);
+      if (tracker) {
+        tracker.status = 'error';
+      }
+
+      // 通知前端
+      chrome.runtime.sendMessage({
+        type: 'OKOOO_MATCH_PARSE_ERROR',
+        data: {
+          matchId,
+          date,
+          success: false,
+          error: String(error)
+        }
+      }).catch(() => {});
     }
   }
 
   /**
    * 检查文件是否已存在
    */
-  private async checkFileExists(matchId: string, pageType: string): Promise<boolean> {
+  private async checkFileExists(matchId: string, pageType: string, date?: string): Promise<boolean> {
     try {
+      const checkDate = date || new Date().toISOString().split('T')[0];
       const response = await fetch(
-        `${BACKEND_CONFIG.baseUrl}/api/v1/okooo/check-file?match_id=${matchId}&page_type=${encodeURIComponent(pageType)}`
+        `${BACKEND_CONFIG.baseUrl}/api/v1/okooo/check-file?match_id=${matchId}&page_type=${encodeURIComponent(pageType)}&date=${checkDate}`
       );
       if (response.ok) {
         const data = await response.json();
@@ -693,9 +917,37 @@ export class OkoooMainCrawler {
   private async getPageHtml(): Promise<string> {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: this.tabId! },
-      func: () => document.documentElement.outerHTML
+      func: () => {
+        // 检查页面是否有错误提示（如请求被取消）
+        const errorIndicators = [
+          '请求被取消',
+          '请求中断',
+          '网络错误',
+          '加载失败',
+          'ERR_ABORTED',
+          'cancelled',
+          'aborted'
+        ];
+        
+        const pageText = document.body.innerText || '';
+        const hasError = errorIndicators.some(indicator => 
+          pageText.includes(indicator)
+        );
+        
+        if (hasError) {
+          return { error: '页面包含错误信息', html: '' };
+        }
+        
+        return { html: document.documentElement.outerHTML };
+      }
     });
-    return (result as any)?.result || '';
+    
+    const data = (result as any)?.result;
+    if (data?.error) {
+      throw new Error(data.error);
+    }
+    
+    return data?.html || '';
   }
 
   private async saveHtmlToBackend(task: CrawlerTask, html: string) {
@@ -705,13 +957,14 @@ export class OkoooMainCrawler {
       url: task.url,
       match_id: task.matchId,
       page_type: task.pageType,
+      filename_prefix: task.filenamePrefix,  // 添加文件名前缀
       captured_at: new Date().toISOString(),
       date: new Date().toISOString().split('T')[0]
     };
 
     if (task.pageType.includes('历史') || task.pageType.includes('战绩') || task.pageType === 'history') {
       apiUrl = '/api/v1/okooo/save-history-html';
-      body.parent_match_id = task.matchId; 
+      body.parent_match_id = task.matchId;
     } else if (task.pageType.includes('亚盘') || task.pageType === 'handicap' || task.pageType.includes('yp')) {
       apiUrl = '/api/v1/okooo/save-handicap-html';
     } else if (task.pageType.includes('列表') || task.pageType === 'list') {
@@ -724,15 +977,15 @@ export class OkoooMainCrawler {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
-      
+
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
-      
+
       const resData = await response.json();
       const savePath = resData.data?.save_path || resData.data?.path || '未知路径';
       this.addLog(`✓ 保存成功: ${savePath}`);
-      
+
     } catch (e) {
       throw new Error(`保存失败: ${e}`);
     }
@@ -780,16 +1033,86 @@ export class OkoooMainCrawler {
   }
   
   private async waitForPageLoad(tabId: number): Promise<void> {
+    // 第一阶段：等待 document.readyState === 'complete'
     for (let i = 0; i < 30; i++) {
       try {
         const [res] = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => document.readyState
         });
-        if ((res as any)?.result === 'complete') return;
+        if ((res as any)?.result === 'complete') break;
       } catch(e) {}
       await this.wait(500);
     }
+    
+    // 第二阶段：等待网络空闲（没有正在进行的请求）
+    this.addLog('⏳ 等待网络请求完成...');
+    await this.waitForNetworkIdle(tabId, 3000); // 等待3秒网络空闲
+  }
+  
+  /**
+   * 等待网络空闲（没有正在进行的请求）
+   */
+  private async waitForNetworkIdle(tabId: number, idleTime: number = 2000): Promise<void> {
+    this.addLog(`[网络] 开始等待网络空闲 ${idleTime}ms...`);
+    
+    // 使用 Performance API 检查网络状态
+    const checkNetworkIdle = async (): Promise<boolean> => {
+      try {
+        const [res] = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => {
+            // 检查是否有未完成的图片、XHR、fetch请求
+            const performanceEntries = performance.getEntriesByType('resource');
+            const recentEntries = performanceEntries.slice(-10); // 最近10个资源
+            const now = performance.now();
+            
+            // 检查是否有正在进行的请求（最近100ms内开始的请求）
+            const hasRecentRequests = recentEntries.some((entry: any) => {
+              const startTime = entry.startTime;
+              const duration = entry.duration;
+              // 如果请求在100ms内开始且还未完成（duration为0或很小）
+              return (now - startTime < 100) || duration === 0;
+            });
+            
+            return !hasRecentRequests;
+          }
+        });
+        return (res as any)?.result || false;
+      } catch {
+        return true; // 如果出错，假设网络已空闲
+      }
+    };
+    
+    // 连续检查网络空闲状态
+    let idleCount = 0;
+    const requiredIdleCount = Math.ceil(idleTime / 500); // 需要连续检查的次数
+    let lastStatus = '';
+    
+    for (let i = 0; i < 60; i++) { // 最多等待30秒
+      const isIdle = await checkNetworkIdle();
+      const status = isIdle ? '空闲' : '忙碌';
+      
+      // 只在状态变化时打印日志
+      if (status !== lastStatus) {
+        this.addLog(`[网络] 状态: ${status} (检查 ${i}/${60})`);
+        lastStatus = status;
+      }
+      
+      if (isIdle) {
+        idleCount++;
+        if (idleCount >= requiredIdleCount) {
+          this.addLog(`[网络] ✅ 网络已空闲，共检查 ${i} 次`);
+          return;
+        }
+      } else {
+        idleCount = 0; // 重置计数器
+      }
+      
+      await this.wait(500);
+    }
+    
+    this.addLog('[网络] ⚠️ 等待网络空闲超时，继续执行');
   }
   
   private async checkPageHasContent(): Promise<boolean> {
@@ -807,6 +1130,116 @@ export class OkoooMainCrawler {
       const tab = await chrome.tabs.get(this.tabId!);
       return tab.url || '';
     } catch { return ''; }
+  }
+
+  /**
+   * 验证页面内容是否完整（根据页面类型检查关键元素）
+   */
+  private async validatePageContent(pageType: string): Promise<boolean> {
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: this.tabId! },
+        func: (type: string) => {
+          const html = document.documentElement.outerHTML;
+          const text = document.body.innerText || '';
+
+          // 根据页面类型检查关键内容
+          switch (true) {
+            case type.includes('历史') || type.includes('战绩') || type === 'history':
+              // 历史战绩页面应该包含比赛记录表格
+              return html.includes('match') || html.includes('比赛') || text.includes('VS') || text.includes('vs');
+
+            case type.includes('欧赔') || type === 'odds':
+              // 欧赔页面应该包含赔率数据
+              return html.includes('odds') || text.includes('胜') || text.includes('平') || text.includes('负');
+
+            case type.includes('亚盘') || type === 'handicap':
+              // 亚盘页面应该包含盘口数据
+              return html.includes('handicap') || text.includes('盘口') || text.includes('让球');
+
+            case type.includes('盈亏') || type === 'exchanges':
+              // 盈亏页面应该包含指数数据
+              return html.includes('exchange') || text.includes('盈亏') || text.includes('指数');
+
+            case type.includes('阵容') || type === 'form':
+              // 阵容页面应该包含球员信息
+              return html.includes('player') || text.includes('阵容') || text.includes('球员');
+
+            case type.includes('积分') || type === 'game':
+              // 积分页面应该包含排名数据
+              return html.includes('rank') || text.includes('排名') || text.includes('积分');
+
+            default:
+              // 默认检查：页面应该有足够的内容
+              return html.length > 5000 && text.length > 200;
+          }
+        },
+        args: [pageType]
+      });
+
+      return (result as any)?.result || false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 导航到URL并等待页面完全加载
+   * 使用 chrome.tabs.onUpdated 监听加载完成事件
+   */
+  private async navigateAndWaitForLoad(tabId: number, url: string): Promise<void> {
+    this.addLog(`[导航] 开始导航到: ${url}`);
+    
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.addLog('[导航] ❌ 60秒超时', 'error');
+        cleanup();
+        reject(new Error('页面加载超时'));
+      }, 60000); // 60秒超时
+
+      let isLoading = false;
+      let loadStartTime = 0;
+
+      const listener = (updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) => {
+        if (updatedTabId !== tabId) return;
+
+        this.addLog(`[导航] onUpdated: status=${changeInfo.status}, url=${tab.url?.substring(0, 50)}...`);
+
+        // 监听加载开始
+        if (changeInfo.status === 'loading') {
+          isLoading = true;
+          loadStartTime = Date.now();
+          this.addLog('[导航] 🔄 页面开始加载...');
+        }
+
+        // 监听加载完成
+        if (changeInfo.status === 'complete' && isLoading) {
+          const loadTime = Date.now() - loadStartTime;
+          this.addLog(`[导航] ✅ 页面加载完成，耗时 ${loadTime}ms`);
+          cleanup();
+          resolve();
+        }
+      };
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        chrome.tabs.onUpdated.removeListener(listener);
+      };
+
+      // 注册监听器
+      chrome.tabs.onUpdated.addListener(listener);
+      this.addLog('[导航] 已注册 onUpdated 监听器');
+
+      // 执行导航
+      this.addLog(`[导航] 执行 chrome.tabs.update...`);
+      chrome.tabs.update(tabId, { url }).then(() => {
+        this.addLog('[导航] chrome.tabs.update 已执行');
+      }).catch((err) => {
+        this.addLog(`[导航] ❌ chrome.tabs.update 失败: ${err}`, 'error');
+        cleanup();
+        reject(err);
+      });
+    });
   }
 }
 

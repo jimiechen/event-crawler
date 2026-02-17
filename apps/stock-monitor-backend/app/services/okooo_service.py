@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 import asyncio
 import logging
+import os
+import sys
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 from sqlalchemy import select, desc, update, delete
@@ -12,6 +14,11 @@ from app.services.task_executor import manager  # WebSocket manager
 from app.services.sse_service import sse_service  # SSE Service
 
 logger = logging.getLogger(__name__)
+
+# 添加 scripts 目录到路径，用于导入解析器
+SCRIPTS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'scripts')
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
 
 class OkoooService:
     """
@@ -531,17 +538,23 @@ class OkoooService:
         
         return results
 
-    async def check_single_file_exists(self, match_id: str, page_type: str) -> bool:
+    async def check_single_file_exists(self, match_id: str, page_type: str, date_str: str = None) -> bool:
         """
         检查单个文件是否已存在且有效
         用于爬虫防重复机制
+        
+        Args:
+            match_id: 比赛ID
+            page_type: 页面类型
+            date_str: 日期 (YYYY-MM-DD)，默认使用今天
         """
         import os
         
         try:
-            # 获取今天的日期
-            from datetime import datetime
-            date_str = datetime.now().strftime("%Y-%m-%d")
+            # 使用传入的日期或今天
+            if not date_str:
+                from datetime import datetime
+                date_str = datetime.now().strftime("%Y-%m-%d")
             
             # 生成文件名
             filename = self._get_filename_by_type(page_type, match_id)
@@ -576,6 +589,73 @@ class OkoooService:
         except Exception as e:
             logger.error(f"[OkoooCheck] 检查文件存在性失败: {e}")
             return False
+
+    async def filter_new_matches(self, date: str, match_ids: List[str], check_days: int = 7) -> Dict[str, Any]:
+        """
+        筛选出新比赛（今天抓取但历史日期不存在的）
+        
+        Args:
+            date: 今天的日期 (YYYY-MM-DD)
+            match_ids: 今日抓取的比赛ID列表
+            check_days: 检查历史天数，默认7天
+            
+        Returns:
+            {
+                "new_matches": [...],      # 新比赛ID列表
+                "existing_matches": [...], # 已存在比赛ID列表
+                "new_count": int,
+                "existing_count": int
+            }
+        """
+        import os
+        from datetime import datetime, timedelta
+        
+        try:
+            new_matches = []
+            existing_matches = []
+            
+            base_dir = os.path.join(os.getcwd(), "data", "okooo", "matches")
+            
+            for match_id in match_ids:
+                # 检查历史日期目录是否存在该比赛
+                exists_in_history = False
+                
+                # 生成前check_days天的日期列表
+                for i in range(1, check_days + 1):
+                    check_date = (datetime.strptime(date, "%Y-%m-%d") - timedelta(days=i)).strftime("%Y-%m-%d")
+                    match_dir = os.path.join(base_dir, check_date, match_id)
+                    
+                    if os.path.exists(match_dir):
+                        # 检查目录下是否有文件
+                        if os.listdir(match_dir):
+                            exists_in_history = True
+                            logger.info(f"[FilterNew] 比赛 {match_id} 已存在于 {check_date}")
+                            break
+                
+                if exists_in_history:
+                    existing_matches.append(match_id)
+                else:
+                    new_matches.append(match_id)
+            
+            result = {
+                "new_matches": new_matches,
+                "existing_matches": existing_matches,
+                "new_count": len(new_matches),
+                "existing_count": len(existing_matches)
+            }
+            
+            logger.info(f"[FilterNew] 筛选完成: 新比赛 {result['new_count']} 个, 已存在 {result['existing_count']} 个")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[FilterNew] 筛选新比赛失败: {e}")
+            return {
+                "new_matches": match_ids,
+                "existing_matches": [],
+                "new_count": len(match_ids),
+                "existing_count": 0,
+                "error": str(e)
+            }
 
     async def start_crawl(self, start_id: int, end_id: int) -> bool:
         """启动爬虫任务"""
@@ -670,8 +750,10 @@ class OkoooService:
 
     async def _run_crawl_ids(self, scheduler: OkoooScheduler, match_ids: list, force: bool = False, date_str: Optional[str] = None):
         """执行ID列表爬虫任务的包装器"""
+        crawl_success = False
         try:
             await scheduler.crawl_ids(match_ids, force=force, date_str=date_str)
+            crawl_success = True
         except Exception as e:
             logger.error(f"Crawl ids task error: {e}")
             await self._on_log("ERROR", f"Crawl ids task crashed: {e}")
@@ -686,6 +768,169 @@ class OkoooService:
                 "type": "okooo_status",
                 "is_running": False
             })
+            
+            # 爬虫完成后，自动触发解析任务
+            if crawl_success and date_str:
+                await self._on_log("INFO", f"爬虫完成，开始解析 {date_str} 的比赛数据...")
+                await self._parse_matches_after_crawl(date_str, match_ids)
+
+    async def _parse_matches_after_crawl(self, date_str: str, match_ids: List[str]):
+        """
+        爬虫完成后解析比赛数据
+        逐个比赛解析，发送详细的进度和结果到前端
+        """
+        try:
+            # 延迟导入解析器
+            from parse_okooo_mobile import OkoooParser
+
+            # 初始化解析器
+            base_dir = os.path.join(os.getcwd(), "data", "okooo", "matches")
+            output_dir = os.path.join(os.getcwd(), "data", "okooo", "processed")
+            parser = OkoooParser(base_dir, output_dir)
+
+            total = len(match_ids)
+            parsed_count = 0
+            failed_count = 0
+            incomplete_count = 0
+
+            await self._on_log("INFO", f"开始解析 {total} 场比赛...")
+
+            # 发送解析开始事件
+            await sse_service.broadcast("okooo_parse_start", {
+                "date": date_str,
+                "total": total,
+                "match_ids": match_ids,
+                "message": f"开始解析 {total} 场比赛"
+            })
+
+            for idx, match_id in enumerate(match_ids, 1):
+                try:
+                    # 步骤1: 检查目录
+                    match_dir = os.path.join(base_dir, date_str, match_id)
+                    dir_exists = os.path.exists(match_dir)
+
+                    # 发送目录状态事件
+                    await sse_service.broadcast("okooo_task_directory_status", {
+                        "match_id": match_id,
+                        "date": date_str,
+                        "exists": dir_exists,
+                        "path": match_dir,
+                        "step": "directory",
+                        "status": "completed" if dir_exists else "error"
+                    })
+
+                    # 步骤2: 检查8个文件
+                    expected_files = {
+                        "history": {"name": "澳客历史", "filename": f"history_{match_id}.html"},
+                        "exchanges": {"name": "澳客盈亏", "filename": f"exchanges_{match_id}.html"},
+                        "form": {"name": "澳客阵容", "filename": f"form_{match_id}.html"},
+                        "handicap": {"name": "澳客亚盘", "filename": f"handicap_{match_id}.html"},
+                        "odds": {"name": "澳客欧赔", "filename": f"odds_{match_id}.html"},
+                        "game": {"name": "澳客积分", "filename": f"game_{match_id}.html"},
+                        "macao_change": {"name": "澳门亚盘变化", "filename": f"macao_change_{match_id}.html"},
+                        "bifa_change": {"name": "必发指数变化", "filename": f"bifa_change_{match_id}.html"},
+                    }
+
+                    file_statuses = {}
+                    if dir_exists:
+                        files = os.listdir(match_dir)
+                        for key, info in expected_files.items():
+                            exists = info["filename"] in files
+                            file_statuses[key] = {
+                                "name": info["name"],
+                                "filename": info["filename"],
+                                "exists": exists,
+                                "status": "completed" if exists else "missing"
+                            }
+
+                    # 发送文件状态事件
+                    await sse_service.broadcast("okooo_task_files_status", {
+                        "match_id": match_id,
+                        "date": date_str,
+                        "files": file_statuses,
+                        "completed_count": sum(1 for f in file_statuses.values() if f["exists"]),
+                        "total_count": len(expected_files),
+                        "step": "files"
+                    })
+
+                    # 步骤3: 解析JSON
+                    await sse_service.broadcast("okooo_task_parse_start", {
+                        "match_id": match_id,
+                        "date": date_str,
+                        "step": "parse",
+                        "status": "processing"
+                    })
+
+                    # 解析比赛数据
+                    result = parser.process_date_match(date_str, match_id)
+
+                    # 保存结果
+                    output_path = parser.save_result(date_str, match_id, result)
+
+                    # 验证字段完整性
+                    is_complete, missing_fields = parser.validate_parsed_data(result)
+
+                    if not is_complete:
+                        incomplete_count += 1
+                        warning_msg = f"比赛 {match_id} 缺少字段: {', '.join(missing_fields)}"
+                        await self._on_log("WARNING", warning_msg)
+
+                        # 发送告警到前端
+                        await sse_service.broadcast("okooo_parse_warning", {
+                            "match_id": match_id,
+                            "date": date_str,
+                            "missing_fields": missing_fields,
+                            "message": warning_msg,
+                            "step": "parse",
+                            "status": "warning"
+                        })
+                    else:
+                        await self._on_log("INFO", f"[{idx}/{total}] {match_id} 解析完成，字段完整")
+
+                    # 发送解析完成事件
+                    await sse_service.broadcast("okooo_task_parse_complete", {
+                        "match_id": match_id,
+                        "date": date_str,
+                        "progress": {"current": idx, "total": total},
+                        "is_complete": is_complete,
+                        "missing_fields": missing_fields if not is_complete else [],
+                        "output_path": output_path,
+                        "step": "parse",
+                        "status": "completed" if is_complete else "incomplete"
+                    })
+
+                    parsed_count += 1
+
+                except Exception as e:
+                    failed_count += 1
+                    error_msg = f"[{idx}/{total}] {match_id} 解析失败: {str(e)}"
+                    await self._on_log("ERROR", error_msg)
+
+                    # 发送解析失败事件
+                    await sse_service.broadcast("okooo_task_parse_error", {
+                        "match_id": match_id,
+                        "date": date_str,
+                        "error": str(e),
+                        "step": "parse",
+                        "status": "error"
+                    })
+
+            # 发送解析总结
+            summary_msg = f"解析完成: {parsed_count}/{total} 成功, {failed_count} 失败, {incomplete_count} 字段不完整"
+            await self._on_log("INFO", summary_msg)
+
+            await sse_service.broadcast("okooo_parse_summary", {
+                "date": date_str,
+                "total": total,
+                "parsed": parsed_count,
+                "failed": failed_count,
+                "incomplete": incomplete_count,
+                "message": summary_msg
+            })
+
+        except Exception as e:
+            logger.error(f"解析任务失败: {e}")
+            await self._on_log("ERROR", f"解析任务失败: {str(e)}")
 
     async def _run_crawl_lists(self, scheduler: OkoooScheduler):
         """执行列表爬虫任务的包装器"""
@@ -942,7 +1187,8 @@ class OkoooService:
         date: str,
         page_type: Optional[str] = None,
         pid: Optional[str] = None,
-        force: bool = False
+        force: bool = False,
+        filename_prefix: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         保存比赛详情页面 HTML
@@ -962,8 +1208,11 @@ class OkoooService:
             ))
             os.makedirs(save_dir, exist_ok=True)
 
-            # 生成文件名
-            filename = self._get_filename_by_type(page_type, match_id, pid)
+            # 生成文件名（优先使用传入的filename_prefix）
+            if filename_prefix:
+                filename = f"{filename_prefix}_{match_id}.html"
+            else:
+                filename = self._get_filename_by_type(page_type, match_id, pid)
             save_path = os.path.join(save_dir, filename)
 
             # 检查文件是否已存在且有效（大小>=2KB）
