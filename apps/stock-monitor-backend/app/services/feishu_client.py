@@ -501,6 +501,71 @@ class FeishuClient:
 • `@winbot 分析股票 <代码>` - 分析指定股票"""
         
         return self.send_group_message(content, msg_type="text")
+    
+    def send_screenshot_status(self,
+                               trade_date: date,
+                               sector_code: str,
+                               screenshot_results: List[Dict[str, Any]],
+                               total_stocks: int) -> Dict[str, Any]:
+        """
+        发送截图完成状态到飞书
+        
+        Args:
+            trade_date: 交易日期
+            sector_code: 板块代码
+            screenshot_results: 截图结果列表
+            total_stocks: 总股票数量
+            
+        Returns:
+            Dict: 发送结果
+        """
+        from datetime import datetime
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        success_count = len([r for r in screenshot_results if r.get('success')])
+        failed_count = len([r for r in screenshot_results if not r.get('success')])
+        
+        # 构建截图列表
+        screenshot_list = []
+        for result in screenshot_results[:5]:  # 最多显示5个
+            stock_code = result.get('stock_code', '')
+            path = result.get('path', '')
+            img_type = result.get('type', 'tdx')
+            if result.get('success'):
+                screenshot_list.append(f"✅ {stock_code} ({img_type})")
+            else:
+                error = result.get('error', '未知错误')
+                screenshot_list.append(f"❌ {stock_code} - {error}")
+        
+        if len(screenshot_results) > 5:
+            screenshot_list.append(f"... 等共 {len(screenshot_results)} 只股票")
+        
+        # 构建消息内容
+        content = f"""📸 截图任务完成通知
+
+📋 **任务**：通达信+天龙博弈截图
+📅 **日期**：{trade_date}
+🏷️ **板块**：{sector_code}
+⏰ **时间**：{current_time}
+
+📊 **执行结果**：
+✅ 成功：{success_count} 只
+❌ 失败：{failed_count} 只
+📈 总计：{total_stocks} 只
+
+🖼️ **截图详情**：
+{chr(10).join(screenshot_list) if screenshot_list else "暂无截图记录"}
+
+💾 **存储路径**：
+`static/screenshot/{trade_date.strftime('%Y%m%d')}/`
+
+---
+
+💡 **可用指令**：
+• `@winbot 检查截图` - 检查截图状态
+• `@winbot 重新截图 <代码>` - 重新截图指定股票"""
+        
+        return self.send_group_message(content, msg_type="text")
 
 
 # 全局飞书客户端实例

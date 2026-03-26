@@ -139,9 +139,20 @@ class SchedulerService:
         #     replace_existing=True
         # )
         
-        # self.scheduler.start()
-        # self.is_running = True
-        # logger.info("Scheduler started successfully")
+        # 4. 每日复盘数据更新 (收盘后30分钟)
+        # 暂时注释掉：当前没有通达信选股数据源，复盘任务会失败
+        # TODO: 恢复条件：当有通达信选股数据时取消注释
+        # self.scheduler.add_job(
+        #     self.run_daily_review,
+        #     CronTrigger(hour=15, minute=30),
+        #     id="daily_review",
+        #     name="每日复盘数据更新",
+        #     replace_existing=True
+        # )
+        
+        self.scheduler.start()
+        self.is_running = True
+        logger.info("Scheduler started successfully")
 
     def shutdown(self):
         """关闭调度器"""
@@ -582,6 +593,29 @@ class SchedulerService:
                 logger.info("每日验收测试完成")
         except Exception as e:
             logger.error(f"每日验收测试失败: {e}")
+
+    async def run_daily_review(self):
+        """每日复盘数据更新任务（收盘后30分钟）"""
+        from datetime import date
+        from app.services.daily_review_service import DailyReviewService
+        
+        logger.info("定时任务: 开始每日复盘数据更新")
+        try:
+            trade_date = date.today()
+            service = DailyReviewService()
+            
+            result = await service.update_stock_pool_daily_data(trade_date)
+            
+            if result.get("status") == "success":
+                logger.info(f"复盘数据更新完成: "
+                           f"批次数={result.get('batches_count')}, "
+                           f"股票数={result.get('stocks_count')}, "
+                           f"同步数={result.get('synced_count')}")
+            else:
+                logger.error(f"复盘数据更新失败: {result.get('error')}")
+                
+        except Exception as e:
+            logger.error(f"每日复盘数据更新任务异常: {e}")
 
     async def _init_default_tasks(self):
         """初始化默认定时任务"""

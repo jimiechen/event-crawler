@@ -9,6 +9,7 @@ import os
 import subprocess
 import json
 import re
+import threading
 from datetime import date
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -19,17 +20,32 @@ class ScreenshotService:
     """
     截图服务
     调用外部skill脚本进行截图
+    
+    注意：截图使用pyautogui截取屏幕，同一时间只能执行一个截图任务
     """
+    
+    # 类级别的锁，确保同一时间只有一个截图任务在执行
+    _screenshot_lock = threading.Lock()
     
     def __init__(self):
         """初始化截图服务"""
-        # Skill脚本路径
-        self.tdx_script_path = Path(r"d:\agentsTeam\skills\nanobot\tdx-test-screenshot\scripts\tdx_test_screenshot.py")
-        self.tlby_script_path = Path(r"d:\agentsTeam\skills\nanobot\tlby-automation\scripts\tlby_auto.py")
+        # 获取当前文件所在目录
+        self.service_dir = Path(__file__).parent
         
-        # 默认输出目录
-        self.output_dir = Path("./screenshots")
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        # Skill脚本路径（相对于服务目录，便于版本管理）
+        self.tdx_script_path = self.service_dir / "screenshot_scripts" / "tdx_test_screenshot.py"
+        self.tlby_script_path = self.service_dir / "screenshot_scripts" / "tlby_auto.py"
+        
+        # 从环境变量获取截图基础路径，或使用默认值
+        env_path = os.getenv("SCREENSHOT_BASE_PATH")
+        if env_path:
+            self.base_output_dir = Path(env_path)
+        else:
+            # 默认路径：项目根目录下的 static/screenshot
+            self.base_output_dir = self.service_dir / ".." / ".." / ".." / "static" / "screenshot"
+        
+        self.base_output_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"截图服务初始化，基础路径: {self.base_output_dir}")
     
     def _extract_json_from_output(self, output: str) -> Optional[Dict]:
         """
@@ -80,33 +96,50 @@ class ScreenshotService:
             trade_date = date.today()
         
         if output_dir is None:
-            output_dir = str(self.output_dir / trade_date.strftime("%Y%m%d") / "tdx")
+            # 按日期创建子目录：screenshot/YYYYMMDD/tdx/
+            output_dir = str(self.base_output_dir / trade_date.strftime("%Y%m%d") / "tdx")
         
         logger.info(f"开始截取通达信截图: {stock_code}")
         
-        # 构建命令
-        cmd = [
-            "python",
-            str(self.tdx_script_path),
-            "--code", stock_code,
-            "--output-dir", output_dir
-        ]
-        
-        if no_launch:
-            cmd.append("--no-launch")
+        # 获取锁，确保同一时间只有一个截图任务
+        if not self._screenshot_lock.acquire(blocking=False):
+            logger.warning("另一个截图任务正在执行，请等待")
+            return {
+                "success": False,
+                "screenshot_path": None,
+                "stock_code": stock_code,
+                "error": "另一个截图任务正在执行"
+            }
         
         try:
-            # 执行脚本
+            # 构建命令
+            cmd = [
+                "python",
+                str(self.tdx_script_path),
+                "--code", stock_code,
+                "--output-dir", output_dir
+            ]
+            
+            if no_launch:
+                cmd.append("--no-launch")
+            
+            # 执行脚本 - 增加超时时间到120秒
+            logger.info(f"执行截图脚本，超时时间: 120秒")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                text=True,
-                encoding='utf-8',
-                timeout=60
+                timeout=120
             )
             
-            # 解析输出
-            output = result.stdout + result.stderr
+            # 解析输出 - 尝试多种编码
+            try:
+                output = result.stdout.decode('utf-8') + result.stderr.decode('utf-8')
+            except UnicodeDecodeError:
+                try:
+                    output = result.stdout.decode('gbk') + result.stderr.decode('gbk')
+                except UnicodeDecodeError:
+                    output = result.stdout.decode('utf-8', errors='replace') + result.stderr.decode('utf-8', errors='replace')
+            
             json_result = self._extract_json_from_output(output)
             
             if json_result and json_result.get("success"):
@@ -144,6 +177,9 @@ class ScreenshotService:
                 "stock_code": stock_code,
                 "error": str(e)
             }
+        finally:
+            # 释放锁
+            self._screenshot_lock.release()
     
     def capture_tlby_screenshot(self,
                                 stock_code: str,
@@ -174,31 +210,42 @@ class ScreenshotService:
             trade_date = date.today()
         
         if output_dir is None:
-            output_dir = str(self.output_dir / trade_date.strftime("%Y%m%d") / "tlby")
+            # 按日期创建子目录：screenshot/YYYYMMDD/tlby/
+            output_dir = str(self.base_output_dir / trade_date.strftime("%Y%m%d") / "tlby")
         
         logger.info(f"开始截取天龙博弈截图: {stock_code}")
         
-        # 构建命令
-        cmd = [
-            "python",
-            str(self.tlby_script_path),
-            "--code", stock_code,
-            "--output-dir", output_dir
-        ]
-        
-        if no_launch:
-            cmd.append("--no-launch")
-        
-        if analyze_sanlong:
-            cmd.append("--analyze-sanlong")
+        # 获取锁，确保同一时间只有一个截图任务
+        if not self._screenshot_lock.acquire(blocking=False):
+            logger.warning("另一个截图任务正在执行，请等待")
+            return {
+                "success": False,
+                "intraday_path": None,
+                "daily_path": None,
+                "analysis_path": None,
+                "stock_code": stock_code,
+                "error": "另一个截图任务正在执行"
+            }
         
         try:
+            # 构建命令
+            cmd = [
+                "python",
+                str(self.tlby_script_path),
+                "--code", stock_code,
+                "--output-dir", output_dir
+            ]
+            
+            if no_launch:
+                cmd.append("--no-launch")
+            
+            if analyze_sanlong:
+                cmd.append("--analyze-sanlong")
+            
             # 执行脚本
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                text=True,
-                encoding='utf-8',
                 timeout=120  # 天龙博弈需要更长时间
             )
             
@@ -255,6 +302,9 @@ class ScreenshotService:
                 "stock_code": stock_code,
                 "error": str(e)
             }
+        finally:
+            # 释放锁
+            self._screenshot_lock.release()
     
     def batch_capture_tlby_screenshots(self,
                                        stock_codes: List[str],

@@ -128,6 +128,9 @@ class Settings(BaseSettings):
     batch_size: int = Field(default=1000, description="批处理大小")
     query_timeout_seconds: int = Field(default=30, description="查询超时时间(秒)")
     
+    # 截图配置
+    screenshot_base_path: str = Field(default="./static/screenshot", description="截图基础存储路径")
+    
     # 安全配置
     secret_key: str = Field(default="your-secret-key-here", description="应用密钥")
     

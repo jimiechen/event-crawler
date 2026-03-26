@@ -41,6 +41,13 @@ class StockDaily(BaseModel):
     volume_ratio: Mapped[Decimal] = mapped_column(DECIMAL(10, 4), nullable=True, comment="量比")
 
     adj_factor: Mapped[Decimal] = mapped_column(DECIMAL(10, 4), nullable=True, comment="复权因子")
+    
+    # 关联TDX选股批次
+    source_batch_id: Mapped[Optional[int]] = mapped_column(
+        Integer, 
+        nullable=True, 
+        comment="来源TDX选股批次ID"
+    )
 
 class StockDailyTemp(BaseModel):
     """临时股票日线数据表(用于形态初筛)"""

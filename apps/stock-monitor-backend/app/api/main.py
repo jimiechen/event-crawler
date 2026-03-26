@@ -142,6 +142,22 @@ try:
 except ImportError as e:
     logger.warning(f"未找到Okooo解析控制器，跳过注册: {e}")
 
+# 注册通达信选股控制器
+try:
+    from . import tdx_selection_controller
+    app.include_router(tdx_selection_controller.router)
+    logger.info("通达信选股控制器注册成功")
+except ImportError as e:
+    logger.warning(f"未找到通达信选股控制器，跳过注册: {e}")
+
+# 注册通达信日线数据控制器
+try:
+    from . import tdx_daily_controller
+    app.include_router(tdx_daily_controller.router)
+    logger.info("通达信日线数据控制器注册成功")
+except ImportError as e:
+    logger.warning(f"未找到通达信日线数据控制器，跳过注册: {e}")
+
 # 挂载静态文件目录
 app.mount("/static", StaticFiles(directory="static"), name="static")
 

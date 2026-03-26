@@ -166,7 +166,36 @@ class TdxSelectionWorkflow:
             
             logger.info(f"保存选股结果完成: {saved_count} 条记录")
             
-            # 5. 发送飞书通知
+            # 7. 同步250天日线数据到stock_daily表
+            logger.info(f"同步 {len(selected_codes)} 只股票的250天日线数据...")
+            from app.services.tdx_daily_data_service import TdxDailyDataService
+            daily_service = TdxDailyDataService(self.tdx_client)
+            sync_result = await daily_service.sync_daily_data_for_selection(
+                stock_codes=selected_codes,
+                end_date=trade_date,
+                batch_id=wencai_batch_id,
+                days=250
+            )
+            logger.info(f"日线数据同步完成: {sync_result['total_synced']} 条记录")
+            
+            # 8. 计算量价得分 (复用现有VolumeAnalysisService)
+            logger.info("计算量价得分...")
+            from app.services.volume_analysis_service import VolumeAnalysisService
+            from app.database import db_manager
+            
+            async with db_manager.get_session() as session:
+                for stock_code in selected_codes:
+                    try:
+                        code = stock_code.split('.')[0] if '.' in stock_code else stock_code
+                        await VolumeAnalysisService.generate_daily_tags(
+                            code=code,
+                            target_date=trade_date,
+                            session=session
+                        )
+                    except Exception as e:
+                         logger.warning(f"计算 {stock_code} 得分失败: {e}")
+             
+            # 9. 发送飞书通知（选股结果）
             if self.feishu_client:
                 try:
                     result = self.feishu_client.send_selection_report(
@@ -177,11 +206,28 @@ class TdxSelectionWorkflow:
                     )
                     
                     if result.get("message", {}).get("status") == "success":
-                        logger.info("飞书通知发送成功")
+                        logger.info("选股结果飞书通知发送成功")
                     else:
-                        logger.warning(f"飞书通知发送失败: {result}")
+                        logger.warning(f"选股结果飞书通知发送失败: {result}")
                 except Exception as e:
-                    logger.error(f"发送飞书通知失败: {e}")
+                    logger.error(f"发送选股结果飞书通知失败: {e}")
+            
+            # 10. 发送截图状态通知
+            if self.feishu_client and screenshot_paths:
+                try:
+                    screenshot_result = self.feishu_client.send_screenshot_status(
+                        trade_date=trade_date,
+                        sector_code=sector_code,
+                        screenshot_results=screenshot_paths,
+                        total_stocks=len(selected_codes)
+                    )
+                    
+                    if screenshot_result.get("status") == "success":
+                        logger.info("截图状态飞书通知发送成功")
+                    else:
+                        logger.warning(f"截图状态飞书通知发送失败: {screenshot_result}")
+                except Exception as e:
+                    logger.error(f"发送截图状态飞书通知失败: {e}")
             
             return {
                 "status": "success",
