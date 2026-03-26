@@ -311,11 +311,18 @@ async def get_crawl_batches(
     start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
     query_date: Optional[str] = Query(None, description="查询日期 (YYYY-MM-DD)"),
+    source: Optional[str] = Query(None, description="数据来源 (wencai/tdx)"),
+    sector_code: Optional[str] = Query(None, description="板块代码 (如: 3BL0325)"),
     limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """获取问财数据抓取批次列表"""
+    """获取问财数据抓取批次列表
+    
+    支持按数据来源筛选：
+    - wencai: 问财爬虫数据
+    - tdx: 通达信选股数据
+    """
     try:
         # 构建查询SQL
         where_conditions = []
@@ -336,6 +343,14 @@ async def get_crawl_batches(
         if query_date:
             where_conditions.append("query_date = :query_date")
             params['query_date'] = query_date
+            
+        if source:
+            where_conditions.append("source = :source")
+            params['source'] = source
+            
+        if sector_code:
+            where_conditions.append("sector_code = :sector_code")
+            params['sector_code'] = sector_code
             
         where_clause = "WHERE " + " AND ".join(where_conditions) if where_conditions else ""
         
@@ -565,17 +580,59 @@ async def get_batch_dedup_records(
         )
 
 
+@router.get("/batches/{batch_id}/stocks", response_model=BaseResponse, summary="获取批次股票数据")
+async def get_batch_stocks(
+    batch_id: int,
+    limit: int = Query(100, ge=1, le=5000, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量"),
+    db: AsyncSession = Depends(get_db_session)
+):
+    """获取指定批次的股票数据（支持TDX和问财数据）"""
+    try:
+        sql = """
+        SELECT * FROM wencai_stocks 
+        WHERE crawl_batch_id = :batch_id
+        ORDER BY change_percent DESC 
+        LIMIT :limit OFFSET :offset
+        """
+        
+        from sqlalchemy import text
+        result = await db.execute(text(sql), {'batch_id': str(batch_id), 'limit': limit, 'offset': offset})
+        rows = result.fetchall()
+        
+        records = [dict(row._mapping) for row in rows]
+        
+        return BaseResponse(
+            data=records,
+            message=f"获取批次股票数据成功，共 {len(records)} 条"
+        )
+        
+    except Exception as e:
+        logger.error(f"获取批次股票数据失败: {e}")
+        return BaseResponse(
+            success=False,
+            data=[],
+            message=f"获取批次股票数据失败: {str(e)}"
+        )
+
+
 @router.get("/stocks", response_model=BaseResponse, summary="获取问财股票数据")
 async def get_wencai_stocks(
     batch_id: Optional[int] = Query(None, description="批次ID"),
     stock_code: Optional[str] = Query(None, description="股票代码"),
+    source: Optional[str] = Query(None, description="数据来源 (wencai/tdx)"),
     start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
     limit: int = Query(50, ge=1, le=1000, description="返回数量限制"),
     offset: int = Query(0, ge=0, description="偏移量"),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """获取问财股票数据"""
+    """获取问财股票数据
+    
+    支持按数据来源筛选：
+    - wencai: 问财爬虫数据
+    - tdx: 通达信选股数据
+    """
     try:
         wencai_service = WencaiService(db)
         
@@ -585,6 +642,8 @@ async def get_wencai_stocks(
             filters['crawl_batch_id'] = batch_id
         if stock_code:
             filters['stock_code'] = stock_code
+        if source:
+            filters['source'] = source
             
         result = await wencai_service.get_stocks(
             filters=filters,

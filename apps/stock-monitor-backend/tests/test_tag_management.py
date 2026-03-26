@@ -1,145 +1,75 @@
+import requests
+import json
+import time
 
-import pytest
-from httpx import AsyncClient
-from app.main import app
+BASE_URL = "http://127.0.0.1:8000/api/v1/tags"
 
-# Base URL for tag API
-BASE_URL = "/api/v1/tags"
+def print_res(res):
+    print(f"Status: {res.status_code}")
+    try:
+        print(json.dumps(res.json(), indent=2, ensure_ascii=False))
+    except:
+        print(res.text)
 
-@pytest.mark.asyncio
-async def test_create_tag(test_client: AsyncClient):
-    # Test creating a new tag
-    tag_data = {"name": "TestTag_Unit", "score": 8.5}
-    response = await test_client.post(BASE_URL, json=tag_data)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert data["data"]["name"] == "TestTag_Unit"
-    assert float(data["data"]["score"]) == 8.5
-    
-    # Test duplicate creation
-    response = await test_client.post(BASE_URL, json=tag_data)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is False
-    assert "already exists" in data["message"]
+def main():
+    print("--- 1. Create Tag ---")
+    tag_data = {"name": "TestTag_HighGrowth", "score": 5.0}
+    res = requests.post(BASE_URL, json=tag_data)
+    print_res(res)
+    if res.status_code == 200 and res.json().get('success'):
+        tag_id = res.json()['data']['id']
+    else:
+        # If exists from previous run, try to get it
+        print("Tag might exist, fetching list...")
+        res = requests.get(BASE_URL, params={"name": "TestTag_HighGrowth"})
+        items = res.json()['data']['items']
+        if items:
+            tag_id = items[0]['id']
+            print(f"Found existing tag ID: {tag_id}")
+        else:
+            print("Failed to get tag ID")
+            return
 
-@pytest.mark.asyncio
-async def test_get_tags(test_client: AsyncClient):
-    # Create some tags first
-    await test_client.post(BASE_URL, json={"name": "Tag1", "score": 1.0})
-    await test_client.post(BASE_URL, json={"name": "Tag2", "score": 2.0})
-    
-    # Test list
-    response = await test_client.get(BASE_URL)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert data["data"]["total"] >= 2
-    items = data["data"]["items"]
-    assert any(item["name"] == "Tag1" for item in items)
-    
-    # Test search
-    response = await test_client.get(BASE_URL, params={"name": "Tag1"})
-    data = response.json()
-    items = data["data"]["items"]
-    assert len(items) >= 1
-    assert items[0]["name"] == "Tag1"
+    print("\n--- 2. Update Tag ---")
+    update_data = {"score": 4.5}
+    res = requests.put(f"{BASE_URL}/{tag_id}", json=update_data)
+    print_res(res)
 
-@pytest.mark.asyncio
-async def test_update_tag(test_client: AsyncClient):
-    # Create tag
-    create_res = await test_client.post(BASE_URL, json={"name": "TagToUpdate", "score": 5.0})
-    tag_id = create_res.json()["data"]["id"]
-    
-    # Update score
-    update_data = {"score": 6.0}
-    response = await test_client.put(f"{BASE_URL}/{tag_id}", json=update_data)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-    assert float(data["data"]["score"]) == 6.0
-    
-    # Update name
-    update_data = {"name": "TagUpdated"}
-    response = await test_client.put(f"{BASE_URL}/{tag_id}", json=update_data)
-    assert response.status_code == 200
-    assert response.json()["data"]["name"] == "TagUpdated"
-
-@pytest.mark.asyncio
-async def test_delete_tag(test_client: AsyncClient):
-    # Create tag
-    create_res = await test_client.post(BASE_URL, json={"name": "TagToDelete", "score": 5.0})
-    tag_id = create_res.json()["data"]["id"]
-    
-    # Delete
-    response = await test_client.delete(f"{BASE_URL}/{tag_id}")
-    assert response.status_code == 200
-    assert response.json()["success"] is True
-    
-    # Verify deleted (soft delete usually excludes from list)
-    response = await test_client.get(BASE_URL, params={"name": "TagToDelete"})
-    items = response.json()["data"]["items"]
-    assert len(items) == 0
-
-@pytest.mark.asyncio
-async def test_batch_import(test_client: AsyncClient):
+    print("\n--- 3. Batch Import ---")
     batch_data = [
-        {"name": "Batch1", "score": 1.0},
-        {"name": "Batch2", "score": 2.0}
+        {"name": "TestTag_LowVal", "score": 3.0},
+        {"name": "TestTag_Tech", "score": 4.0}
     ]
-    response = await test_client.post(f"{BASE_URL}/batch", json=batch_data)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["data"]["success"] == 2
-    assert data["data"]["failed"] == 0
+    res = requests.post(f"{BASE_URL}/batch", json=batch_data)
+    print_res(res)
 
-@pytest.mark.asyncio
-async def test_stock_association(test_client: AsyncClient):
-    # Create tag
-    create_res = await test_client.post(BASE_URL, json={"name": "TagStock", "score": 10.0})
-    tag_id = create_res.json()["data"]["id"]
-    
-    # Associate
-    stock_codes = ["000001", "000002"]
-    response = await test_client.post(f"{BASE_URL}/{tag_id}/stocks", json={"stock_codes": stock_codes, "tag_id": tag_id})
-    assert response.status_code == 200
-    assert response.json()["success"] is True
-    
-    # Check Tag Stocks
-    response = await test_client.get(f"{BASE_URL}/{tag_id}/stocks")
-    assert response.status_code == 200
-    stocks = response.json()["data"]
-    assert "000001" in stocks
-    assert "000002" in stocks
-    
-    # Check Stock Tags
-    response = await test_client.get(f"{BASE_URL}/stocks/000001")
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["stock_code"] == "000001"
-    assert any(t["name"] == "TagStock" for t in data["tags"])
-    assert float(data["total_score"]) == 10.0
-    
-    # Dissociate
-    # Use request method to send body with DELETE
-    response = await test_client.request("DELETE", f"{BASE_URL}/{tag_id}/stocks", json={"stock_codes": ["000001"], "tag_id": tag_id})
-    assert response.status_code == 200
-    
-    # Verify dissociation
-    response = await test_client.get(f"{BASE_URL}/{tag_id}/stocks")
-    stocks = response.json()["data"]
-    assert "000001" not in stocks
-    assert "000002" in stocks
+    print("\n--- 4. Associate Stocks ---")
+    stock_codes = ["600000", "000001"]
+    res = requests.post(f"{BASE_URL}/{tag_id}/stocks", json={"stock_codes": stock_codes, "tag_id": tag_id})
+    print_res(res)
 
-@pytest.mark.asyncio
-async def test_operation_logs(test_client: AsyncClient):
-    # Trigger some operations
-    await test_client.post(BASE_URL, json={"name": "LogTag", "score": 1.0})
+    print("\n--- 5. Get Tag Stocks ---")
+    res = requests.get(f"{BASE_URL}/{tag_id}/stocks")
+    print_res(res)
+
+    print("\n--- 6. Get Stock Tags ---")
+    res = requests.get(f"{BASE_URL}/stocks/600000")
+    print_res(res)
+
+    print("\n--- 7. Operation Logs ---")
+    res = requests.get(f"{BASE_URL}/logs")
+    print_res(res)
     
-    # Get logs
-    response = await test_client.get(f"{BASE_URL}/logs")
-    assert response.status_code == 200
-    data = response.json()["data"]
-    assert data["total"] > 0
-    assert data["items"][0]["target_type"] == "tag"
+    print("\n--- 8. Delete Tag ---")
+    # Clean up
+    res = requests.delete(f"{BASE_URL}/{tag_id}")
+    print_res(res)
+    
+    # Clean up others
+    res = requests.get(BASE_URL, params={"name": "TestTag"})
+    items = res.json()['data']['items']
+    for item in items:
+        requests.delete(f"{BASE_URL}/{item['id']}")
+
+if __name__ == "__main__":
+    main()

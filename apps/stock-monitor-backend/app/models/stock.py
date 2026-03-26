@@ -564,6 +564,9 @@ class WencaiStock(BaseModel):
         Index("idx_wencai_created_at", "created_at"),
         Index("idx_wencai_concept", "concept", mysql_length=100),
         Index("idx_wencai_industry", "industry", mysql_length=100),
+        Index("idx_wencai_source", "source"),
+        Index("idx_wencai_change_percent", "change_percent"),
+        Index("idx_wencai_volume_ratio", "volume_ratio"),
         {"comment": "问财股票数据核心字段表"}
     )
 
@@ -580,10 +583,28 @@ class WencaiStock(BaseModel):
     
     is_active: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否活跃")
 
-    # 新增字段
+    # 基础字段
     concept: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="所属概念")
     industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="所属行业")
     raw_data: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="原始HTML数据")
+    
+    # 数据来源字段 - 区分TDX和问财
+    source: Mapped[str] = mapped_column(String(20), default="wencai", comment="数据来源(wencai/tdx)")
+    
+    # 价格数据字段（TDX用）
+    change_percent: Mapped[Optional[DECIMAL]] = mapped_column(DECIMAL(8, 4), nullable=True, comment="涨跌幅(%)")
+    open_price: Mapped[Optional[DECIMAL]] = mapped_column(DECIMAL(10, 3), nullable=True, comment="开盘价")
+    high_price: Mapped[Optional[DECIMAL]] = mapped_column(DECIMAL(10, 3), nullable=True, comment="最高价")
+    low_price: Mapped[Optional[DECIMAL]] = mapped_column(DECIMAL(10, 3), nullable=True, comment="最低价")
+    prev_close: Mapped[Optional[DECIMAL]] = mapped_column(DECIMAL(10, 3), nullable=True, comment="昨收价")
+    
+    # 成交量数据字段（TDX用）
+    volume_ratio: Mapped[Optional[DECIMAL]] = mapped_column(DECIMAL(10, 4), nullable=True, comment="成交量比值(当日/前日)")
+    turnover: Mapped[Optional[DECIMAL]] = mapped_column(DECIMAL(20, 3), nullable=True, comment="成交额(元)")
+    
+    # 策略标记（TDX用）
+    is_limit_up: Mapped[bool] = mapped_column(Boolean, default=False, comment="是否涨停")
+    strategy_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, comment="策略名称(如: 3x_volume_limit_up)")
 
 
 
@@ -592,6 +613,9 @@ class WencaiCrawlBatch(BaseModel):
     __table_args__ = (
         Index("idx_wencai_batch_status", "status"),
         Index("idx_wencai_started_at", "started_at"),
+        Index("idx_wencai_batch_source", "source"),
+        Index("idx_wencai_batch_sector", "sector_code"),
+        Index("idx_wencai_batch_query_date", "query_date"),
         {"comment": "问财抓取批次表"}
     )
 
@@ -606,10 +630,15 @@ class WencaiCrawlBatch(BaseModel):
     failed_records: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # New fields for query and tags
+    # 查询条件字段
     query_condition: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="原始查询条件")
-    # tags字段在数据库中可能不存在，使用BatchTagRelation表进行关联
-    # tags: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True, comment="解析出的结构化标签")
+    
+    # 数据来源字段 - 区分TDX和问财
+    source: Mapped[str] = mapped_column(String(20), default="wencai", comment="数据来源(wencai/tdx)")
+    
+    # TDX相关字段
+    sector_code: Mapped[Optional[str]] = mapped_column(String(20), nullable=True, comment="TDX板块代码(如: 3BL0325)")
+    query_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, comment="查询日期")
 
 
 class WencaiDataDedup(BaseModel):
