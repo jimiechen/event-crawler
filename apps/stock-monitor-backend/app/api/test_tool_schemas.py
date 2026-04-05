@@ -68,3 +68,4 @@ class AddCustomStockResponse(BaseModel):
     message: str
     stock_info: Dict[str, Any]
     daily_data: List[StockDailyData] = []
+    extra: Dict[str, Any] = {}

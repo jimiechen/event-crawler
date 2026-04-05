@@ -7,6 +7,7 @@
 
 import os
 import json
+import requests
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import date
@@ -219,6 +220,42 @@ class FeishuClient:
             logger.error(f"❌ 创建任务卡片异常: {e}")
             return {"status": "failed", "reason": str(e)}
     
+    def _get_bitable_fields(self) -> Dict[str, str]:
+        """
+        获取飞书多维表格的字段信息
+        
+        Returns:
+            Dict[str, str]: 字段名映射 {api_name: display_name}
+        """
+        try:
+            access_token = self._get_access_token()
+            if not access_token:
+                return {}
+            
+            url = f"https://open.feishu.cn/open-apis/bitable/v1/apps/{self.app_token}/tables/{self.table_id}/fields"
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
+            result = response.json()
+            
+            if result.get("code") == 0:
+                fields = result.get("data", {}).get("items", [])
+                field_mapping = {}
+                for field in fields:
+                    field_name = field.get("field_name")
+                    if field_name:
+                        field_mapping[field_name] = field_name
+                return field_mapping
+            else:
+                logger.warning(f"获取表格字段失败: {result}")
+                return {}
+        except Exception as e:
+            logger.error(f"获取表格字段异常: {e}")
+            return {}
+    
     def add_records_to_bitable(self,
                                records: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -383,19 +420,46 @@ class FeishuClient:
         msg_result = self.send_group_message(content, msg_type="text")
         
         # 添加到多维表格（如果有配置）
+        # 标准表格字段: 股票代码, 股票名称, 入池日期, 入池开盘价, 入池收盘价, 入池最高价,
+        # 成交量, 3倍量确认, 5日地量, 10日地量, 20日地量, 30日地量, 60日地量, 备注
         if selected_stocks and self.app_token and self.table_id:
-            records = [
-                {
-                    "日期": str(trade_date),
-                    "板块代码": sector_code,
-                    "股票代码": s.get('stock_code', '') or s.get('code', ''),
-                    "股票名称": s.get('stock_name', '') or s.get('name', ''),
-                    "量比": str(round(s.get('volume_ratio', 0), 2)),
-                    "涨幅": str(round(s.get('change_percent', 0), 2)),
-                    "来源": source_display
+            records = []
+            import time
+            
+            for s in selected_stocks:
+                # 提取股票代码（去掉.SZ/.SH后缀）
+                stock_code = s.get('stock_code', '')
+                if '.' in stock_code:
+                    stock_code = stock_code.split('.')[0]
+                
+                # 日期转换为Unix时间戳（毫秒）
+                date_timestamp = int(time.mktime(trade_date.timetuple())) * 1000
+                
+                # 构建标准表格记录
+                # 数字字段需要转换为float/int类型
+                def to_float(val, default=0.0):
+                    try:
+                        return float(val) if val else default
+                    except:
+                        return default
+                
+                record = {
+                    "股票代码": stock_code,
+                    "股票名称": s.get('stock_name', ''),
+                    "入池日期": date_timestamp,
+                    "入池开盘价": to_float(s.get('open', s.get('open_price', 0))),
+                    "入池收盘价": to_float(s.get('close', s.get('close_price', 0))),
+                    "入池最高价": to_float(s.get('high', s.get('high_price', 0))),
+                    "成交量": to_float(s.get('volume', s.get('vol', 0))),
+                    "3倍量确认": True,  # 选股结果默认都是3倍量
+                    "5日地量": False,  # 需要后续计算
+                    "10日地量": False,
+                    "20日地量": False,
+                    "30日地量": False,
+                    "60日地量": False,
+                    "备注": f"量比: {round(s.get('volume_ratio', 0), 2)}, 涨幅: {round(s.get('change_percent', 0), 2)}%, 板块: {sector_code}"
                 }
-                for s in selected_stocks
-            ]
+                records.append(record)
             
             table_result = self.add_records_to_bitable(records)
         else:

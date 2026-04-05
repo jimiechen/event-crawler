@@ -1,0 +1,1 @@
+{"name": "chanlun-e2e-tests", "version": "1.0.0", "description": "缠论自动画图 E2E自动化测试", "scripts": {"test": "playwright test", "test:headless": "playwright test --headed=false", "report": "npx playwright show-report reports/html"}, "devDependencies": {"@playwright/test": "^1.48.0"}}

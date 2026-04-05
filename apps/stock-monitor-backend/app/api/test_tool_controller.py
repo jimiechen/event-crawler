@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 import random
 import asyncio
-from datetime import datetime
+from datetime import datetime, date, timedelta
 
 from app.database import get_db_session, db_manager
 from app.services.wencai_service import WencaiService
@@ -13,6 +13,7 @@ from app.services.tushare_service import TushareService
 from app.services.baostock_service import BaostockService
 from app.services.akshare_service import AkshareService
 from app.services.tdx_service import TdxService
+from app.services.tdx_daily_data_service import TdxDailyDataService
 from app.services.local_data_service import LocalDataService
 from app.services.stock_service import StockService
 from app.api.test_tool_schemas import (
@@ -182,6 +183,34 @@ async def add_custom_stock(
                 success_codes.append(code) # Consider it success if it exists
 
             # 4. Get Stock Data (only for the first one to display)
+
+            # ===== 新增: 通达信数据源（最高优先级）=====
+            try:
+                logger.info(f"[TDX] 尝试通过通达信获取 {code} 的250天日K线...")
+                tdx_svc = TdxDailyDataService()
+
+                tdx_code = code if '.' in code else (
+                    f"{code}.SH" if code.startswith('6') else
+                    f"{code}.SZ" if code.startswith(('0', '3')) else
+                    f"{code}.BJ"
+                )
+
+                end_d = date.today()
+                start_d = end_d - timedelta(days=300)
+
+                synced_count = await tdx_svc.sync_single_stock_daily_data(
+                    stock_code=tdx_code,
+                    start_date=start_d,
+                    end_date=end_d,
+                    batch_id=batch_id
+                )
+
+                if synced_count > 0:
+                    logger.info(f"[TDX] 通达信成功同步 {code}: {synced_count} 条记录")
+            except Exception as e:
+                logger.warning(f"[TDX] 通达信获取 {code} 失败，回退到其他数据源: {e}")
+            # ===== 新增结束 ======
+
             if first_stock_data is None:
                 first_stock_data = stock_data
                 query_code = code
@@ -414,11 +443,18 @@ async def add_custom_stock(
         if codes[0].startswith('002735') and first_daily_data:
             logger.info(f"DEBUG RESPONSE 002735: Count={len(first_daily_data)}, LastItem={first_daily_data[-1]}")
 
+        import datetime as dt
+        _sync_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        _last_date = first_daily_data[-1].get('trade_date', '') if first_daily_data else ''
+        _data_count = len(first_daily_data) if first_daily_data else 0
+        logger.info(f"RESPONSE: {_data_count} records, last_date={_last_date}, sync_time={_sync_time}")
+
         return AddCustomStockResponse(
             success=True,
             message=f"Successfully added {len(success_codes)} stocks: {', '.join(success_codes)}",
             stock_info=first_stock_data or {"stock_code": codes[0], "stock_name": request.label},
-            daily_data=first_daily_data or []
+            daily_data=first_daily_data or [],
+            extra={"sync_time": _sync_time, "data_count": _data_count, "last_date": _last_date}
         )
         
     except Exception as e:

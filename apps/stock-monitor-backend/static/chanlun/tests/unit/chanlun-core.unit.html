@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>缠论核心算法 - 单元测试</title>
+    <style>
+        body { font-family: 'Microsoft YaHei', sans-serif; padding: 20px; background: #f5f5f5; }
+        .test-header { background: #6366f1; color: white; padding: 15px 20px; border-radius: 8px; margin-bottom: 20px; }
+        .test-header h1 { margin: 0; font-size: 20px; }
+        .test-summary { display: flex; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+        .summary-card { background: white; padding: 15px 25px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); text-align: center; min-width: 120px; }
+        .summary-card .num { font-size: 28px; font-weight: bold; }
+        .summary-card .label { font-size: 12px; color: #666; margin-top: 4px; }
+        .pass { color: #16a34a; } .fail { color: #dc2626; } .pending { color: #d97706; }
+        .test-group { background: white; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); overflow: hidden; }
+        .test-group-title { background: #f8fafc; padding: 10px 16px; font-weight: bold; font-size: 14px; border-bottom: 1px solid #e2e8f0; cursor: pointer; }
+        .test-case { padding: 10px 16px; border-bottom: 1px solid #f1f5f9; display: flex; align-items: center; gap: 10px; font-size: 13px; }
+        .test-case:last-child { border-bottom: none; }
+        .status-icon { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+        .status-pass { background: #dcfce7; color: #16a34a; }
+        .status-fail { background: #fee2e2; color: #dc2626; }
+        .status-pending { background: #fef3c7; color: #d97706; }
+        .test-name { flex: 1; }
+        .test-detail { font-size: 11px; color: #888; max-width: 400px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        #runBtn { background: #6366f1; color: white; border: none; padding: 10px 24px; border-radius: 6px; font-size: 14px; cursor: pointer; margin-bottom: 15px; }
+        #runBtn:hover { background: #4f46e5; }
+        .report-section { background: white; border-radius: 8px; padding: 20px; margin-top: 20px; }
+        .report-section h2 { margin-top: 0; font-size: 16px; color: #374151; }
+        pre { background: #1e293b; color: #e2e8f0; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+    </style>
+</head>
+<body>
+    <div class="test-header">
+        <h1>🧪 缠论核心算法 - 单元测试 (TDD)</h1>
+        <p style="margin: 5px 0 0; opacity: 0.85;">ChanLunCore Algorithm Unit Tests</p>
+    </div>
+
+    <button id="runBtn" onclick="runAllTests()">▶ 运行全部测试</button>
+
+    <div class="test-summary" id="summary"></div>
+    <div id="results"></div>
+    <div class="report-section" id="reportSection" style="display:none;">
+        <h2>📋 中文测试报告</h2>
+        <pre id="reportText"></pre>
+    </div>
+
+    <script src="../../js/chanlun-core.js"></script>
+    <script src="./utils/test-data.js"></script>
+    <script>
+        var testResults = [];
+        var reportData = [];
+
+        function assertEqual(actual, expected, msg) {
+            if (JSON.stringify(actual) === JSON.stringify(expected)) return { pass: true };
+            return { pass: false, detail: msg + ' | 预期: ' + JSON.stringify(expected) + ' | 实际: ' + JSON.stringify(actual) };
+        }
+
+        function assertTrue(condition, msg) {
+            return condition ? { pass: true } : { pass: false, detail: msg || '条件为假' };
+        }
+
+        function assertGt(actual, expected, msg) {
+            return actual > expected ? { pass: true } : { pass: false, detail: (msg || '') + ' | 预期 > ' + expected + ', 实际=' + actual };
+        }
+
+        function addTest(groupName, testName, result) {
+            testResults.push({ group: groupName, name: testName, result: result });
+            var statusClass = result.pass ? 'status-pass' : 'status-fail';
+            var statusIcon = result.pass ? '✓' : '✗';
+            reportData.push({
+                name: testName,
+                status: result.pass ? 'passed' : 'failed',
+                expected: '',
+                actual: result.detail || (result.pass ? '通过' : '失败')
+            });
+        }
+
+        function runTests() {
+            testResults = [];
+            reportData = [];
+
+            // ===== 包含关系处理 =====
+            addTest('包含处理', 'U-FR-01: 上升趋势合并向上',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData([
+                        { high: 15, low: 10, close: 12 },
+                        { high: 13, low: 11, close: 13 },
+                        { high: 14, low: 9, close: 14 }
+                    ]);
+                    var merged = ChanLunCore.mergeIncludedKLines(klines);
+                    var r1 = assertEqual(parseFloat(merged[0].high), 15, 'high');
+                    var r2 = assertEqual(parseFloat(merged[0].low).toFixed(1), '12.0', 'low(向上合并取max)');
+                    return r1.pass && r2.pass ? { pass: true } : { pass: false, detail: r1.detail || r2.detail };
+                })()
+            );
+
+            addTest('包含处理', 'U-FR-02: 无包含时保持原样',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData([
+                        { high: 10, low: 8, close: 9 },
+                        { high: 14, low: 11, close: 13 },
+                        { high: 12, low: 9, close: 10 }
+                    ]);
+                    var merged = ChanLunCore.mergeIncludedKLines(klines);
+                    return assertEqual(merged.length, 3, '数量');
+                })()
+            );
+
+            addTest('包含处理', 'U-FR-03: 连续多组包含关系',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData([
+                        { high: 20, low: 5, close: 15 },
+                        { high: 15, low: 8, close: 12 },
+                        { high: 18, low: 6, close: 14 },
+                        { high: 12, low: 9, close: 10 },
+                        { high: 16, low: 7, close: 13 }
+                    ]);
+                    var merged = ChanLunCore.mergeIncludedKLines(klines);
+                    return assertGt(merged.length, 0, '应产生合并结果') && assertLt(merged.length, klines.length, '数量应减少');
+                })()
+            );
+
+            // ===== 分型识别 =====
+            addTest('分型识别', 'U-FX-01: 正确识别顶分型',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData([
+                        { high: 10, low: 5, close: 7 },
+                        { high: 15, low: 8, close: 12 },
+                        { high: 12, low: 6, close: 9 }
+                    ]);
+                    var merged = ChanLunCore.mergeIncludedKLines(klines);
+                    var fractals = ChanLunCore.detectFractals(merged);
+                    var tops = fractals.filter(function(f) { return f.type === 'top'; });
+                    return tops.length > 0 ? assertEqual(tops[0].price, 15, '顶分型价格') : { pass: false, detail: '未找到顶分型, fractals=' + JSON.stringify(fractals) };
+                })()
+            );
+
+            addTest('分型识别', 'U-FX-02: 正确识别底分型',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData([
+                        { high: 15, low: 10, close: 12 },
+                        { high: 12, low: 5, close: 7 },
+                        { high: 14, low: 9, close: 11 }
+                    ]);
+                    var merged = ChanLunCore.mergeIncludedKLines(klines);
+                    var fractals = ChanLunCore.detectFractals(merged);
+                    var bottoms = fractals.filter(function(f) { return f.type === 'bottom'; });
+                    return bottoms.length > 0 ? assertEqual(bottoms[0].price, 5, '底分型价格') : { pass: false, detail: '未找到底分型' };
+                })()
+            );
+
+            addTest('分型识别', 'U-FX-03: 数据不足(<3根)返回空',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData([
+                        { high: 10, low: 5, close: 7 },
+                        { high: 12, low: 6, close: 9 }
+                    ]);
+                    var merged = ChanLunCore.mergeIncludedKLines(klines);
+                    var fractals = ChanLunCore.detectFractals(merged);
+                    return assertEqual(fractals.length, 0, '空数组');
+                })()
+            );
+
+            // ===== 笔识别 =====
+            addTest('笔识别', 'U-BI-01: 基本上升下降笔',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData(
+                        ChanLunTestUtils.generateRisingFallingPattern()
+                    );
+                    var result = ChanLunCore.analyze(klines);
+                    var r1 = assertGt(result.bis.length, 1, '笔数量');
+                    var r2 = result.bis.length > 0 ? assertEqual(result.bis[0].direction, 'up', '第一笔方向') : { pass: true };
+                    return r1.pass && r2.pass ? { pass: true } : { pass: false, detail: (r1.detail||'')+' '+(r2.detail||'') };
+                })()
+            );
+
+            addTest('笔识别', 'U-BI-02: 笔的方向交替性',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData(
+                        ChanLunTestUtils.generateRisingFallingPattern()
+                    );
+                    var result = ChanLunCore.analyze(klines);
+                    for (var i = 1; i < result.bis.length; i++) {
+                        if (result.bis[i].direction === result.bis[i-1].direction) {
+                            return { pass: false, detail: '第'+i+'笔方向未交替: '+result.bis[i].direction };
+                        }
+                    }
+                    return { pass: true };
+                })()
+            );
+
+            addTest('笔识别', 'U-BI-03: 笔的最小间距要求',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData([
+                        { high: 10, low: 8, close: 9 },
+                        { high: 15, low: 5, close: 12 },
+                        { high: 12, low: 9, close: 10 },
+                        { high: 18, low: 7, close: 15 }
+                    ]);
+                    var result = ChanLunCore.analyze(klines);
+                    for (var i = 0; i < result.bis.length; i++) {
+                        var bi = result.bis[i];
+                        var gap = bi.end.originalIndex - bi.start.originalIndex;
+                        if (gap < 2) return { pass: false, detail: '笔间距不足: gap=' + gap };
+                    }
+                    return { pass: true };
+                })()
+            );
+
+            // ===== 中枢识别 =====
+            addTest('中枢识别', 'U-ZS-01: 基本3笔重叠中枢',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData(
+                        ChanLunTestUtils.generateZhongshuPattern()
+                    );
+                    var result = ChanLunCore.analyze(klines);
+                    if (result.zhongshus.length === 0) return { pass: false, detail: '未检测到中枢, bis=' + result.bis.length };
+                    var zs = result.zhongshus[0];
+                    var r1 = assertTrue(zs.zg > zs.zd, 'ZG>ZD');
+                    var r2 = assertGt(zs.biCount, 2, 'biCount>=3');
+                    return r1.pass && r2.pass ? { pass: true } : { pass: false, detail: (r1.detail||'')+' '+(r2.detail||'') };
+                })()
+            );
+
+            addTest('中枢识别', 'U-ZS-02: 单边走势不产生中枢',
+                (function() {
+                    var klines = ChanLunTestUtils.generateTestKData(
+                        ChanLunTestUtils.generateTrend(30, 10, 30, 'up')
+                    );
+                    var result = ChanLunCore.analyze(klines);
+                    return assertEqual(result.zhongshuCount, 0, '单边上涨不应有中枢');
+                })()
+            );
+
+            // ===== 一键分析 =====
+            addTest('一键分析', 'U-ALL-01: 完整分析返回正确结构',
+                (function() {
+                    var klines = ChanLunTestUtils.generateRandomKData(100);
+                    var result = ChanLunCore.analyze(klines);
+                    var r1 = assertTrue(result.fractals !== undefined, 'fractals存在');
+                    var r2 = assertTrue(result.bis !== undefined, 'bis存在');
+                    var r3 = assertTrue(result.zhongshus !== undefined, 'zhongshus存在');
+                    var r4 = assertTrue(result.stats !== undefined, 'stats存在');
+                    var r5 = assertEqual(result.stats.fractalCount, result.fractals.length, 'fractalCount');
+                    return (r1.pass&&r2.pass&&r3.pass&&r4.pass&&r5.pass) ? { pass: true } : { pass: false, detail: '结构检查失败' };
+                })()
+            );
+        }
+
+        function assertLt(a, b, msg) { return a < b ? { pass: true } : { pass: false, detail: (msg||'') + ' 预期<'+b+' 实际='+a }; }
+
+        function renderResults() {
+            var passed = testResults.filter(function(t) { return t.result.pass; }).length;
+            var failed = testResults.length - passed;
+            var pct = testResults.length > 0 ? ((passed / testResults.length) * 100).toFixed(1) : 0;
+
+            document.getElementById('summary').innerHTML =
+                '<div class="summary-card"><div class="num">' + testResults.length + '</div><div class="label">总用例</div></div>' +
+                '<div class="summary-card"><div class="num pass">' + passed + '</div><div class="label">✅ 通过</div></div>' +
+                '<div class="summary-card"><div class="num fail">' + failed + '</div><div class="label">❌ 失败</div></div>' +
+                '<div class="summary-card"><div class="num">' + pct + '%</div><div class="label">通过率</div></div>';
+
+            var groups = {};
+            testResults.forEach(function(t) {
+                if (!groups[t.group]) groups[t.group] = [];
+                groups[t.group].push(t);
+            });
+
+            var html = '';
+            for (var g in groups) {
+                html += '<div class="test-group"><div class="test-group-title">📂 ' + g + ' (' + groups[g].length + ')</div>';
+                groups[g].forEach(function(t) {
+                    var sc = t.result.pass ? 'status-pass' : 'status-fail';
+                    var icon = t.result.pass ? '✓' : '✗';
+                    html += '<div class="test-case"><span class="status-icon ' + sc + '">' + icon + '</span>' +
+                            '<span class="test-name">' + t.name + '</span>' +
+                            '<span class="test-detail">' + (t.result.detail || '') + '</span></div>';
+                });
+                html += '</div>';
+            }
+            document.getElementById('results').innerHTML = html;
+
+            // 生成中文报告
+            var reportText = '# 缠论核心算法 - 单元测试报告\n\n';
+            reportText += '| 项目 | 数值 |\n|------|------|\n';
+            reportText += '| 总用例数 | ' + testResults.length + ' |\n';
+            reportText += '| ✅ 通过 | ' + passed + ' |\n';
+            reportText += '| ❌ 失败 | ' + failed + ' |\n';
+            reportText += '| 通过率 | ' + pct + '% |\n';
+            reportText += '| 测试时间 | ' + new Date().toLocaleString('zh-CN') + ' |\n\n';
+
+            reportText += '## 详细结果\n\n';
+            testResults.forEach(function(t) {
+                reportText += (t.result.pass ? '### ✅ ' : '### ❌ ') + t.name + '\n\n';
+                reportText += '**状态**: ' + (t.result.pass ? '通过' : '失败') + '\n\n';
+                if (!t.result.pass && t.result.detail) reportText += '**详情**: `' + t.result.detail + '`\n\n';
+                reportText += '---\n\n';
+            });
+
+            document.getElementById('reportText').textContent = reportText;
+            document.getElementById('reportSection').style.display = 'block';
+        }
+
+        function runAllTests() {
+            document.getElementById('results').innerHTML = '<p style="color:#666;padding:20px;">⏳ 测试运行中...</p>';
+            setTimeout(function() {
+                runTests();
+                renderResults();
+            }, 50);
+        }
+
+        window.onload = function() { runAllTests(); };
+    </script>
+</body>
+</html>
