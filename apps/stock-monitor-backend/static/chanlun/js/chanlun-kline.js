@@ -7,7 +7,7 @@ var ChanLunKline = (function() {
     var ComposedChart = RC.ComposedChart, XAxis = RC.XAxis, YAxis = RC.YAxis;
     var Tooltip = RC.Tooltip, Legend = RC.Legend, Bar = RC.Bar, Line = RC.Line;
     var ResponsiveContainer = RC.ResponsiveContainer;
-    var Brush = RC.Brush, CartesianGrid = RC.CartesianGrid;
+    var Brush = RC.Brush, CartesianGrid = RC.CartesianGrid, ReferenceArea = RC.ReferenceArea;
 
     function calcMA(data, period) {
         var result = [];
@@ -56,44 +56,21 @@ var ChanLunKline = (function() {
         if (!payload || !payload.ohlc) return null;
         var o = payload.ohlc.o, h = payload.ohlc.h, l = payload.ohlc.l, c = payload.ohlc.c;
         var yMin = props.yDomain[0], yMax = props.yDomain[1];
-        var yRange = yMax - yMin || 1;
-
-        // 调试日志：打印前2根蜡烛
-        if (payload._idx < 2) {
-            console.log('[CandlestickShape] idx=' + payload._idx + ' OHLC={' + o + ',' + h + ',' + l + ',' + c + '} ' +
-                        'yDomain=[' + yMin.toFixed(2) + ',' + yMax.toFixed(2) + '] props.y=' + y.toFixed(1) + ' height=' + height.toFixed(1));
-        }
 
         var isUp = c >= o;
         var color = isUp ? '#ec0000' : '#00da3c';
         var borderColor = isUp ? '#8A0000' : '#008F28';
 
-        // 关键：Bar的props.y是该Bar的底部Y坐标（对应close价格）
-        // height是Bar的高度（从close到0）
-        // 我们需要基于yDomain重新计算每个价格相对于这个Bar的位置
-        var barBottomPrice = yMin;  // Bar底部对应的价格
-        var barTopPrice = yMax;     // Bar顶部对应的价格
-        
-        function priceToPixel(price) {
-            // 将价格映射到当前Bar的局部坐标系
-            // y是Bar的底部（SVG坐标），height是Bar高度
-            // 但Bar的高度是基于dataKey(close)计算的，不是基于yDomain
-            // 所以我们需要基于yDomain重新计算
-            var ratio = (price - yMin) / yRange;
-            // props.y是close价格对应的SVG坐标
-            // 我们需要找出close价格在yDomain中的比例位置
-            var closeRatio = (c - yMin) / yRange;
-            var closePixelY = y + height - (closeRatio * height); // close在SVG中的位置
-            
-            // 其他价格相对于close的偏移
-            var priceOffset = (price - c) / yRange * height;
-            return closePixelY - priceOffset;
+        var scale = height / (c - yMin);
+
+        function p2p(price) {
+            return y + (c - price) * scale;
         }
 
-        var yTop = priceToPixel(Math.max(o, c));
-        var yBot = priceToPixel(Math.min(o, c));
-        var yHigh = priceToPixel(h);
-        var yLow = priceToPixel(l);
+        var yTop = p2p(Math.max(o, c));
+        var yBot = p2p(Math.min(o, c));
+        var yHigh = p2p(h);
+        var yLow = p2p(l);
         var cx = x + width / 2;
         var bw = Math.max(width * 0.65, 2);
 
@@ -145,6 +122,7 @@ var ChanLunKline = (function() {
         var biData = props.biData || [], zhongshuData = props.zhongshuData || [], xianduanData = props.xianduanData || [];
         var showBi = props.showBi !== false, showZhongshu = props.showZhongshu !== false;
         var showXianduan = props.showXianduan !== false, showLabel = props.showLabel !== false;
+        var showCandles = props.showCandles !== false;  // 新增：显示蜡烛图
         var dates = props.dates || [];
         var plotArea = props.plotArea || {};
         var pw = plotArea.width || 800, ph = plotArea.height || 400;
@@ -153,9 +131,16 @@ var ChanLunKline = (function() {
         var yRange = yMax - yMin || 1;
         var brushRange = props.brushRange || {};
         var brushStart = brushRange.start || 0, brushEnd = brushRange.end || (dates.length - 1);
+        var chartData = props.chartData || [];  // 新增：K线数据
 
-        if ((!showBi && !showZhongshu && !showXianduan && !showLabel)) return null;
+        if ((!showBi && !showZhongshu && !showXianduan && !showLabel && !showCandles)) return null;
         if (!dates.length) return null;
+
+        // ChanOverlay 关键日志
+        console.log('[DEBUG-CHANOVERLAY] plotArea: left=' + pl + ' top=' + pt + ' w=' + pw.toFixed(0) + ' h=' + ph.toFixed(0));
+        console.log('[DEBUG-CHANOVERLAY] yDomain: [' + yMin.toFixed(2) + ',' + yMax.toFixed(2) + '] range=' + yRange.toFixed(2));
+        console.log('[DEBUG-CHANOVERLAY] brush: start=' + brushStart + ' end=' + brushEnd + ' visibleCount=' + visibleCount);
+        console.log('[DEBUG-CHANOVERLAY] chartData长度=' + chartData.length + ' dates长度=' + dates.length);
 
         var visibleCount = brushEnd - brushStart + 1;
         function mapX(dateIdx) {
@@ -165,6 +150,36 @@ var ChanLunKline = (function() {
         function mapY(priceVal) { return pt + ph - ((priceVal - yMin) / yRange) * ph; }
 
         var elements = [];
+
+        // 绘制蜡烛图
+        if (showCandles && chartData.length > 0) {
+            var candleWidth = Math.max(pw / visibleCount * 0.65, 2);
+            chartData.forEach(function(d, idx) {
+                if (idx < brushStart || idx > brushEnd) return;
+                if (!d.ohlc) return;
+                var o = d.ohlc.o, h = d.ohlc.h, l = d.ohlc.l, c = d.ohlc.c;
+                var x = mapX(idx);
+                if (x < -9990) return;
+                
+                var isUp = c >= o;
+                var color = isUp ? '#ec0000' : '#00da3c';
+                var borderColor = isUp ? '#8A0000' : '#008F28';
+                
+                var yTop = mapY(Math.max(o, c));
+                var yBot = mapY(Math.min(o, c));
+                var yHigh = mapY(h);
+                var yLow = mapY(l);
+                var bw = Math.max(candleWidth * 0.65, 2);
+                
+                elements.push(React.createElement('line', { key: 'candle-wick-t-' + idx,
+                    x1: x, y1: yHigh, x2: x, y2: yTop, stroke: color, strokeWidth: 1 }));
+                elements.push(React.createElement('line', { key: 'candle-wick-b-' + idx,
+                    x1: x, y1: yBot, x2: x, y2: yLow, stroke: color, strokeWidth: 1 }));
+                elements.push(React.createElement('rect', { key: 'candle-body-' + idx,
+                    x: x - bw / 2, y: yTop, width: bw, height: Math.max(yBot - yTop, 1), 
+                    fill: color, stroke: borderColor, strokeWidth: 1 }));
+            });
+        }
 
         if (showZhongshu && zhongshuData.length > 0) {
             zhongshuData.forEach(function(zs, zi) {
@@ -338,18 +353,20 @@ var ChanLunKline = (function() {
         var allLow = chartData.map(function(d) { return parseFloat(d.low); });
         var dataMin = Math.min.apply(null, allLow);  // 应该用最低价，不是收盘价
         var dataMax = Math.max.apply(null, allHigh);
-        var padding = (dataMax - dataMin) * 0.06;
-        var yDomain = [dataMin - padding, dataMax + padding];
-        console.log('[KlineChart] yDomain计算: dataMin=' + dataMin + ' dataMax=' + dataMax + ' padding=' + padding + ' yDomain=[' + yDomain[0] + ',' + yDomain[1] + ']');
+        var range = dataMax - dataMin;
+        var paddingTop = range * 0.06;
+        var paddingBottom = range * 0.12;  // 底部padding加倍，避免蜡烛图压到日期轴
+        var yDomain = [dataMin - paddingBottom, dataMax + paddingTop];
+        console.log('[KlineChart] yDomain计算: dataMin=' + dataMin + ' dataMax=' + dataMax + ' paddingBottom=' + paddingBottom.toFixed(2) + ' yDomain=[' + yDomain[0].toFixed(2) + ',' + yDomain[1].toFixed(2) + ']');
 
         var allVol = chartData.map(function(d) { return parseFloat(d.volume || 0); });
         var maxVol = Math.max.apply(null, allVol) || 1;
 
-        var MARGIN = { top: 10, right: 80, left: 5, bottom: 20 };
-        var BRUSH_H = 30;  // Brush 高度，用于缩放控制
+        var CHART_MARGIN = { top: 8, right: 80, left: 5, bottom: 18 };
+        var BRUSH_H = 30;
         var LEGEND_H = 28;
         var VOL_H = showVolume ? 100 : 0;
-        var YAXIS_W = 60;
+        var YAXIS_W = 62;
 
         var containerRef = React.useRef(null);
         var [dimensions, setDimensions] = React.useState({ w: 1200, h: chartHeight });
@@ -375,11 +392,19 @@ var ChanLunKline = (function() {
             };
         }, []);
 
-        var plotW = dimensions.w - MARGIN.left - MARGIN.right - YAXIS_W;
+        var plotW = dimensions.w - CHART_MARGIN.left - CHART_MARGIN.right - YAXIS_W;
         var mainH = Math.max(dimensions.h - (showVolume ? 110 : 10), 250);
-        var plotArea = { width: Math.max(plotW, 100), height: Math.max(mainH - MARGIN.top - MARGIN.bottom, 200), left: MARGIN.left + YAXIS_W, top: MARGIN.top };
+        var mainH_px = mainH;
         var visibleCount = brushState.end - brushState.start + 1;
         var candleBarSize = Math.max(3, Math.min(8, Math.floor(plotW / visibleCount * 0.65)));
+
+        console.log('[DEBUG-LAYOUT] 容器: w=' + dimensions.w.toFixed(0) + ' h=' + dimensions.h.toFixed(0) + ' mainH=' + mainH_px.toFixed(0));
+        console.log('[DEBUG-LAYOUT] MARGIN:', JSON.stringify(CHART_MARGIN), 'YAXIS_W=' + YAXIS_W);
+        console.log('[DEBUG-LAYOUT] 数据量: total=' + dates.length + ' visible=' + visibleCount + ' barSize=' + candleBarSize);
+        console.log('[DEBUG-LAYOUT] yDomain: [' + yDomain[0].toFixed(2) + ',' + yDomain[1].toFixed(2) + ']');
+        if (chanResult) {
+            console.log('[DEBUG-LAYOUT] 缠论: 笔=' + chanResult.stats.biCount + ' 线段=' + chanResult.stats.xianduanCount + ' 中枢=' + chanResult.stats.zhongshuCount);
+        }
 
         function handleBrushChange(range) {
             console.log('[Brush] onChange 触发:', JSON.stringify(range));
@@ -456,25 +481,79 @@ var ChanLunKline = (function() {
             var volDomain = [0, Math.max.apply(null, allVol) * 1.05];
         }
 
-        chartChildren.push(React.createElement(Brush, { key: 'brush',
-            dataKey: 'trade_date',
-            startIndex: brushState.start,
-            endIndex: brushState.end,
-            height: BRUSH_H,
-            fill: 'rgba(99,102,241,0.08)',
-            stroke: '#6366f1',
-            strokeWidth: 1.5,
-            onChange: handleBrushChange
-        }));
+        function buildChanlunLineData(startDate, endDate, startPrice, endPrice) {
+            return [
+                { trade_date: startDate, _chanPrice: startPrice },
+                { trade_date: endDate, _chanPrice: endPrice }
+            ];
+        }
 
-        // 使用 Bar 组件绘制蜡烛图 - dataKey用close但shape中忽略，基于yDomain重新计算
-        chartChildren.push(React.createElement(Bar, { key: 'candle',
+        if (showZhongshu && chanResult && chanResult.zhongshus && chanResult.zhongshus.length > 0) {
+            chanResult.zhongshus.forEach(function(zs, zi) {
+                var zsAmp = zs.zg - zs.zd;
+                var isSmall = zsAmp < 1.0;
+                chartChildren.push(React.createElement(ReferenceArea, {
+                    key: 'zs-' + zi,
+                    x1: zs.startDate, x2: zs.endDate,
+                    y1: zs.zg, y2: zs.zd,
+                    fill: isSmall ? 'rgba(139,92,246,0.06)' : 'rgba(103,232,249,0.12)',
+                    stroke: isSmall ? '#a855f7' : '#22d3ee',
+                    strokeWidth: 0.8,
+                    strokeDasharray: isSmall ? '4,3' : '4,4'
+                }));
+            });
+        }
+
+        if (showBi && chanResult && chanResult.bis && chanResult.bis.length > 0) {
+            chanResult.bis.forEach(function(bi, biIdx) {
+                var lineData = buildChanlunLineData(bi.start.date, bi.end.date, bi.startPrice, bi.endPrice);
+                chartChildren.push(React.createElement(Line, {
+                    key: 'bi-' + biIdx,
+                    data: lineData,
+                    type: 'linear',
+                    dataKey: '_chanPrice',
+                    stroke: '#dc2626',
+                    strokeWidth: 1.5,
+                    opacity: 0.85,
+                    dot: false,
+                    activeDot: false,
+                    isAnimationActive: false,
+                    connectNulls: true
+                }));
+            });
+        }
+
+        if (showXianduan && chanResult && chanResult.xianduans && chanResult.xianduans.length > 0) {
+            chanResult.xianduans.forEach(function(xd, xdIdx) {
+                var xdData = buildChanlunLineData(xd.start.date, xd.end.date, xd.startPrice, xd.endPrice);
+                chartChildren.push(React.createElement(Line, {
+                    key: 'xd-' + xdIdx,
+                    data: xdData,
+                    type: 'linear',
+                    dataKey: '_chanPrice',
+                    stroke: '#3b82f6',
+                    strokeWidth: 3.5,
+                    opacity: 0.88,
+                    dot: function(info) {
+                        var idx = info.index;
+                        var cx = info.cx, cy = info.cy;
+                        if (idx === 0) return React.createElement('circle', { cx: cx, cy: cy, r: 4, fill: '#3b82f6', stroke: '#fff', strokeWidth: 1 });
+                        if (idx === 1) return React.createElement('circle', { cx: cx, cy: cy, r: 4.5, fill: '#3b82f6', stroke: '#fff', strokeWidth: 1 });
+                        return false;
+                    },
+                    activeDot: false,
+                    isAnimationActive: false,
+                    connectNulls: true
+                }));
+            });
+        }
+
+        chartChildren.push(React.createElement(Bar, { key: 'candlestick',
             dataKey: 'close',
-            shape: function(p) { return CandlestickShape(Object.assign({}, p, { yDomain: yDomain, plotH: mainH_px - MARGIN.top - MARGIN.bottom })); },
+            shape: function(p) { return CandlestickShape(Object.assign({}, p, { yDomain: yDomain })); },
             isAnimationActive: false,
             barSize: candleBarSize,
-            name: 'K线',
-            fill: '#8884d8'
+            name: 'K线'
         }));
 
         if (showMA5) chartChildren.push(React.createElement(Line, { key: 'ma5', type: 'monotone', dataKey: '_ma5', stroke: '#f97316', dot: false, strokeWidth: 1.0, connectNulls: false, name: 'MA5', hide: false }));
@@ -482,8 +561,6 @@ var ChanLunKline = (function() {
         if (showMA20) chartChildren.push(React.createElement(Line, { key: 'ma20', type: 'monotone', dataKey: '_ma20', stroke: '#8b5cf6', dot: false, strokeWidth: 1.0, connectNulls: false, name: 'MA20', hide: false }));
         if (showMA60) chartChildren.push(React.createElement(Line, { key: 'ma60', type: 'monotone', dataKey: '_ma60', stroke: '#eab308', dot: false, strokeWidth: 1.0, connectNulls: false, name: 'MA60', hide: false }));
         if (showEXPMA13) chartChildren.push(React.createElement(Line, { key: 'expma13', type: 'monotone', dataKey: '_expma13', stroke: '#ffaa00', dot: false, strokeWidth: 1.2, connectNulls: false, name: 'EXPMA13', hide: false }));
-
-
 
         chartChildren.push(React.createElement(Tooltip, { key: 'tooltip',
             content: CustomTooltip,
@@ -497,37 +574,24 @@ var ChanLunKline = (function() {
 
         var zoomBtnStyle = { display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 24, borderRadius: 4, border: '1px solid #e2e8f0', background: '#fff', color: '#475569', fontSize: 13, cursor: 'pointer', margin: '0 2px' };
         var rangeInfo = (brushState.end - brushState.start + 1) + '/' + dates.length;
-        var mainH_px = showVolume ? chartHeight - 110 : chartHeight - 10;
         var volH_px = showVolume ? 95 : 0;
 
         var mainChart = React.createElement('div', { key: 'main-wrap', style: { position: 'relative', width: '100%', height: mainH_px } },
             React.createElement(ResponsiveContainer, { width: '100%', height: '100%' },
                 React.createElement(ComposedChart, {
-                    data: chartData, margin: MARGIN, syncId: 'chanlunKline'
+                    data: chartData, margin: CHART_MARGIN, syncId: 'chanlunKline'
                 }, chartChildren)
-            ),
-            chanResult ? React.createElement(ChanOverlay, {
-                biData: chanResult.bis,
-                zhongshuData: chanResult.zhongshus,
-                xianduanData: chanResult.xianduans,
-                showBi: showBi,
-                showZhongshu: showZhongshu,
-                showXianduan: showXianduan,
-                showLabel: showLabel,
-                dates: dates,
-                plotArea: { width: plotW, height: mainH_px - MARGIN.top - MARGIN.bottom, left: MARGIN.left + YAXIS_W, top: MARGIN.top },
-                yMin: yDomain[0],
-                yMax: yDomain[1],
-                brushRange: brushState
-            }) : null
+            )
         );
 
         var volChart = null;
         if (showVolume && volDomain) {
+            var volH_px = VOL_H;
+            console.log('[DEBUG-VOL] 成交量图高度=' + volH_px + ' 数据量=' + chartData.length + ' volDomain=[' + volDomain[0] + ',' + volDomain[1] + ']');
             volChart = React.createElement('div', { key: 'vol-wrap', style: { width: '100%', height: volH_px, marginTop: 5 } },
                 React.createElement(ResponsiveContainer, { width: '100%', height: '100%' },
                     React.createElement(ComposedChart, {
-                        data: chartData, margin: { top: 2, right: 80, left: 5, bottom: 5 }, syncId: 'chanlunKline'
+                        data: chartData, margin: CHART_MARGIN, syncId: 'chanlunKline'
                     },
                         React.createElement(XAxis, { dataKey: 'trade_date',
                             tick: { fill: '#64748b', fontSize: 9 }, interval: 'preserveStartEnd',
@@ -563,6 +627,28 @@ var ChanLunKline = (function() {
                 React.createElement('button', { style: zoomBtnStyle, title: '右移', onClick: handlePanRight }, '▶')
             ),
             mainChart,
+            // Brush 缩略图 - 独立syncId，不影响主图和成交量的时间轴同步
+            React.createElement('div', { key: 'brush-wrap', style: { width: '100%', height: BRUSH_H, marginTop: 2 } },
+                React.createElement(ResponsiveContainer, { width: '100%', height: '100%' },
+                    React.createElement(ComposedChart, {
+                        data: chartData, margin: { top: 0, right: 80, left: 5, bottom: 0 }, syncId: 'chanlunKline'
+                    },
+                        React.createElement(XAxis, { dataKey: 'trade_date', hide: true }),
+                        React.createElement(YAxis, { hide: true }),
+                        React.createElement(Bar, { dataKey: 'volume', fill: 'rgba(99,102,241,0.3)' }),
+                        React.createElement(Brush, {
+                            dataKey: 'trade_date',
+                            startIndex: brushState.start,
+                            endIndex: brushState.end,
+                            height: BRUSH_H,
+                            fill: 'rgba(99,102,241,0.08)',
+                            stroke: '#6366f1',
+                            strokeWidth: 1.5,
+                            onChange: handleBrushChange
+                        })
+                    )
+                )
+            ),
             volChart
         );
     }

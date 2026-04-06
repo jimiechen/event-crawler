@@ -8,6 +8,7 @@
     <script src="/static/libs/d3.v7.min.js"></script>
     <script src="/static/libs/echarts.min.js"></script>
     <script src="/static/js/navbar.js"></script>
+    <link rel="stylesheet" href="/static/chanlun/css/chanlun.css">
     <style>
         .spinner {
             border: 3px solid #f3f3f3;
@@ -174,8 +175,19 @@
                     </button>
                 </div>
             </div>
-            <div id="stockChart" style="width: 100%; height: 500px;"></div>
-            
+            <div id="stockChart" style="width: 100%; height: 1000px; position: relative;"></div>
+
+            <div id="chanControlPanel" class="chan-control-panel hidden mt-3">
+                <div class="chan-title">📐 缠论分析</div>
+                <div class="chan-options" style="gap:12px">
+                    <label><input type="checkbox" id="chanShowBi" checked> <b style="color:#dc2626">笔</b></label>
+                    <label><input type="checkbox" id="chanShowXianduan" checked> <b style="color:#a855f7">线段</b></label>
+                    <label><input type="checkbox" id="chanShowZhongshu" checked> <b style="color:#a855f7">中枢</b></label>
+                    <label><input type="checkbox" id="chanShowBeichi" checked> <b style="color:#16a34a">背驰</b></label>
+                    <span id="chanStats" class="chan-stats"></span>
+                </div>
+            </div>
+
             <!-- Volume Analysis Results -->
             <div id="volumeAnalysisContainer" class="mt-6 hidden">
                 <h4 class="text-md font-bold text-gray-700 mb-2">成交量异动分析表</h4>
@@ -623,7 +635,7 @@
                 <div class="space-y-4">
                     <div>
                         <label class="block text-sm font-medium text-gray-700">股票代码</label>
-                        <input type="text" id="customStockCode" placeholder="如: 600000.SH" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
+                        <input type="text" id="customStockCode" value="605299" placeholder="如: 600000.SH" class="mt-1 block w-full border border-gray-300 rounded-md shadow-sm px-3 py-2 focus:ring-blue-500 focus:border-blue-500">
                         <p class="text-xs text-gray-500 mt-1">格式: 6位数字 + .SH/.SZ</p>
                     </div>
                     <div>
@@ -2981,6 +2993,206 @@
             });
         }
         
+        // ===== 缠论数据常量（605299.SH 精确坐标，来源：chanlun-chart-replication-plan.md）=====
+        var CHAN_605299_DATA = {
+            stockCode: '605299',
+            stockName: '605299.SH',
+            dateRange: { start: '20250828', end: '20260403' },
+            bis: [
+                { dir: 'up',    startDate: '20250828', startPrice: 9.27,  endDate: '20250908', endPrice: 10.70 },
+                { dir: 'down',  startDate: '20250908', startPrice: 10.70, endDate: '20251017', endPrice: 8.85 },
+                { dir: 'up',    startDate: '20251017', startPrice: 8.85,  endDate: '20251105', endPrice: 10.25, beichi: true },
+                { dir: 'down',  startDate: '20251105', startPrice: 10.25, endDate: '20251113', endPrice: 9.54 },
+                { dir: 'up',    startDate: '20251113', startPrice: 9.54,  endDate: '20251210', endPrice: 17.25 },
+                { dir: 'down',  startDate: '20251210', startPrice: 17.25, endDate: '20251217', endPrice: 11.22 },
+                { dir: 'up',    startDate: '20251217', startPrice: 11.22, endDate: '20251225', endPrice: 12.48 },
+                { dir: 'down',  startDate: '20251225', startPrice: 12.48, endDate: '20251231', endPrice: 11.22 },
+                { dir: 'up',    startDate: '20251231', startPrice: 11.22, endDate: '20260122', endPrice: 13.35 },
+                { dir: 'down',  startDate: '20260122', startPrice: 13.35, endDate: '20260304', endPrice: 11.61 },
+                { dir: 'up',    startDate: '20260304', startPrice: 11.61, endDate: '20260402', endPrice: 23.63 }
+            ],
+            xianduans: [
+                { dir: 'up',   startDate: '20250828', startPrice: 9.27,  endDate: '20251225', endPrice: 12.48 },
+                { dir: 'down', startDate: '20251225', startPrice: 12.48, endDate: '20260304', endPrice: 11.61 }
+            ],
+            zhongshus: [
+                { zg: 9.30, zd: 8.85, startDate: '20250925', endDate: '20251105',
+                  fill: 'rgba(139,92,246,0.06)', stroke: '#a855f7', dashArray: [4,3], label: 'ZS1' },
+                { zg: 12.48, zd: 11.22, startDate: '20251210', endDate: '20260227',
+                  fill: 'rgba(103,232,249,0.12)', stroke: '#22d3ee', dashArray: [4,4], label: 'ZS2' }
+            ],
+            beichi: { date: '20251105', price: 10.25 }
+        };
+
+        function buildChanLunOverlay(chanData, dates) {
+            console.group('[ChanLun] buildChanLunOverlay 开始构建');
+            console.log('[ChanLun] 日期数组: 共' + dates.length + '条, 前5=' + JSON.stringify(dates.slice(0, 5)) + ', 后5=' + JSON.stringify(dates.slice(-5)));
+            console.log('[ChanLun] 日期格式样本: trade_date="' + dates[0] + '" (type=' + typeof dates[0] + ', len=' + dates[0].length + ')');
+
+            var series = [];
+            var showBi = document.getElementById('chanShowBi') ? document.getElementById('chanShowBi').checked : true;
+            var showXd = document.getElementById('chanShowXianduan') ? document.getElementById('chanShowXianduan').checked : true;
+            var showZs = document.getElementById('chanShowZhongshu') ? document.getElementById('chanShowZhongshu').checked : true;
+            var showBc = document.getElementById('chanShowBeichi') ? document.getElementById('chanShowBeichi').checked : true;
+
+            function dateIndex(d) { return dates.indexOf(d); }
+
+            if (showZs && chanData.zhongshus) {
+                chanData.zhongshus.forEach(function(zs, i) {
+                    var si = dateIndex(zs.startDate), ei = dateIndex(zs.endDate);
+                    console.log('[ChanLun] 中枢' + (i+1) + ' (' + zs.label + '): startDate=' + zs.startDate + ' → index=' + si + ', endDate=' + zs.endDate + ' → index=' + ei + (si === -1 || ei === -1 ? ' ⚠️ 未匹配到日期!' : ' ✓'));
+                    if (si === -1 || ei === -1) return;
+                    series.push({
+                        name: zs.label || ('中枢' + (i + 1)),
+                        type: 'line',
+                        xAxisIndex: 0,
+                        yAxisIndex: 0,
+                        data: Array(dates.length).fill(null),
+                        silent: true,
+                        showSymbol: false,
+                        lineStyle: { width: 0 },
+                        markArea: {
+                            silent: true,
+                            data: [[{
+                                xAxis: dates[si],
+                                yAxis: zs.zg,
+                                itemStyle: { color: zs.fill, borderWidth: 1.5, borderColor: zs.stroke, borderType: 'dashed' }
+                            }, {
+                                xAxis: dates[ei],
+                                yAxis: zs.zd
+                            }]]
+                        }
+                    });
+                });
+            }
+
+            if (showXd && chanData.xianduans) {
+                chanData.xianduans.forEach(function(xd, i) {
+                    var si = dateIndex(xd.startDate), ei = dateIndex(xd.endDate);
+                    console.log('[ChanLun] 线段' + (i+1) + '(' + xd.dir + '): [' + xd.startDate + ',' + xd.startPrice + '] → index=' + si + ', [' + xd.endDate + ',' + xd.endPrice + '] → index=' + ei + (si === -1 || ei === -1 ? ' ⚠️ 未匹配!' : ' ✓'));
+                    if (si === -1 || ei === -1) return;
+                    var lineData = new Array(dates.length).fill(null);
+                    lineData[si] = xd.startPrice;
+                    lineData[ei] = xd.endPrice;
+                    var xdColor = xd.color || '#a855f7';
+                    series.push({
+                        name: '线段' + (i + 1),
+                        type: 'line',
+                        xAxisIndex: 0,
+                        yAxisIndex: 0,
+                        data: lineData,
+                        symbol: 'circle',
+                        symbolSize: 8,
+                        itemStyle: { color: xdColor, borderColor: '#fff', borderWidth: 2 },
+                        lineStyle: { width: 4, color: xdColor, opacity: 0.95 },
+                        connectNulls: true,
+                        zlevel: 4,
+                        animation: false
+                    });
+                });
+            }
+
+            var bcMarkPoints = [];
+            if (showBc && chanData.beichi) {
+                var bcIdx = dateIndex(chanData.beichi.date);
+                console.log('[ChanLun] 背驰标识: date=' + chanData.beichi.date + ' → index=' + bcIdx + (bcIdx === -1 ? ' ⚠️ 未匹配!' : ' ✓'));
+                if (bcIdx !== -1) {
+                    bcMarkPoints.push({
+                        coord: [dates[bcIdx], chanData.beichi.price],
+                        symbol: 'circle',
+                        symbolSize: 20,
+                        itemStyle: { color: 'rgba(22,163,74,0.2)', borderColor: '#16a34a', borderWidth: 2 },
+                        label: { show: true, formatter: '\u00D8', position: 'inside', fontSize: 14, fontWeight: 'bold', color: '#16a34a', fontFamily: 'Arial,sans-serif' }
+                    });
+                }
+            }
+
+            if (showBi && chanData.bis) {
+                chanData.bis.forEach(function(bi, i) {
+                    var si = dateIndex(bi.startDate), ei = dateIndex(bi.endDate);
+                    console.log('[ChanLun] 笔' + (i+1) + '(' + bi.dir + '): [' + bi.startDate + ',' + bi.startPrice + ']→idx=' + si + ', [' + bi.endDate + ',' + bi.endPrice + ']→idx=' + ei + (si === -1 || ei === -1 ? ' ⚠️ 未匹配!' : (bi.beichi ? ' ✓ 背驰点' : ' ✓')));
+                    if (si === -1 || ei === -1) return;
+                    var lineData = new Array(dates.length).fill(null);
+                    lineData[si] = bi.startPrice;
+                    lineData[ei] = bi.endPrice;
+                    var isUp = (bi.dir === 'up');
+                    var biColor = isUp ? '#dc2626' : '#22c55e';
+                    var biSeriesConfig = {
+                        name: '笔' + (i + 1),
+                        type: 'line',
+                        xAxisIndex: 0,
+                        yAxisIndex: 0,
+                        data: lineData,
+                        symbol: 'circle',
+                        symbolSize: 4,
+                        itemStyle: { color: isUp ? '#ef4444' : '#22c55e', borderColor: '#fff', borderWidth: 0.5 },
+                        lineStyle: { width: 1.5, color: biColor, opacity: 0.9 },
+                        connectNulls: true,
+                        zlevel: 3,
+                        animation: false
+                    };
+                    if (bi.beichi && bcMarkPoints.length > 0) {
+                        biSeriesConfig.markPoint = { data: [bcMarkPoints[0]], animation: false };
+                        bcMarkPoints = [];
+                    }
+                    series.push(biSeriesConfig);
+                });
+            }
+
+            console.log('[ChanLun] 构建完成: series=' + series.length + '个 (全部使用series内置元素,跟随dataZoom)');
+            console.table(series.map(function(s) { return { name: s.name, type: s.type, zlevel: s.zlevel, hasMarkArea: !!s.markArea, hasMarkPoint: !!s.markPoint }; }));
+            console.groupEnd();
+            return { series: series, graphic: [] };
+        }
+
+        function convertGraphicCoords(chartInstance, graphicElements) {
+            console.log('[ChanLun] convertGraphicCoords: 开始转换, graphicElements=' + graphicElements.length + '个');
+            if (!chartInstance || !graphicElements.length) { console.log('[ChanLun] ⚠️ 无chartInstance或graphic为空, 跳过'); return; }
+            graphicElements.forEach(function(gGroup) {
+                if (gGroup._chanData) {
+                    var d = gGroup._chanData;
+                    var p1 = chartInstance.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [d.si, d.zg]);
+                    var p2 = chartInstance.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, [d.ei, d.zd]);
+                    if (p1 && p2) {
+                        gGroup.shape = { x: p1[0], y: p1[1], width: p2[0] - p1[0], height: p2[1] - p1[1] };
+                        delete gGroup._chanData;
+                        delete gGroup.position;
+                        console.log('[ChanLun] 中枢' + d.label + ' rect: [' + d.si + ',' + d.zg + ']→[' + p1[0].toFixed(0) + ',' + p1[1].toFixed(0) + '], size=' + gGroup.shape.width.toFixed(0) + 'x' + gGroup.shape.height.toFixed(0));
+                    } else { console.warn('[ChanLun] ⚠️ 中枢坐标转换失败!'); }
+                    return;
+                }
+                if (!gGroup.children) return;
+                gGroup.children.forEach(function(child) {
+                    if (child.position && child.position.length >= 2) {
+                        var dataPt = chartInstance.convertToPixel({ xAxisIndex: 0, yAxisIndex: 0 }, child.position);
+                        console.log('[ChanLun] 坐标转换: 数据坐标[' + child.position.join(',') + '] → 像素坐标' + (dataPt ? '[' + dataPt.join(',') + ']' : 'null'));
+                        if (dataPt) child.position = dataPt;
+                        else console.warn('[ChanLun] ⚠️ convertToPixel 返回null! 数据坐标=' + JSON.stringify(child.position));
+                    }
+                });
+            });
+            chartInstance.setOption({ graphic: graphicElements });
+            console.log('[ChanLun] ✓ graphic坐标转换完成并setOption');
+        }
+
+        function updateChanStatsDisplay() {
+            var el = document.getElementById('chanStats');
+            if (!el) return;
+            var d = CHAN_605299_DATA;
+            el.textContent = '笔' + d.bis.length + ' 线段' + d.xianduans.length + ' 中枢' + d.zhongshus.length;
+        }
+
+        ['chanShowBi', 'chanShowXianduan', 'chanShowZhongshu', 'chanShowBeichi'].forEach(function(id) {
+            var el = document.getElementById(id);
+            if (el) {
+                el.addEventListener('change', function() {
+                    if (currentStockContext && currentStockContext.sortedChartData) {
+                        renderStockChart(currentStockContext.stockInfo, currentStockContext.sortedChartData);
+                    }
+                });
+            }
+        });
+
         function renderStockChart(stockInfo, dailyData) {
             console.log('renderStockChart called', { stockInfo, dataLen: dailyData ? dailyData.length : 0 });
             
@@ -3111,6 +3323,25 @@
             });
 
             const dates = chartData.map(item => item.trade_date);
+
+            // ===== 缠论叠加层：检测605299并构建缠论元素 =====
+            console.log('[ChanLun] === renderStockChart 缠论检测 ===');
+            console.log('[ChanLun] stockInfo:', JSON.stringify(stockInfo));
+            var isChanTarget = stockInfo && ((stockInfo.stock_code === '605299') || (stockInfo.code === '605299') || (stockInfo.symbol === '605299'));
+            console.log('[ChanLun] isChanTarget=' + isChanTarget);
+            console.log('[ChanLun] CHAN_605299_DATA defined=' + (typeof CHAN_605299_DATA !== 'undefined'));
+            var chanOverlay = { series: [], graphic: [] };
+            if (isChanTarget && typeof CHAN_605299_DATA !== 'undefined') {
+                chanOverlay = buildChanLunOverlay(CHAN_605299_DATA, dates);
+                document.getElementById('chanControlPanel').classList.remove('hidden');
+                updateChanStatsDisplay();
+                console.log('[ChanLun] ✓ 缠论模式已激活, 叠加series=' + chanOverlay.series.length + ', graphic=' + chanOverlay.graphic.length);
+            } else {
+                var ccp = document.getElementById('chanControlPanel');
+                if (ccp) ccp.classList.add('hidden');
+                console.log('[ChanLun] ✗ 非目标股票或数据未定义, 跳过缠论渲染');
+            }
+
             const values = chartData.map(item => [
                 parseFloat(item.open).toFixed(2),
                 parseFloat(item.close).toFixed(2),
@@ -3236,7 +3467,8 @@
                                 最低价: ${parseFloat(param.data[3]).toFixed(2)}<br/>
                                 最高价: ${parseFloat(param.data[4]).toFixed(2)}<br/>`;
                             } else if (param.seriesType === 'bar') {
-                                result += `${param.seriesName}: ${param.data[1]}<br/>`;
+                                var vol = parseFloat(param.data[1]) || 0;
+                                result += `${param.seriesName}: ` + (vol >= 10000 ? (vol / 10000).toFixed(1) + '万' : vol.toFixed(0)) + '<br/>';
                             } else if (param.seriesType === 'line') {
                                 result += `<span style="display:inline-block;margin-right:5px;border-radius:10px;width:10px;height:10px;background-color:${param.color};"></span>${param.seriesName}: ${param.data}<br/>`;
                             }
@@ -3248,13 +3480,13 @@
                     {
                         left: '10%',
                         right: '10%',
-                        height: '50%'
+                        height: '58%'
                     },
                     {
                         left: '10%',
                         right: '10%',
-                        top: '65%',
-                        height: '20%'
+                        top: '63%',
+                        height: '26%'
                     }
                 ],
                 xAxis: [
@@ -3316,7 +3548,7 @@
                         show: true,
                         xAxisIndex: [0, 1],
                         type: 'slider',
-                        top: '90%',
+                        top: '92%',
                         start: 50,
                         end: 100
                     }
@@ -3377,9 +3609,12 @@
                             color: '#ffaa00'
                         }
                     }
-                ]
+                ].concat(chanOverlay.series)
             };
-            
+
+            console.log('[ChanLun] 最终option: 总series数=' + (option.series ? option.series.length : 0) + ', 缠论series=' + chanOverlay.series.length);
+            console.log('[ChanLun] series名称列表:', option.series.map(function(s){return s.name;}).join(', '));
+
             stockChartInstance.setOption(option);
             
             // Render Baseline

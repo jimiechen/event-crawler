@@ -88,7 +88,11 @@ var ChanLunCore = (function() {
 
             if (lastFractal) {
                 var gap = curr.originalIndex - lastFractal.originalIndex;
-                if (gap < 1) continue;
+                if (gap < 2) continue;
+
+                var priceChange = Math.abs(curr.price - lastFractal.price);
+                var avgPrice = (curr.price + lastFractal.price) / 2;
+                if (avgPrice > 0 && priceChange / avgPrice < 0.008) continue;
 
                 var direction = lastFractal.type === 'bottom' ? 'up' : 'down';
                 bis.push({
@@ -106,7 +110,8 @@ var ChanLunCore = (function() {
 
     function detectZhongshus(bis, options) {
         var opts = options || {};
-        var minBiCount = opts.minBiCount || 3;
+        var minBiCount = opts.minBiCount || 5;
+        var minAmplitude = opts.minAmplitude || 0;
         var zhongshus = [];
         if (!bis || bis.length < minBiCount) return zhongshus;
 
@@ -126,7 +131,7 @@ var ChanLunCore = (function() {
             var zg = Math.min.apply(null, upHighs);
             var zd = Math.max.apply(null, downLows);
 
-            if (zg > zd) {
+            if (zg > zd && (zg - zd) > minAmplitude) {
                 var endIdx = i + minBiCount - 1;
                 for (var k = i + minBiCount; k < bis.length; k++) {
                     var bk = bis[k];
