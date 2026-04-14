@@ -2,93 +2,56 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>Footprint + 1min K线 左右联动 Demo</title>
-  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <title>Footprint Demo — 蜡烛|卖方|买方</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
-      background: #1a1a2e;
+      background: #141420;
       color: #e0e0e0;
       font-family: 'Consolas', 'Monaco', monospace;
       font-size: 12px;
       padding: 16px;
     }
-
     h2 {
-      color: #888;
-      font-size: 13px;
+      color: #555;
+      font-size: 12px;
       font-weight: normal;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
       letter-spacing: 1px;
     }
-
-    /* ── 核心：左右结构 ── */
-    .chart-row {
-      display: grid;
-      grid-template-columns: 320px 1fr;
-      gap: 0;
-      align-items: stretch;
-    }
-
-    /* 左侧：K线 + Volume（ECharts） */
-    #kline-chart {
-      width: 320px;
-      height: 520px;
-      border-right: 1px solid #2a2a3e;
-    }
-
-    /* 右侧：Footprint（Canvas） */
-    #fp-wrap {
+    #chart-scroll {
       overflow-x: auto;
-      height: 520px;
-      display: flex;
-      align-items: flex-start;
     }
-
-    #fp-canvas {
-      display: block;
-    }
-
-    /* 图例 */
+    canvas { display: block; }
     .legend {
-      margin-top: 12px;
+      margin-top: 10px;
       display: flex;
-      gap: 20px;
-      color: #555;
+      gap: 18px;
+      color: #444;
       font-size: 11px;
-      align-items: center;
     }
-    .legend-dot {
-      width: 12px; height: 12px;
-      border-radius: 2px;
-      display: inline-block;
-      margin-right: 5px;
-      vertical-align: middle;
+    .ld {
+      width: 10px; height: 10px; border-radius: 2px;
+      display: inline-block; margin-right: 4px; vertical-align: middle;
     }
   </style>
 </head>
 <body>
 
-<h2>605299.SH &nbsp;|&nbsp; 2026-04-10 &nbsp;|&nbsp; 1min K线（左）+ Footprint 订单流（右）&nbsp;[DEMO]</h2>
-
-<div class="chart-row">
-  <div id="kline-chart"></div>
-  <div id="fp-wrap">
-    <canvas id="fp-canvas"></canvas>
-  </div>
+<h2>605299.SH &nbsp;|&nbsp; 2026-04-10 &nbsp;|&nbsp; Footprint 订单流 [DEMO]</h2>
+<div id="chart-scroll">
+  <canvas id="main-canvas"></canvas>
 </div>
-
 <div class="legend">
-  <span><span class="legend-dot" style="background:#e24b4a"></span>卖方主导（delta &lt; 0）</span>
-  <span><span class="legend-dot" style="background:#1d9e75"></span>买方主导（delta &gt; 0）</span>
-  <span style="color:#444">格式：主动卖 × 主动买 &nbsp;|&nbsp; 底部 = 分钟 Delta</span>
+  <span><span class="ld" style="background:#e24b4a"></span>卖方（中间列，sell×buy）</span>
+  <span><span class="ld" style="background:#1d9e75"></span>买方（右侧列，buy×sell）</span>
+  <span>底部数字 = 分钟 Delta</span>
 </div>
 
 <script>
-// ─────────────────────────────────────────────────────────────
-// MOCK 数据（API v2.0 契约，5 分钟）
-// ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────
+// MOCK 数据（API v2.0）
+// ─────────────────────────────────────────
 const MOCK_MINUTES = [
   {
     minute: "09:30",
@@ -99,9 +62,9 @@ const MOCK_MINUTES = [
       { price: 18.82, sell: 87,  buy: 79,  delta: -8  },
       { price: 18.81, sell: 198, buy: 170, delta: -28 },
       { price: 18.80, sell: 59,  buy: 56,  delta: -3  },
-      { price: 18.79, sell: 80,  buy: 67,  delta: -13 },
-      { price: 18.78, sell: 23,  buy: 18,  delta: -5  },
-      { price: 18.77, sell: 41,  buy: 37,  delta: -4  },
+      { price: 18.79, sell: 83,  buy: 66,  delta: -17 },
+      { price: 18.78, sell: 28,  buy: 22,  delta: -6  },
+      { price: 18.77, sell: 23,  buy: 18,  delta: -5  },
     ]
   },
   {
@@ -157,284 +120,225 @@ const MOCK_MINUTES = [
   }
 ];
 
-// ─────────────────────────────────────────────────────────────
-// 共享价格轴（K线高低 + Footprint 所有价格，统一对齐）
-// ─────────────────────────────────────────────────────────────
-function buildSharedPriceAxis() {
+// ─────────────────────────────────────────
+// 全局价格轴
+// ─────────────────────────────────────────
+function buildPriceAxis() {
   const set = new Set();
   MOCK_MINUTES.forEach(m => {
-    // K线范围内每 0.01 一格
     let p = Math.round(m.kline.low * 100);
     const hi = Math.round(m.kline.high * 100);
     while (p <= hi) { set.add(p / 100); p++; }
-    // Footprint 行价格
     m.rows.forEach(r => set.add(Math.round(r.price * 100) / 100));
   });
-  return Array.from(set).sort((a, b) => b - a); // 高 → 低
+  return Array.from(set).sort((a, b) => b - a);
 }
 
-const ALL_PRICES   = buildSharedPriceAxis();
-const PRICE_MAX    = ALL_PRICES[0];
-const PRICE_MIN    = ALL_PRICES[ALL_PRICES.length - 1];
-const PRICE_RANGE  = PRICE_MAX - PRICE_MIN || 0.01;
+const ALL_PRICES = buildPriceAxis();
+const N_ROWS     = ALL_PRICES.length;
 
-// ─────────────────────────────────────────────────────────────
-// Footprint Canvas 参数
-// ─────────────────────────────────────────────────────────────
-const CELL_H    = 20;   // 每价格行高度 px（与 K线Y轴对齐）
-const CELL_W    = 140;  // 每分钟列宽 px
-const COL_GAP   = 3;    // 列间距
-const PAD_L     = 8;    // 左边距（紧贴K线右侧）
-const PAD_TOP   = 28;   // 顶部时间标签区
-const PAD_BOT   = 52;   // 底部 Volume + Delta 区
+// ─────────────────────────────────────────
+// 布局参数
+// 每分钟 = 蜡烛列(左) + 卖方列(中) + 买方列(右)
+// ─────────────────────────────────────────
+const CELL_H    = 20;   // 每价格行高
+const CANDLE_W  = 56;   // 左：蜡烛列宽
+const SELL_W    = 108;  // 中：卖方列宽
+const BUY_W     = 108;  // 右：买方列宽
+const COL_W     = CANDLE_W + SELL_W + BUY_W;  // 272px
+const COL_GAP   = 3;
+const PAD_L     = 52;   // 价格轴标签
+const PAD_TOP   = 28;
+const PAD_BOT   = 52;
+const VOL_H     = 34;
 
-const N_ROWS    = ALL_PRICES.length;
-const FP_H      = PAD_TOP + N_ROWS * CELL_H + PAD_BOT;
-const FP_W      = PAD_L + MOCK_MINUTES.length * (CELL_W + COL_GAP);
+const CANVAS_W  = PAD_L + MOCK_MINUTES.length * (COL_W + COL_GAP);
+const CANVAS_H  = PAD_TOP + N_ROWS * CELL_H + PAD_BOT;
 
-// K线图高度需与 Footprint 价格区高度对齐
-const KLINE_PRICE_H = N_ROWS * CELL_H;  // 价格区像素高
-const VOL_H         = 48;               // 成交量区高度
+// 颜色
+const SELL_RGB = [226, 75,  74 ];
+const BUY_RGB  = [29,  158, 117];
+const NEUT_RGB = [80,  80,  95 ];
 
-// ─────────────────────────────────────────────────────────────
-// 颜色工具
-// ─────────────────────────────────────────────────────────────
-const UP_RGB   = [29,  158, 117];
-const DOWN_RGB = [226, 75,  74];
-const NEUT_RGB = [70,  70,  80];
-
-function rgba(rgb, a) {
-  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
+function rgba([r, g, b], a) {
+  return `rgba(${r},${g},${b},${a})`;
 }
 
-// 价格 → Footprint Y 坐标（行顶部）
-function priceToRowY(price) {
-  const idx = ALL_PRICES.findIndex(p => Math.abs(p - price) < 0.001);
-  if (idx < 0) return -1;
-  return PAD_TOP + idx * CELL_H;
+function priceIdx(price) {
+  return ALL_PRICES.findIndex(p => Math.abs(p - price) < 0.0005);
+}
+function rowTopY(price) {
+  const i = priceIdx(price);
+  return i < 0 ? -1 : PAD_TOP + i * CELL_H;
+}
+function rowMidY(price) {
+  const i = priceIdx(price);
+  return i < 0 ? -1 : PAD_TOP + i * CELL_H + CELL_H / 2;
 }
 
-// 价格 → Footprint Y 坐标（中心，用于K线影线对齐参考）
-function priceToY(price) {
-  return PAD_TOP + (PRICE_MAX - price) / PRICE_RANGE * (N_ROWS * CELL_H);
-}
+// 第 ci 分钟：蜡烛列起始 X
+function candleColX(ci) { return PAD_L + ci * (COL_W + COL_GAP); }
+function sellColX(ci)   { return candleColX(ci) + CANDLE_W; }
+function buyColX(ci)    { return candleColX(ci) + CANDLE_W + SELL_W; }
 
-// 列左边 X
-function colX(ci) {
-  return PAD_L + ci * (CELL_W + COL_GAP);
-}
-
-// ─────────────────────────────────────────────────────────────
-// 左侧：ECharts K线图
-// ─────────────────────────────────────────────────────────────
-function renderKlineChart() {
-  const chart = echarts.init(document.getElementById('kline-chart'), null, {
-    renderer: 'canvas'
-  });
-
-  const xData    = MOCK_MINUTES.map(m => m.minute);
-  const kData    = MOCK_MINUTES.map(m => [m.kline.open, m.kline.close, m.kline.low, m.kline.high]);
-  const volData  = MOCK_MINUTES.map(m => ({
-    value: m.kline.volume,
-    itemStyle: { color: m.kline.close >= m.kline.open ? rgba(UP_RGB, 0.6) : rgba(DOWN_RGB, 0.6) }
-  }));
-
-  // 价格轴范围与 Footprint 完全一致
-  const yMin = PRICE_MIN - 0.005;
-  const yMax = PRICE_MAX + 0.005;
-
-  const option = {
-    backgroundColor: '#1a1a2e',
-    animation: false,
-    grid: [
-      // K线主图
-      { left: 8, right: 40, top: PAD_TOP, height: KLINE_PRICE_H },
-      // 成交量副图
-      { left: 8, right: 40, top: PAD_TOP + KLINE_PRICE_H + 8, height: VOL_H }
-    ],
-    xAxis: [
-      {
-        type: 'category', data: xData, gridIndex: 0,
-        axisLine: { lineStyle: { color: '#2a2a3e' } },
-        axisLabel: { color: '#666', fontSize: 11, fontFamily: 'Consolas' },
-        splitLine: { show: true, lineStyle: { color: '#252538', width: 0.5 } }
-      },
-      {
-        type: 'category', data: xData, gridIndex: 1,
-        axisLabel: { show: false },
-        axisLine: { lineStyle: { color: '#2a2a3e' } },
-        splitLine: { show: false }
-      }
-    ],
-    yAxis: [
-      {
-        type: 'value', gridIndex: 0,
-        min: yMin, max: yMax,
-        scale: false,
-        axisLabel: {
-          color: '#555', fontSize: 10, fontFamily: 'Consolas',
-          formatter: v => v.toFixed(2),
-          inside: false
-        },
-        splitLine: { lineStyle: { color: '#252538', width: 0.5 } },
-        axisLine: { show: false }
-      },
-      {
-        type: 'value', gridIndex: 1,
-        axisLabel: { show: false },
-        splitLine: { show: false },
-        axisLine: { show: false }
-      }
-    ],
-    series: [
-      {
-        type: 'candlestick',
-        xAxisIndex: 0, yAxisIndex: 0,
-        data: kData,
-        itemStyle: {
-          color:        rgba(UP_RGB,   0.9),
-          color0:       rgba(DOWN_RGB, 0.9),
-          borderColor:  rgba(UP_RGB,   1),
-          borderColor0: rgba(DOWN_RGB, 1),
-          borderWidth: 1
-        }
-      },
-      {
-        type: 'bar',
-        xAxisIndex: 1, yAxisIndex: 1,
-        data: volData,
-        barMaxWidth: 28
-      }
-    ]
-  };
-
-  chart.setOption(option);
-}
-
-// ─────────────────────────────────────────────────────────────
-// 右侧：Canvas Footprint
-// ─────────────────────────────────────────────────────────────
-function renderFootprint() {
-  const canvas  = document.getElementById('fp-canvas');
-  canvas.width  = FP_W;
-  canvas.height = FP_H;
+// ─────────────────────────────────────────
+// 渲染
+// ─────────────────────────────────────────
+function render() {
+  const canvas = document.getElementById('main-canvas');
+  canvas.width  = CANVAS_W;
+  canvas.height = CANVAS_H;
   const ctx = canvas.getContext('2d');
 
   // 背景
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(0, 0, FP_W, FP_H);
+  ctx.fillStyle = '#141420';
+  ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-  // 水平网格线（每价格行）
-  ctx.strokeStyle = '#252538';
-  ctx.lineWidth   = 0.5;
-  ALL_PRICES.forEach((_, ri) => {
-    const y = PAD_TOP + ri * CELL_H;
+  // 价格轴标签（左侧）
+  ctx.font = '10px Consolas';
+  ctx.textAlign = 'right';
+  ALL_PRICES.forEach((price, i) => {
+    if (i % 2 === 0) {
+      ctx.fillStyle = '#3a3a55';
+      ctx.fillText(price.toFixed(2), PAD_L - 4, PAD_TOP + i * CELL_H + CELL_H / 2 + 3);
+    }
+  });
+
+  // 水平网格线
+  ALL_PRICES.forEach((_, i) => {
+    const y = PAD_TOP + i * CELL_H;
+    ctx.strokeStyle = '#1c1c2e';
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
     ctx.moveTo(PAD_L, y);
-    ctx.lineTo(FP_W, y);
+    ctx.lineTo(CANVAS_W, y);
     ctx.stroke();
   });
-  // 底边
+  // 价格区底部边线
+  ctx.strokeStyle = '#2a2a40';
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(PAD_L, PAD_TOP + N_ROWS * CELL_H);
-  ctx.lineTo(FP_W, PAD_TOP + N_ROWS * CELL_H);
+  ctx.lineTo(CANVAS_W, PAD_TOP + N_ROWS * CELL_H);
   ctx.stroke();
 
-  // 每分钟列
   MOCK_MINUTES.forEach((m, ci) => {
-    const cx     = colX(ci);
+    const cx  = candleColX(ci);
+    const sx  = sellColX(ci);
+    const bx  = buyColX(ci);
     const maxAbs = Math.max(...m.rows.map(r => Math.abs(r.delta)), 1);
 
-    // 时间标签
-    ctx.fillStyle = '#666';
-    ctx.font      = '11px Consolas';
+    // 时间标签（列顶部居中）
+    ctx.fillStyle = '#555';
+    ctx.font = '11px Consolas';
     ctx.textAlign = 'center';
-    ctx.fillText(m.minute, cx + CELL_W / 2, PAD_TOP - 8);
+    ctx.fillText(m.minute, cx + COL_W / 2, PAD_TOP - 8);
 
-    // ── Footprint 格子 ────────────────────────────────────
+    // ── Footprint 格子 ──────────────────────
     m.rows.forEach(row => {
-      const cellY = priceToRowY(row.price);
-      if (cellY < 0) return;
+      const ry = rowTopY(row.price);
+      if (ry < 0) return;
 
       const intensity = Math.abs(row.delta) / maxAbs;
-      const alpha     = 0.18 + intensity * 0.72;
-      const color     = row.delta > 0 ? UP_RGB : row.delta < 0 ? DOWN_RGB : NEUT_RGB;
+      const alpha     = 0.14 + intensity * 0.76;
+      const isMax     = Math.abs(row.delta) === maxAbs;
+      const midY      = ry + CELL_H / 2 + 4;
 
-      // 格子背景
-      ctx.fillStyle = rgba(color, alpha);
-      ctx.fillRect(cx + 1, cellY + 0.5, CELL_W - 2, CELL_H - 1);
+      // 卖方格子（中间列）—— 红色系
+      const sellBg = row.delta < 0 ? SELL_RGB : row.delta > 0 ? BUY_RGB : NEUT_RGB;
+      ctx.fillStyle = rgba(sellBg, alpha);
+      ctx.fillRect(sx + 1, ry + 0.5, SELL_W - 2, CELL_H - 1);
 
-      // 最大 |delta| 行加边框高亮
-      if (Math.abs(row.delta) === maxAbs) {
-        ctx.strokeStyle = rgba(color, 0.95);
-        ctx.lineWidth   = 1.5;
-        ctx.strokeRect(cx + 1.75, cellY + 1, CELL_W - 3.5, CELL_H - 2);
+      // 买方格子（右侧列）—— 绿色系
+      const buyBg = row.delta > 0 ? BUY_RGB : row.delta < 0 ? SELL_RGB : NEUT_RGB;
+      ctx.fillStyle = rgba(buyBg, alpha * 0.85);
+      ctx.fillRect(bx + 1, ry + 0.5, BUY_W - 2, CELL_H - 1);
+
+      // 最大量行边框
+      if (isMax) {
+        const bc = row.delta >= 0 ? BUY_RGB : SELL_RGB;
+        ctx.strokeStyle = rgba(bc, 0.9);
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(sx + 1.75, ry + 1, SELL_W - 3.5, CELL_H - 2);
+        ctx.strokeRect(bx + 1.75, ry + 1, BUY_W - 3.5, CELL_H - 2);
       }
 
-      // 文字：sell × buy
-      const midY = cellY + CELL_H / 2 + 4;
-
-      ctx.font      = '11px Consolas';
       ctx.lineWidth = 1;
+      ctx.font = '11px Consolas';
 
-      // sell（左对齐）
-      ctx.fillStyle = '#ddd';
+      // 卖方文字：sell × buy（中间列）
+      ctx.fillStyle = rgba(SELL_RGB, 0.9);
       ctx.textAlign = 'left';
-      ctx.fillText(row.sell, cx + 6, midY);
-
-      // ×（居中）
-      ctx.fillStyle = '#555';
+      ctx.fillText(row.sell, sx + 5, midY);
+      ctx.fillStyle = '#3a3a55';
       ctx.textAlign = 'center';
-      ctx.fillText('×', cx + CELL_W / 2, midY);
-
-      // buy（右对齐，颜色跟随方向）
-      ctx.fillStyle = row.delta > 0 ? rgba(UP_RGB, 1)
-                    : row.delta < 0 ? rgba(DOWN_RGB, 1)
-                    : '#888';
+      ctx.fillText('×', sx + SELL_W / 2, midY);
+      ctx.fillStyle = '#bbb';
       ctx.textAlign = 'right';
-      ctx.fillText(row.buy, cx + CELL_W - 6, midY);
+      ctx.fillText(row.buy, sx + SELL_W - 5, midY);
+
+      // 买方文字：buy × sell（右侧列）
+      ctx.fillStyle = rgba(BUY_RGB, 0.9);
+      ctx.textAlign = 'left';
+      ctx.fillText(row.buy, bx + 5, midY);
+      ctx.fillStyle = '#3a3a55';
+      ctx.textAlign = 'center';
+      ctx.fillText('×', bx + BUY_W / 2, midY);
+      ctx.fillStyle = '#bbb';
+      ctx.textAlign = 'right';
+      ctx.fillText(row.sell, bx + BUY_W - 5, midY);
     });
 
-    // ── 成交量柱（价格区下方） ────────────────────────────
-    const volTop  = PAD_TOP + N_ROWS * CELL_H + 8;
-    const maxVol  = Math.max(...MOCK_MINUTES.map(d => d.kline.volume));
-    const barH    = (m.kline.volume / maxVol) * (VOL_H - 12);
-    const up      = m.kline.close >= m.kline.open;
+    // ── K线蜡烛（左侧列）─────────────────────
+    const { open, close, high, low } = m.kline;
+    const up    = close >= open;
+    const color = up ? rgba(BUY_RGB, 1) : rgba(SELL_RGB, 1);
+    const ccx   = cx + CANDLE_W / 2;  // 蜡烛中心 X
+    const bw    = CANDLE_W * 0.52;    // 实体宽
 
-    ctx.fillStyle = up ? rgba(UP_RGB, 0.5) : rgba(DOWN_RGB, 0.5);
-    ctx.fillRect(
-      cx + CELL_W * 0.15,
-      volTop + (VOL_H - 12) - barH,
-      CELL_W * 0.7,
-      barH
-    );
+    const bodyT = Math.min(rowMidY(open), rowMidY(close));
+    const bodyB = Math.max(rowMidY(open), rowMidY(close));
+    const bodyH = Math.max(bodyB - bodyT, 2);
 
-    // ── 分钟 Delta 标签（最底部） ─────────────────────────
-    const deltaY = PAD_TOP + N_ROWS * CELL_H + VOL_H + 16;
+    // 影线
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(ccx, rowMidY(high)); ctx.lineTo(ccx, bodyT); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ccx, bodyB); ctx.lineTo(ccx, rowMidY(low)); ctx.stroke();
+
+    // 实体
+    ctx.fillStyle = color;
+    ctx.fillRect(ccx - bw / 2, bodyT, bw, bodyH);
+
+    // ── 成交量柱（价格区正下方，蜡烛列居中）──
+    const volAreaTop = PAD_TOP + N_ROWS * CELL_H + 5;
+    const maxVol     = Math.max(...MOCK_MINUTES.map(d => d.kline.volume));
+    const barH       = (m.kline.volume / maxVol) * (VOL_H - 6);
+    ctx.fillStyle    = up ? rgba(BUY_RGB, 0.45) : rgba(SELL_RGB, 0.45);
+    ctx.fillRect(cx + CANDLE_W * 0.12, volAreaTop + (VOL_H - 6) - barH, CANDLE_W * 0.76, barH);
+
+    // ── 分钟 Delta（卖方列底部）──────────────
+    const deltaY = PAD_TOP + N_ROWS * CELL_H + VOL_H + 18;
     ctx.font      = 'bold 12px Consolas';
     ctx.textAlign = 'center';
-    ctx.fillStyle = m.minute_delta > 0 ? rgba(UP_RGB, 1) : rgba(DOWN_RGB, 1);
+    ctx.fillStyle = m.minute_delta > 0 ? rgba(BUY_RGB, 1) : rgba(SELL_RGB, 1);
     ctx.fillText(
       (m.minute_delta > 0 ? '+' : '') + m.minute_delta,
-      cx + CELL_W / 2,
+      sx + SELL_W / 2,
       deltaY
     );
 
-    // ── 列分隔线 ─────────────────────────────────────────
-    ctx.strokeStyle = '#2a2a3e';
-    ctx.lineWidth   = 1;
+    // ── 列分隔线 ─────────────────────────────
+    ctx.strokeStyle = '#1e1e32';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(cx + CELL_W + COL_GAP / 2, PAD_TOP);
-    ctx.lineTo(cx + CELL_W + COL_GAP / 2, PAD_TOP + N_ROWS * CELL_H);
+    ctx.moveTo(cx + COL_W + COL_GAP / 2, PAD_TOP - 20);
+    ctx.lineTo(cx + COL_W + COL_GAP / 2, PAD_TOP + N_ROWS * CELL_H + PAD_BOT - 4);
     ctx.stroke();
   });
 }
 
-// ─────────────────────────────────────────────────────────────
-// 入口
-// ─────────────────────────────────────────────────────────────
-renderKlineChart();
-renderFootprint();
+render();
 </script>
 </body>
 </html>
