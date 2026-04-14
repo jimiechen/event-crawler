@@ -192,6 +192,8 @@ function renderFootprintItem(params, api) {
 
   const children = [];
 
+  if (params.dataIndex === 0) console.log('DEBUG', { colW: Math.max(8, Math.min(300, api.size([1,0])[0])), csHeight: api.getHeight(), gridH: api.coord([0, 0]) });
+
   // 主题文字颜色
   const TC = currentTheme === 'light'
     ? { sell: '#8b1a1a', buy: '#1a5c2a', muted: '#555' }
