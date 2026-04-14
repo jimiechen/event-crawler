@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Footprint 240根 — 性能测试</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0f0f1a; color: #e0e0e0; font-family: Consolas, monospace; padding: 12px; }
+
+    .toolbar {
+      display: flex; gap: 10px; align-items: center;
+      margin-bottom: 8px; flex-wrap: wrap;
+    }
+    .toolbar button {
+      background: #1e1e30; color: #aaa; border: 1px solid #2a2a40;
+      padding: 4px 12px; cursor: pointer; font-family: Consolas; font-size: 11px;
+      border-radius: 3px;
+    }
+    .toolbar button:hover { background: #2a2a44; color: #ddd; }
+    .toolbar button.active { background: #2a3a5a; color: #7ac; border-color: #3a5a8a; }
+
+    #perf {
+      font-size: 11px; color: #555; margin-left: auto;
+      display: flex; gap: 16px;
+    }
+    #perf span { color: #3a3a55; }
+    #perf .val { color: #7ac; }
+    #perf .warn { color: #e24b4a; }
+
+    #chart { width: 100%; height: calc(100vh - 80px); min-height: 500px; }
+  </style>
+</head>
+<body>
+
+<div class="toolbar">
+  <span style="color:#444;font-size:11px">视图：</span>
+  <button id="btn-all"   class="active" onclick="setView('all')">全天 240根</button>
+  <button id="btn-60"    onclick="setView(60)">最近 60根</button>
+  <button id="btn-30"    onclick="setView(30)">最近 30根</button>
+  <button id="btn-10"    onclick="setView(10)">最近 10根</button>
+  <span style="color:#2a2a40;margin:0 4px">|</span>
+  <button onclick="chart.dispatchAction({type:'dataZoom',start:0,end:100})">重置缩放</button>
+
+  <div id="perf">
+    <span>渲染耗时 <span id="p-render" class="val">--</span> ms</span>
+    <span>可见蜡烛 <span id="p-visible" class="val">--</span></span>
+    <span>总数据点 <span id="p-total" class="val">--</span></span>
+    <span>FPS <span id="p-fps" class="val">--</span></span>
+  </div>
+</div>
+
+<div id="chart"></div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// 1. 生成 240 根 1min OHLCV + Footprint 数据
+// ─────────────────────────────────────────────────────────────
+function generateDay() {
+  const minutes = [];
+  let price = 18.80;
+  const TICK = 0.01;
+
+  // 09:30 ~ 11:30 (120根) + 13:00 ~ 15:00 (120根)
+  const slots = [];
+  for (let h = 9, m = 30; slots.length < 120; ) {
+    slots.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+    m++; if (m === 60) { m = 0; h++; }
+  }
+  for (let h = 13, m = 0; slots.length < 240; ) {
+    slots.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+    m++; if (m === 60) { m = 0; h++; }
+  }
+
+  slots.forEach((minute, i) => {
+    // 模拟价格随机游走（带趋势）
+    const trend = Math.sin(i / 40) * 0.003 + (Math.random() - 0.49) * 0.005;
+    price = Math.max(17.50, Math.min(20.50, price + trend));
+    price = Math.round(price * 100) / 100;
+
+    const range  = Math.round((0.02 + Math.random() * 0.06) * 100) / 100;
+    const open   = price;
+    const close  = Math.round((price + (Math.random() - 0.5) * range) * 100) / 100;
+    const high   = Math.round((Math.max(open, close) + Math.random() * range * 0.5) * 100) / 100;
+    const low    = Math.round((Math.min(open, close) - Math.random() * range * 0.5) * 100) / 100;
+    const volume = Math.round(1000 + Math.random() * 8000);
+
+    // 生成 Footprint rows（每分钟 3~10 个价格档位）
+    const rowCount = 3 + Math.floor(Math.random() * 8);
+    const priceMin = Math.round(low * 100);
+    const priceMax = Math.round(high * 100);
+    const priceRange = priceMax - priceMin || 1;
+    const rows = [];
+    const usedPrices = new Set();
+
+    for (let r = 0; r < rowCount; r++) {
+      let p = priceMin + Math.floor(Math.random() * (priceRange + 1));
+      if (usedPrices.has(p)) continue;
+      usedPrices.add(p);
+      const sell = Math.round(10 + Math.random() * 200);
+      const buy  = Math.round(10 + Math.random() * 200);
+      rows.push({ price: p / 100, sell, buy, delta: buy - sell });
+    }
+    rows.sort((a, b) => b.price - a.price);
+
+    const minute_delta = rows.reduce((s, r) => s + r.delta, 0);
+    price = close;
+
+    minutes.push({ minute, kline: { open, high, low, close, volume }, minute_delta, rows });
+  });
+
+  return minutes;
+}
+
+console.time('generateDay');
+const MOCK_MINUTES = generateDay();
+console.timeEnd('generateDay');
+
+document.getElementById('p-total').textContent =
+  MOCK_MINUTES.reduce((s, m) => s + m.rows.length, 0) + ' 行';
+
+// ─────────────────────────────────────────────────────────────
+// 2. 全局价格轴
+// ─────────────────────────────────────────────────────────────
+const priceSet = new Set();
+MOCK_MINUTES.forEach(m => {
+  let p = Math.round(m.kline.low * 100);
+  const hi = Math.round(m.kline.high * 100);
+  while (p <= hi) { priceSet.add(p / 100); p++; }
+  m.rows.forEach(r => priceSet.add(Math.round(r.price * 100) / 100));
+});
+const ALL_PRICES = Array.from(priceSet).sort((a, b) => a - b);
+const Y_MIN = ALL_PRICES[0] - 0.02;
+const Y_MAX = ALL_PRICES[ALL_PRICES.length - 1] + 0.02;
+
+// ─────────────────────────────────────────────────────────────
+// 3. 颜色工具
+// ─────────────────────────────────────────────────────────────
+const C_SELL = { r: 226, g: 75,  b: 74  };
+const C_BUY  = { r: 29,  g: 158, b: 117 };
+const C_NEUT = { r: 70,  g: 70,  b: 90  };
+
+function ca(c, a) {
+  return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + a.toFixed(2) + ')';
+}
+
+// ─────────────────────────────────────────────────────────────
+// 4. renderItem（带可见性裁剪 + 缩放级别自适应）
+// ─────────────────────────────────────────────────────────────
+function renderFootprintItem(params, api) {
+  const ci = params.dataIndex;
+  const m  = MOCK_MINUTES[ci];
+
+  // 可见性裁剪：不在视口内直接跳过
+  const coordSys = params.coordSys;
+  const xPx = api.coord([ci, Y_MIN])[0];
+  if (xPx < coordSys.x - 20 || xPx > coordSys.x + coordSys.width + 20) {
+    return { type: 'group', children: [] };
+  }
+
+  const children = [];
+
+  // 列宽计算
+  let colPxW = 40;
+  if (MOCK_MINUTES.length > 1) {
+    const x0 = api.coord([0, Y_MIN])[0];
+    const x1 = api.coord([1, Y_MIN])[0];
+    colPxW = Math.abs(x1 - x0) * 0.88;
+  }
+
+  // 缩放级别：列宽 < 8px 时只画蜡烛，不画格子文字
+  const showText  = colPxW >= 60;
+  const showCells = colPxW >= 6;
+
+  const candleW = colPxW * 0.14;
+  const sideW   = colPxW * 0.43;
+
+  const colLeft = api.coord([ci, Y_MIN])[0] - colPxW / 2;
+  const sellX   = colLeft + candleW;
+  const buyX    = colLeft + candleW + sideW;
+
+  // 格子行高
+  let cellH = 14;
+  if (ALL_PRICES.length >= 2) {
+    const ya = api.coord([ci, ALL_PRICES[0]])[1];
+    const yb = api.coord([ci, ALL_PRICES[1]])[1];
+    cellH = Math.abs(yb - ya);
+  }
+
+  const maxAbs = Math.max(...m.rows.map(r => Math.abs(r.delta)), 1);
+
+  // ── Footprint 格子（列宽足够时才画）────────
+  if (showCells) {
+    m.rows.forEach(row => {
+      const rowYc = api.coord([ci, row.price])[1];
+      const ry = rowYc - cellH / 2;
+      const rh = Math.max(cellH - 1, 1);
+
+      const intensity = Math.abs(row.delta) / maxAbs;
+      const alpha     = 0.12 + intensity * 0.78;
+      const isMax     = Math.abs(row.delta) === maxAbs;
+
+      const sellBg = row.delta < 0 ? C_SELL : row.delta > 0 ? C_BUY : C_NEUT;
+      const buyBg  = row.delta > 0 ? C_BUY  : row.delta < 0 ? C_SELL : C_NEUT;
+
+      children.push({
+        type: 'rect',
+        shape: { x: sellX, y: ry, width: sideW - 1, height: rh },
+        style: {
+          fill:      ca(sellBg, alpha),
+          stroke:    isMax ? ca(sellBg, 0.85) : 'none',
+          lineWidth: 1.2
+        }
+      });
+      children.push({
+        type: 'rect',
+        shape: { x: buyX, y: ry, width: sideW - 1, height: rh },
+        style: {
+          fill:      ca(buyBg, alpha * 0.8),
+          stroke:    isMax ? ca(buyBg, 0.85) : 'none',
+          lineWidth: 1.2
+        }
+      });
+
+      // 文字：只在列宽足够且格子高度 >= 12px 时显示
+      if (showText && cellH >= 12) {
+        const ty = rowYc + 4;
+        const fs = Math.max(9, Math.min(11, cellH * 0.6));
+
+        children.push({ type: 'text', style: {
+          text: String(row.sell), x: sellX + 3, y: ty,
+          fill: ca(C_SELL, 0.9), fontSize: fs, fontFamily: 'Consolas', textAlign: 'left'
+        }});
+        children.push({ type: 'text', style: {
+          text: '×', x: sellX + sideW / 2, y: ty,
+          fill: '#252535', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
+        }});
+        children.push({ type: 'text', style: {
+          text: String(row.buy), x: sellX + sideW - 3, y: ty,
+          fill: '#888', fontSize: fs, fontFamily: 'Consolas', textAlign: 'right'
+        }});
+
+        children.push({ type: 'text', style: {
+          text: String(row.buy), x: buyX + 3, y: ty,
+          fill: ca(C_BUY, 0.9), fontSize: fs, fontFamily: 'Consolas', textAlign: 'left'
+        }});
+        children.push({ type: 'text', style: {
+          text: '×', x: buyX + sideW / 2, y: ty,
+          fill: '#252535', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
+        }});
+        children.push({ type: 'text', style: {
+          text: String(row.sell), x: buyX + sideW - 3, y: ty,
+          fill: '#888', fontSize: fs, fontFamily: 'Consolas', textAlign: 'right'
+        }});
+      }
+    });
+  }
+
+  // ── K线蜡烛 ─────────────────────────────────
+  const { open, close, high, low } = m.kline;
+  const up     = close >= open;
+  const kc     = up ? C_BUY : C_SELL;
+  const kColor = ca(kc, 1);
+  const ccx    = colLeft + candleW / 2;
+  const bw     = Math.max(candleW * 0.55, 1);
+
+  const yOpen  = api.coord([ci, open])[1];
+  const yClose = api.coord([ci, close])[1];
+  const yHigh  = api.coord([ci, high])[1];
+  const yLow   = api.coord([ci, low])[1];
+  const bodyTop = Math.min(yOpen, yClose);
+  const bodyH   = Math.max(Math.abs(yClose - yOpen), 1.5);
+
+  children.push({ type: 'line',
+    shape: { x1: ccx, y1: yHigh, x2: ccx, y2: bodyTop },
+    style: { stroke: kColor, lineWidth: 1 }
+  });
+  children.push({ type: 'line',
+    shape: { x1: ccx, y1: bodyTop + bodyH, x2: ccx, y2: yLow },
+    style: { stroke: kColor, lineWidth: 1 }
+  });
+  children.push({ type: 'rect',
+    shape: { x: ccx - bw / 2, y: bodyTop, width: bw, height: bodyH },
+    style: { fill: kColor, stroke: 'none' }
+  });
+
+  // ── 分钟 Delta（列宽足够时显示）────────────
+  if (showText) {
+    const yBottom = api.coord([ci, Y_MIN])[1];
+    const dc = m.minute_delta > 0 ? C_BUY : C_SELL;
+    children.push({ type: 'text', style: {
+      text: (m.minute_delta > 0 ? '+' : '') + m.minute_delta,
+      x: sellX + sideW / 2, y: yBottom + 18,
+      fill: ca(dc, 1), fontSize: 10, fontWeight: 'bold',
+      fontFamily: 'Consolas', textAlign: 'center'
+    }});
+  }
+
+  return { type: 'group', children };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 5. ECharts 初始化
+// ─────────────────────────────────────────────────────────────
+const chart = echarts.init(document.getElementById('chart'), null, {
+  renderer: 'canvas',
+  useDirtyRect: true   // 开启脏矩形优化，只重绘变化区域
+});
+
+const option = {
+  backgroundColor: '#0f0f1a',
+  animation: false,
+  grid: { left: 62, right: 16, top: 20, bottom: 60 },
+
+  // dataZoom：支持滚轮缩放 + 底部滑块
+  dataZoom: [
+    {
+      type: 'inside',       // 滚轮/触控缩放
+      xAxisIndex: 0,
+      start: 80,            // 初始显示最后 20%（约48根）
+      end: 100,
+      minValueSpan: 5,      // 最少显示 5 根
+      maxValueSpan: 240,    // 最多显示全部
+      zoomOnMouseWheel: true,
+      moveOnMouseMove: true,
+      moveOnMouseWheel: false
+    },
+    {
+      type: 'slider',       // 底部滑块
+      xAxisIndex: 0,
+      start: 80,
+      end: 100,
+      height: 20,
+      bottom: 8,
+      borderColor: '#1e1e30',
+      backgroundColor: '#0f0f1a',
+      fillerColor: 'rgba(42,58,90,0.4)',
+      handleStyle: { color: '#3a5a8a' },
+      textStyle: { color: '#444', fontSize: 10 }
+    }
+  ],
+
+  xAxis: {
+    type: 'category',
+    data: MOCK_MINUTES.map(m => m.minute),
+    axisLine:  { lineStyle: { color: '#1e1e30' } },
+    axisLabel: {
+      color: '#444', fontFamily: 'Consolas', fontSize: 10,
+      // 只显示整点标签，避免拥挤
+      formatter: v => (v.endsWith(':00') || v === '09:30' || v === '13:00') ? v : '',
+      interval: 0
+    },
+    splitLine: { show: false },
+    axisTick:  { show: false },
+    boundaryGap: true
+  },
+
+  yAxis: {
+    type: 'value',
+    min: Y_MIN,
+    max: Y_MAX,
+    axisLabel: {
+      color: '#2a2a45',
+      fontFamily: 'Consolas',
+      fontSize: 10,
+      formatter: v => v.toFixed(2)
+    },
+    splitLine: { lineStyle: { color: '#111120', width: 0.5 } },
+    axisLine: { show: false }
+  },
+
+  series: [{
+    type: 'custom',
+    renderItem: renderFootprintItem,
+    data: MOCK_MINUTES.map((_, i) => [i, 0]),
+    encode: { x: 0 },
+    z: 10,
+    clip: false,
+    progressive: 0   // 关闭渐进渲染，保证一次性绘制
+  }]
+};
+
+console.time('setOption');
+chart.setOption(option);
+console.timeEnd('setOption');
+
+// ─────────────────────────────────────────────────────────────
+// 6. 性能监控
+// ─────────────────────────────────────────────────────────────
+let lastRenderTime = 0;
+let frameCount = 0;
+let fpsTimer = Date.now();
+
+chart.on('rendered', () => {
+  const now = performance.now();
+  if (lastRenderTime > 0) {
+    const cost = (now - lastRenderTime).toFixed(1);
+    document.getElementById('p-render').textContent = cost + ' ms';
+    // 超过 100ms 标红
+    document.getElementById('p-render').className =
+      parseFloat(cost) > 100 ? 'warn' : 'val';
+  }
+  lastRenderTime = now;
+  frameCount++;
+});
+
+// FPS 计算（每秒刷新）
+setInterval(() => {
+  document.getElementById('p-fps').textContent = frameCount;
+  frameCount = 0;
+}, 1000);
+
+// 监听 dataZoom，显示当前可见蜡烛数
+chart.on('dataZoom', e => {
+  const zoom = chart.getOption().dataZoom[0];
+  const start = zoom.start / 100;
+  const end   = zoom.end   / 100;
+  const visible = Math.round((end - start) * MOCK_MINUTES.length);
+  document.getElementById('p-visible').textContent = visible + ' 根';
+});
+
+// ─────────────────────────────────────────────────────────────
+// 7. 视图快捷切换
+// ─────────────────────────────────────────────────────────────
+function setView(mode) {
+  document.querySelectorAll('.toolbar button').forEach(b => b.classList.remove('active'));
+  let start, end;
+  if (mode === 'all') {
+    start = 0; end = 100;
+    document.getElementById('btn-all').classList.add('active');
+  } else {
+    end = 100;
+    start = Math.max(0, 100 - (mode / 240 * 100));
+    document.getElementById('btn-' + mode).classList.add('active');
+  }
+  chart.dispatchAction({ type: 'dataZoom', dataZoomIndex: 0, start, end });
+  chart.dispatchAction({ type: 'dataZoom', dataZoomIndex: 1, start, end });
+}
+
+window.addEventListener('resize', () => chart.resize());
+
+// 初始化显示
+document.getElementById('p-visible').textContent = '48 根';
+</script>
+</body>
+</html>
