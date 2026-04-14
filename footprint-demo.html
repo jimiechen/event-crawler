@@ -1,333 +1,438 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Footprint 订单流图表演示</title>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #1a1a1a;
-            color: #ffffff;
-            padding: 20px;
-        }
-        
-        .container {
-            display: grid;
-            grid-template-columns: 320px auto;
-            gap: 20px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        .time-axis {
-            grid-column: 1 / -1;
-            display: flex;
-            gap: 20px;
-            margin-bottom: 10px;
-            padding: 10px 0;
-            border-bottom: 1px solid #333;
-        }
-        
-        .time-item {
-            font-size: 14px;
-            color: #888;
-        }
-        
-        .kline-container {
-            background-color: #222;
-            border-radius: 8px;
-            padding: 15px;
-        }
-        
-        .footprint-container {
-            background-color: #222;
-            border-radius: 8px;
-            padding: 15px;
-            position: relative;
-        }
-        
-        .title {
-            font-size: 16px;
-            font-weight: bold;
-            margin-bottom: 15px;
-            color: #ccc;
-        }
-        
-        #kline-chart {
-            width: 100%;
-            height: 400px;
-        }
-        
-        #footprint-canvas {
-            width: 100%;
-            height: 400px;
-            background-color: #1a1a1a;
-            border: 1px solid #333;
-        }
-        
-        .footprint-row {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 10px;
-        }
-        
-        .minute-label {
-            width: 50px;
-            font-size: 12px;
-            color: #888;
-            display: flex;
-            align-items: center;
-        }
-        
-        .footprint-column {
-            flex: 1;
-            border: 1px solid #333;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Footprint 订单流 Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 12px;
+      padding: 16px;
+    }
+
+    h2 {
+      color: #aaa;
+      font-size: 13px;
+      font-weight: normal;
+      margin-bottom: 12px;
+      letter-spacing: 1px;
+    }
+
+    /* 整体布局：K线在左，Footprint在右 */
+    .chart-wrapper {
+      display: flex;
+      gap: 0;
+      align-items: flex-start;
+    }
+
+    /* 左侧：K线区 */
+    #kline-panel {
+      width: 400px;
+      flex-shrink: 0;
+    }
+
+    /* 右侧：Footprint 区 */
+    #footprint-panel {
+      flex: 1;
+      overflow-x: auto;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    /* 时间轴标签行 */
+    .time-axis {
+      display: flex;
+      margin-bottom: 4px;
+    }
+    .time-label {
+      text-align: center;
+      color: #666;
+      font-size: 11px;
+    }
+
+    /* 图例 */
+    .legend {
+      margin-top: 16px;
+      display: flex;
+      gap: 20px;
+      color: #666;
+      font-size: 11px;
+    }
+    .legend-item { display: flex; align-items: center; gap: 6px; }
+    .legend-dot {
+      width: 12px; height: 12px; border-radius: 2px;
+    }
+  </style>
 </head>
 <body>
-    <h1>Footprint 订单流图表演示</h1>
-    
-    <div class="container">
-        <!-- 时间轴 -->
-        <div class="time-axis">
-            <div class="time-item">09:30</div>
-            <div class="time-item">09:31</div>
-            <div class="time-item">09:32</div>
-            <div class="time-item">09:33</div>
-            <div class="time-item">09:34</div>
-        </div>
-        
-        <!-- K线图表 -->
-        <div class="kline-container">
-            <div class="title">1分钟 K线</div>
-            <div id="kline-chart"></div>
-        </div>
-        
-        <!-- Footprint图表 -->
-        <div class="footprint-container">
-            <div class="title">Footprint 订单流</div>
-            <canvas id="footprint-canvas"></canvas>
-        </div>
-    </div>
-    
-    <script>
-        // Mock数据
-        const MOCK_MINUTES = [
-            {
-                minute: "09:30",
-                kline: { open: 18.80, high: 18.83, low: 18.77, close: 18.81, volume: 3420 },
-                minute_delta: -87,
-                rows: [
-                    { price: 18.82, sell: 87, buy: 79, delta: -8 },
-                    { price: 18.81, sell: 198, buy: 170, delta: -28 }, // 主力卖
-                    { price: 18.80, sell: 59, buy: 56, delta: -3 },
-                    { price: 18.79, sell: 80, buy: 67, delta: -13 },
-                    { price: 18.78, sell: 23, buy: 18, delta: -5 }
-                ]
-            },
-            {
-                minute: "09:31",
-                kline: { open: 18.81, high: 18.85, low: 18.80, close: 18.84, volume: 4100 },
-                minute_delta: +132,
-                rows: [
-                    { price: 18.85, sell: 22, buy: 64, delta: +42 },
-                    { price: 18.84, sell: 31, buy: 128, delta: +97 }, // 主力买
-                    { price: 18.83, sell: 18, buy: 52, delta: +34 }
-                ]
-            },
-            {
-                minute: "09:32",
-                kline: { open: 18.84, high: 18.86, low: 18.82, close: 18.83, volume: 2800 },
-                minute_delta: -45,
-                rows: [
-                    { price: 18.86, sell: 45, buy: 28, delta: -17 },
-                    { price: 18.85, sell: 62, buy: 48, delta: -14 },
-                    { price: 18.84, sell: 38, buy: 32, delta: -6 },
-                    { price: 18.83, sell: 25, buy: 30, delta: +5 }
-                ]
-            },
-            {
-                minute: "09:33",
-                kline: { open: 18.83, high: 18.88, low: 18.82, close: 18.87, volume: 3600 },
-                minute_delta: +98,
-                rows: [
-                    { price: 18.88, sell: 18, buy: 52, delta: +34 },
-                    { price: 18.87, sell: 25, buy: 88, delta: +63 }, // 主力买
-                    { price: 18.86, sell: 32, buy: 45, delta: +13 }
-                ]
-            },
-            {
-                minute: "09:34",
-                kline: { open: 18.87, high: 18.89, low: 18.85, close: 18.86, volume: 2900 },
-                minute_delta: -32,
-                rows: [
-                    { price: 18.89, sell: 58, buy: 32, delta: -26 },
-                    { price: 18.88, sell: 42, buy: 38, delta: -4 },
-                    { price: 18.87, sell: 35, buy: 30, delta: -5 },
-                    { price: 18.86, sell: 28, buy: 30, delta: +2 }
-                ]
-            }
-        ];
-        
-        // 渲染K线图表
-        function renderKline() {
-            const chart = echarts.init(document.getElementById('kline-chart'));
-            
-            const klineData = MOCK_MINUTES.map(minute => [
-                minute.kline.open,
-                minute.kline.close,
-                minute.kline.low,
-                minute.kline.high
-            ]);
-            
-            const option = {
-                backgroundColor: '#1a1a1a',
-                tooltip: {
-                    trigger: 'axis',
-                    axisPointer: {
-                        type: 'cross'
-                    }
-                },
-                grid: {
-                    left: '3%',
-                    right: '4%',
-                    bottom: '3%',
-                    containLabel: true
-                },
-                xAxis: {
-                    type: 'category',
-                    data: MOCK_MINUTES.map(m => m.minute),
-                    axisLine: {
-                        lineStyle: {
-                            color: '#333'
-                        }
-                    },
-                    axisLabel: {
-                        color: '#888'
-                    }
-                },
-                yAxis: {
-                    type: 'value',
-                    scale: true,
-                    axisLine: {
-                        lineStyle: {
-                            color: '#333'
-                        }
-                    },
-                    axisLabel: {
-                        color: '#888'
-                    },
-                    splitLine: {
-                        lineStyle: {
-                            color: '#222'
-                        }
-                    }
-                },
-                series: [{
-                    name: 'K线',
-                    type: 'candlestick',
-                    data: klineData,
-                    itemStyle: {
-                        color: '#1d9e75',
-                        color0: '#e24b4a',
-                        borderColor: '#1d9e75',
-                        borderColor0: '#e24b4a'
-                    }
-                }]
-            };
-            
-            chart.setOption(option);
-        }
-        
-        // 渲染Footprint图表
-        function renderFootprint() {
-            const canvas = document.getElementById('footprint-canvas');
-            const ctx = canvas.getContext('2d');
-            
-            // 设置Canvas尺寸
-            canvas.width = canvas.offsetWidth * 2;
-            canvas.height = canvas.offsetHeight * 2;
-            ctx.scale(2, 2);
-            
-            const CELL_H = 18;
-            const CELL_W = 110;
-            const COLUMN_GAP = 20;
-            const START_X = 20;
-            const START_Y = 20;
-            
-            // 渲染每个分钟的Footprint
-            MOCK_MINUTES.forEach((minuteData, minuteIndex) => {
-                const x = START_X + minuteIndex * (CELL_W + COLUMN_GAP);
-                
-                // 计算该分钟的最大绝对值delta
-                const maxAbsDelta = Math.max(...minuteData.rows.map(r => Math.abs(r.delta)));
-                
-                // 渲染每一行
-                minuteData.rows.forEach((row, rowIndex) => {
-                    const y = START_Y + rowIndex * CELL_H;
-                    
-                    // 计算颜色强度
-                    const intensity = Math.abs(row.delta) / maxAbsDelta;
-                    const alpha = 0.2 + intensity * 0.8;
-                    
-                    // 设置背景色
-                    ctx.fillStyle = row.delta > 0 
-                        ? `rgba(29,158,117,${alpha})` 
-                        : `rgba(226,75,74,${alpha})`;
-                    
-                    // 绘制背景
-                    ctx.fillRect(x, y, CELL_W, CELL_H);
-                    
-                    // 绘制价格
-                    ctx.fillStyle = '#fff';
-                    ctx.font = '12px Arial';
-                    ctx.textAlign = 'left';
-                    ctx.fillText(row.price.toFixed(2), x + 8, y + 13);
-                    
-                    // 绘制sell × buy
-                    ctx.fillStyle = '#fff';
-                    ctx.font = '12px Arial';
-                    ctx.textAlign = 'right';
-                    ctx.fillText(`${row.sell} × ${row.buy}`, x + CELL_W - 8, y + 13);
-                });
-                
-                // 绘制分钟delta
-                const deltaY = START_Y + minuteData.rows.length * CELL_H + 16;
-                ctx.fillStyle = minuteData.minute_delta > 0 ? '#1d9e75' : '#e24b4a';
-                ctx.font = '12px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(minuteData.minute_delta.toString(), x + CELL_W / 2, deltaY);
-                
-                // 绘制分钟标签
-                ctx.fillStyle = '#888';
-                ctx.font = '12px Arial';
-                ctx.textAlign = 'center';
-                ctx.fillText(minuteData.minute, x + CELL_W / 2, START_Y - 5);
-            });
-        }
-        
-        // 页面加载完成后渲染图表
-        window.onload = function() {
-            renderKline();
-            renderFootprint();
-            
-            // 响应窗口大小变化
-            window.onresize = function() {
-                renderKline();
-                renderFootprint();
-            };
-        };
-    </script>
+
+<h2>605299.SH &nbsp;|&nbsp; 2026-04-10 &nbsp;|&nbsp; Footprint + 1min K线 &nbsp;[DEMO]</h2>
+
+<div class="chart-wrapper">
+  <div id="kline-panel">
+    <canvas id="kline-canvas" width="400" height="360"></canvas>
+  </div>
+  <div id="footprint-panel">
+    <canvas id="fp-canvas"></canvas>
+  </div>
+</div>
+
+<div class="legend">
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#e24b4a"></div>卖方主导（delta &lt; 0）
+  </div>
+  <div class="legend-item">
+    <div class="legend-dot" style="background:#1d9e75"></div>买方主导（delta &gt; 0）
+  </div>
+  <div class="legend-item" style="color:#888">
+    格子格式：主动卖 × 主动买 &nbsp;|&nbsp; 底部数字 = 分钟 Delta
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// MOCK 数据（对应 API v2.0 契约）
+// 5 分钟，语义来自参考截图
+// ─────────────────────────────────────────────
+const MOCK_MINUTES = [
+  {
+    minute: "09:30",
+    kline: { open: 18.80, high: 18.83, low: 18.77, close: 18.78, volume: 3420 },
+    minute_delta: -87,
+    rows: [
+      { price: 18.83, sell: 8,   buy: 22,  delta: 14  },
+      { price: 18.82, sell: 87,  buy: 79,  delta: -8  },
+      { price: 18.81, sell: 198, buy: 170, delta: -28 }, // ← 主力卖
+      { price: 18.80, sell: 59,  buy: 56,  delta: -3  },
+      { price: 18.79, sell: 80,  buy: 67,  delta: -13 },
+      { price: 18.78, sell: 23,  buy: 18,  delta: -5  },
+      { price: 18.77, sell: 41,  buy: 37,  delta: -4  },
+    ]
+  },
+  {
+    minute: "09:31",
+    kline: { open: 18.78, high: 18.85, low: 18.77, close: 18.84, volume: 4820 },
+    minute_delta: 132,
+    rows: [
+      { price: 18.85, sell: 22,  buy: 64,  delta: 42  },
+      { price: 18.84, sell: 31,  buy: 128, delta: 97  }, // ← 主力买
+      { price: 18.83, sell: 18,  buy: 52,  delta: 34  },
+      { price: 18.82, sell: 45,  buy: 38,  delta: -7  },
+      { price: 18.81, sell: 12,  buy: 9,   delta: -3  },
+      { price: 18.80, sell: 9,   buy: 18,  delta: 9   },
+      { price: 18.77, sell: 6,   buy: 2,   delta: -4  },
+    ]
+  },
+  {
+    minute: "09:32",
+    kline: { open: 18.84, high: 18.87, low: 18.83, close: 18.86, volume: 2910 },
+    minute_delta: 55,
+    rows: [
+      { price: 18.87, sell: 15,  buy: 28,  delta: 13  },
+      { price: 18.86, sell: 72,  buy: 98,  delta: 26  }, // ← 最大 delta
+      { price: 18.85, sell: 44,  buy: 52,  delta: 8   },
+      { price: 18.84, sell: 38,  buy: 46,  delta: 8   },
+      { price: 18.83, sell: 19,  buy: 11,  delta: -8  },
+    ]
+  },
+  {
+    minute: "09:33",
+    kline: { open: 18.86, high: 18.87, low: 18.82, close: 18.83, volume: 3650 },
+    minute_delta: -63,
+    rows: [
+      { price: 18.87, sell: 28,  buy: 19,  delta: -9  },
+      { price: 18.86, sell: 91,  buy: 72,  delta: -19 },
+      { price: 18.85, sell: 56,  buy: 48,  delta: -8  },
+      { price: 18.84, sell: 38,  buy: 29,  delta: -9  },
+      { price: 18.83, sell: 42,  buy: 24,  delta: -18 }, // ← 最大 |delta|
+      { price: 18.82, sell: 15,  buy: 11,  delta: -4  },
+    ]
+  },
+  {
+    minute: "09:34",
+    kline: { open: 18.83, high: 18.86, low: 18.82, close: 18.85, volume: 3180 },
+    minute_delta: 109,
+    rows: [
+      { price: 18.86, sell: 18,  buy: 55,  delta: 37  },
+      { price: 18.85, sell: 25,  buy: 91,  delta: 66  }, // ← 主力买
+      { price: 18.84, sell: 31,  buy: 34,  delta: 3   },
+      { price: 18.83, sell: 22,  buy: 16,  delta: -6  },
+      { price: 18.82, sell: 9,   buy: 10,  delta: 1   },
+    ]
+  }
+];
+
+// ─────────────────────────────────────────────
+// 渲染参数
+// ─────────────────────────────────────────────
+const CELL_H    = 20;   // 每个价格行高度 px
+const CELL_W    = 130;  // 每分钟列宽 px
+const PAD_LEFT  = 52;   // 左侧价格轴宽度
+const PAD_TOP   = 28;   // 顶部时间轴高度
+const PAD_BOT   = 32;   // 底部 delta 标签区域
+const COL_GAP   = 4;    // 列间距
+
+const UP_COLOR   = [29,  158, 117];  // 买方主导绿
+const DOWN_COLOR = [226, 75,  74];   // 卖方主导红
+const NEUTRAL    = [80,  80,  80];   // 均衡灰
+
+// ─────────────────────────────────────────────
+// 工具函数
+// ─────────────────────────────────────────────
+
+// 收集全部出现过的价格，从高到低排列
+function getAllPrices(minutes) {
+  const set = new Set();
+  minutes.forEach(m => m.rows.forEach(r => set.add(r.price)));
+  return Array.from(set).sort((a, b) => b - a);
+}
+
+// 某分钟某价格的行数据（可能不存在）
+function getRow(minuteData, price) {
+  return minuteData.rows.find(r => Math.abs(r.price - price) < 0.001) || null;
+}
+
+// 颜色 rgba 字符串
+function rgba(rgb, alpha) {
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha.toFixed(2)})`;
+}
+
+// ─────────────────────────────────────────────
+// 渲染 Footprint Canvas
+// ─────────────────────────────────────────────
+function renderFootprint() {
+  const allPrices = getAllPrices(MOCK_MINUTES);
+  const rows      = allPrices.length;
+  const cols      = MOCK_MINUTES.length;
+
+  const W = PAD_LEFT + cols * (CELL_W + COL_GAP);
+  const H = PAD_TOP  + rows * CELL_H + PAD_BOT;
+
+  const canvas = document.getElementById('fp-canvas');
+  canvas.width  = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+
+  // 背景
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, W, H);
+
+  // 价格轴（左侧）
+  ctx.fillStyle = '#555';
+  ctx.font = '11px Consolas';
+  ctx.textAlign = 'right';
+  allPrices.forEach((price, ri) => {
+    const y = PAD_TOP + ri * CELL_H + CELL_H / 2 + 4;
+    ctx.fillStyle = '#555';
+    ctx.fillText(price.toFixed(2), PAD_LEFT - 6, y);
+  });
+
+  // 水平网格线
+  ctx.strokeStyle = '#2a2a3e';
+  ctx.lineWidth = 0.5;
+  allPrices.forEach((_, ri) => {
+    const y = PAD_TOP + ri * CELL_H;
+    ctx.beginPath();
+    ctx.moveTo(PAD_LEFT, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  });
+
+  // 每分钟列
+  MOCK_MINUTES.forEach((minuteData, ci) => {
+    const colX = PAD_LEFT + ci * (CELL_W + COL_GAP);
+
+    // 时间标签
+    ctx.fillStyle = '#666';
+    ctx.font = '11px Consolas';
+    ctx.textAlign = 'center';
+    ctx.fillText(minuteData.minute, colX + CELL_W / 2, PAD_TOP - 8);
+
+    // 该分钟最大 |delta|（用于颜色归一化）
+    const maxAbs = Math.max(...minuteData.rows.map(r => Math.abs(r.delta)), 1);
+
+    // 每个价格行
+    allPrices.forEach((price, ri) => {
+      const cellY = PAD_TOP + ri * CELL_H;
+      const row   = getRow(minuteData, price);
+
+      if (!row) {
+        // 该分钟无此价格成交 → 空格
+        ctx.fillStyle = '#1e1e30';
+        ctx.fillRect(colX, cellY, CELL_W, CELL_H - 1);
+        return;
+      }
+
+      // 颜色强度
+      const intensity = Math.abs(row.delta) / maxAbs;
+      const alpha     = 0.15 + intensity * 0.75;
+      const color     = row.delta > 0 ? UP_COLOR
+                      : row.delta < 0 ? DOWN_COLOR
+                      : NEUTRAL;
+
+      ctx.fillStyle = rgba(color, alpha);
+      ctx.fillRect(colX, cellY, CELL_W, CELL_H - 1);
+
+      // 最大 |delta| 行加边框高亮
+      if (Math.abs(row.delta) === maxAbs) {
+        ctx.strokeStyle = rgba(color, 0.9);
+        ctx.lineWidth   = 1.5;
+        ctx.strokeRect(colX + 0.75, cellY + 0.75, CELL_W - 1.5, CELL_H - 2.5);
+      }
+
+      // 文字：sell × buy
+      ctx.font      = '11px Consolas';
+      ctx.fillStyle = '#e0e0e0';
+
+      // sell（左对齐）
+      ctx.textAlign = 'left';
+      ctx.fillText(row.sell, colX + 5, cellY + CELL_H / 2 + 4);
+
+      // ×（居中）
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#888';
+      ctx.fillText('×', colX + CELL_W / 2, cellY + CELL_H / 2 + 4);
+
+      // buy（右对齐）
+      ctx.textAlign = 'right';
+      ctx.fillStyle = row.delta > 0
+        ? rgba(UP_COLOR, 0.9)
+        : row.delta < 0 ? rgba(DOWN_COLOR, 0.9) : '#e0e0e0';
+      ctx.fillText(row.buy, colX + CELL_W - 5, cellY + CELL_H / 2 + 4);
+    });
+
+    // 底部分钟 Delta
+    const deltaY = PAD_TOP + rows * CELL_H + 18;
+    ctx.textAlign = 'center';
+    ctx.font      = 'bold 12px Consolas';
+    ctx.fillStyle = minuteData.minute_delta > 0
+      ? rgba(UP_COLOR,   1)
+      : rgba(DOWN_COLOR, 1);
+    ctx.fillText(
+      (minuteData.minute_delta > 0 ? '+' : '') + minuteData.minute_delta,
+      colX + CELL_W / 2,
+      deltaY
+    );
+
+    // 列分隔线
+    ctx.strokeStyle = '#2a2a3e';
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(colX + CELL_W + COL_GAP / 2, PAD_TOP);
+    ctx.lineTo(colX + CELL_W + COL_GAP / 2, PAD_TOP + rows * CELL_H);
+    ctx.stroke();
+  });
+}
+
+// ─────────────────────────────────────────────
+// 渲染 1min K线（纯 Canvas）
+// ─────────────────────────────────────────────
+function renderKline() {
+  const canvas = document.getElementById('kline-canvas');
+  const W = canvas.width;
+  const H = canvas.height;
+  const ctx = canvas.getContext('2d');
+
+  const PAD = { l: 40, r: 10, t: 28, b: 50 };
+  const kH  = H - PAD.t - PAD.b;  // K线区高度
+  const vH  = 40;                  // 成交量区高度（底部）
+  const kAreaH = kH - vH - 8;
+
+  // 背景
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, W, H);
+
+  const n    = MOCK_MINUTES.length;
+  const barW = Math.floor((W - PAD.l - PAD.r) / n);
+
+  // 价格范围
+  const allH = MOCK_MINUTES.map(m => m.kline.high);
+  const allL = MOCK_MINUTES.map(m => m.kline.low);
+  const pMax = Math.max(...allH) * 1.001;
+  const pMin = Math.min(...allL) * 0.999;
+  const pRange = pMax - pMin || 0.01;
+
+  // 成交量范围
+  const maxVol = Math.max(...MOCK_MINUTES.map(m => m.kline.volume));
+
+  function pY(p) { return PAD.t + (pMax - p) / pRange * kAreaH; }
+  function vY(v) { return PAD.t + kAreaH + 8 + vH * (1 - v / maxVol); }
+
+  // 网格线
+  ctx.strokeStyle = '#2a2a3e';
+  ctx.lineWidth   = 0.5;
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.t + kAreaH * i / 4;
+    ctx.beginPath(); ctx.moveTo(PAD.l, y); ctx.lineTo(W - PAD.r, y); ctx.stroke();
+    const price = pMax - pRange * i / 4;
+    ctx.fillStyle   = '#444';
+    ctx.font        = '10px Consolas';
+    ctx.textAlign   = 'right';
+    ctx.fillText(price.toFixed(2), PAD.l - 4, y + 3);
+  }
+
+  // 时间标签（顶部）
+  ctx.fillStyle = '#555';
+  ctx.font      = '11px Consolas';
+  ctx.textAlign = 'center';
+
+  MOCK_MINUTES.forEach((m, i) => {
+    const cx = PAD.l + i * barW + barW / 2;
+    ctx.fillText(m.minute, cx, PAD.t - 8);
+  });
+
+  // K线主体
+  MOCK_MINUTES.forEach((m, i) => {
+    const k  = m.kline;
+    const cx = PAD.l + i * barW + barW / 2;
+    const up = k.close >= k.open;
+    const color = up ? '#1d9e75' : '#e24b4a';
+
+    // 影线
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx, pY(k.high));
+    ctx.lineTo(cx, pY(k.low));
+    ctx.stroke();
+
+    // 实体
+    const bodyTop = pY(Math.max(k.open, k.close));
+    const bodyH   = Math.max(Math.abs(pY(k.open) - pY(k.close)), 2);
+    ctx.fillStyle = color;
+    ctx.fillRect(cx - barW * 0.3, bodyTop, barW * 0.6, bodyH);
+
+    // 成交量柱
+    ctx.fillStyle = up ? 'rgba(29,158,117,0.5)' : 'rgba(226,75,74,0.5)';
+    const vTop = vY(k.volume);
+    const vBot = PAD.t + kAreaH + 8 + vH;
+    ctx.fillRect(cx - barW * 0.3, vTop, barW * 0.6, vBot - vTop);
+  });
+
+  // 成交量轴标签
+  ctx.fillStyle = '#444';
+  ctx.font      = '10px Consolas';
+  ctx.textAlign = 'right';
+  ctx.fillText(maxVol, PAD.l - 4, PAD.t + kAreaH + 10);
+
+  // 底部"Volume"标签
+  ctx.fillStyle = '#444';
+  ctx.textAlign = 'center';
+  ctx.fillText('Volume', PAD.l + (W - PAD.l - PAD.r) / 2, H - 8);
+}
+
+// ─────────────────────────────────────────────
+// 入口
+// ─────────────────────────────────────────────
+renderKline();
+renderFootprint();
+
+</script>
 </body>
 </html>
