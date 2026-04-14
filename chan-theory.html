@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<title>舒华体育(605299) 缠论分析</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0d1117;color:#c9d1d9;font-family:'Microsoft YaHei',sans-serif;
+     display:flex;height:100vh;overflow:hidden}
+#sidebar{width:190px;min-width:190px;background:#161b22;border-right:1px solid #30363d;
+  display:flex;flex-direction:column;padding:14px 12px;gap:12px;overflow-y:auto;font-size:13px}
+.sec{font-size:11px;color:#8b949e;padding-bottom:4px;border-bottom:1px solid #30363d;
+     letter-spacing:.5px;text-transform:uppercase}
+.row{display:flex;align-items:center;gap:7px;margin:3px 0;cursor:pointer}
+.row input[type=checkbox]{accent-color:#e05c4b;width:13px;height:13px;cursor:pointer}
+.row label{cursor:pointer;color:#c9d1d9}
+.prow{display:flex;justify-content:space-between;align-items:center;margin:3px 0}
+.prow span{color:#8b949e;font-size:12px}
+.prow input{width:60px;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;
+            border-radius:4px;padding:2px 6px;font-size:12px;text-align:right}
+.btn{width:100%;padding:6px 0;border:none;border-radius:5px;cursor:pointer;
+     font-size:13px;font-weight:600;transition:opacity .2s}
+.btn:hover{opacity:.8}
+.btn-g{background:#238636;color:#fff}
+.info{font-size:11px;color:#8b949e;line-height:1.9}
+.info b{color:#c9d1d9}
+#main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#hdr{height:46px;background:#161b22;border-bottom:1px solid #30363d;
+     display:flex;align-items:center;padding:0 18px;gap:14px}
+#hdr .name{font-size:15px;font-weight:700;color:#e6edf3}
+#hdr .code{font-size:12px;color:#8b949e}
+.price{font-size:17px;font-weight:700}
+.chg{font-size:12px;padding:2px 7px;border-radius:4px}
+.up{color:#f85149}.down{color:#3fb950}
+.bup{background:rgba(248,81,73,.15)}.bdown{background:rgba(63,185,80,.15)}
+#hdr .date{margin-left:auto;font-size:12px;color:#8b949e}
+#charts{flex:1;display:flex;flex-direction:column;padding:10px;gap:6px;overflow:hidden}
+#kc{flex:1;min-height:0}
+#vc{height:110px}
+#sbar{height:30px;background:#161b22;border-top:1px solid #30363d;
+      display:flex;align-items:center;padding:0 18px;gap:20px;font-size:12px;color:#8b949e}
+#sbar b{color:#c9d1d9}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <div style="font-size:14px;font-weight:700;color:#e6edf3">缠论分析</div>
+  <div>
+    <div class="sec">图层</div>
+    <div class="row"><input type="checkbox" id="chkBi"   checked><label for="chkBi">笔</label></div>
+    <div class="row"><input type="checkbox" id="chkDuan" checked><label for="chkDuan">线段</label></div>
+    <div class="row"><input type="checkbox" id="chkZs"   checked><label for="chkZs">中枢</label></div>
+    <div class="row"><input type="checkbox" id="chkBc"        ><label for="chkBc">背驰标注</label></div>
+  </div>
+  <div>
+    <div class="sec">均线</div>
+    <div class="row"><input type="checkbox" id="chkMa5"  checked><label for="chkMa5">MA5</label></div>
+    <div class="row"><input type="checkbox" id="chkMa10" checked><label for="chkMa10">MA10</label></div>
+    <div class="row"><input type="checkbox" id="chkMa20" checked><label for="chkMa20">MA20</label></div>
+  </div>
+  <div>
+    <div class="sec">笔参数</div>
+    <div class="prow"><span>分型间距(K)</span><input type="number" id="pGap"   value="3" min="1" max="10"></div>
+    <div class="prow"><span>最小笔长(K)</span><input type="number" id="pMinBi" value="5" min="3" max="20"></div>
+  </div>
+  <button class="btn btn-g" onclick="recompute()">重新计算</button>
+  <div class="info">
+    股票：<b>605299</b><br>
+    周期：<b>日线</b><br>
+    数据：<b id="iCount">—</b> 条<br>
+    区间：<b id="iRange">—</b>
+  </div>
+</div>
+
+<div id="main">
+  <div id="hdr">
+    <span class="name">舒华体育</span>
+    <span class="code">605299 · 日线</span>
+    <span class="price up" id="hPrice">—</span>
+    <span class="chg up bup" id="hChg">—</span>
+    <span class="date"       id="hDate">—</span>
+  </div>
+  <div id="charts">
+    <div id="kc"></div>
+    <div id="vc"></div>
+  </div>
+  <div id="sbar">
+    笔：<b id="sBi">—</b>&nbsp;
+    线段：<b id="sDuan">—</b>&nbsp;
+    中枢：<b id="sZs">—</b>&nbsp;
+    顶背驰：<b id="sTopBc">—</b>&nbsp;
+    底背驰：<b id="sBotBc">—</b>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+//  全局
+// ═══════════════════════════════════════════
+let kData = [];
+let kchart, vchart;
+
+// ═══════════════════════════════════════════
+//  1. 加载 CSV
+// ═══════════════════════════════════════════
+async function loadCSV() {
+  const res = await fetch('605299.csv');
+  const txt = await res.text();
+  const lines = txt.trim().split('\n').slice(1);
+  kData = lines.map(line => {
+    const [date, o, h, l, c, v] = line.split(',');
+    return { date: date.trim(), o:+o, h:+h, l:+l, c:+c, v:+v };
+  });
+
+  document.getElementById('iCount').textContent = kData.length;
+  document.getElementById('iRange').textContent =
+    kData[0].date + ' ~ ' + kData[kData.length-1].date;
+
+  const last = kData[kData.length-1];
+  const prev = kData[kData.length-2];
+  const diff = (last.c - prev.c).toFixed(2);
+  const pct  = (diff / prev.c * 100).toFixed(2);
+  const isUp = last.c >= prev.c;
+  const el = document.getElementById('hPrice');
+  el.textContent = last.c.toFixed(2);
+  el.className = 'price ' + (isUp ? 'up' : 'down');
+  const ec = document.getElementById('hChg');
+  ec.textContent = (isUp?'+':'') + diff + ' (' + (isUp?'+':'') + pct + '%)';
+  ec.className = 'chg ' + (isUp ? 'up bup' : 'down bdown');
+  document.getElementById('hDate').textContent = last.date;
+}
+
+// ═══════════════════════════════════════════
+//  2. 均线
+// ═══════════════════════════════════════════
+function calcMA(n) {
+  return kData.map((_, i) => {
+    if (i < n - 1) return null;
+    const sum = kData.slice(i - n + 1, i + 1).reduce((a, b) => a + b.c, 0);
+    return +(sum / n).toFixed(3);
+  });
+}
+
+// ═══════════════════════════════════════════
+//  3. 缠论算法
+// ═══════════════════════════════════════════
+
+// 3-1 K线包含处理
+function mergeKlines() {
+  const merged = [];
+  for (let i = 0; i < kData.length; i++) {
+    const k = { ...kData[i], rawIdx: i };
+    if (!merged.length) { merged.push(k); continue; }
+    const prev = merged[merged.length - 1];
+    const engulf =
+      (k.h <= prev.h && k.l >= prev.l) ||
+      (k.h >= prev.h && k.l <= prev.l);
+    if (engulf) {
+      const dir = merged.length >= 2
+        ? (merged[merged.length-1].h >= merged[merged.length-2].h ? 1 : -1)
+        : 1;
+      if (dir === 1) {
+        prev.h = Math.max(prev.h, k.h);
+        prev.l = Math.max(prev.l, k.l);
+      } else {
+        prev.h = Math.min(prev.h, k.h);
+        prev.l = Math.min(prev.l, k.l);
+      }
+      prev.rawIdx = k.rawIdx;
+    } else {
+      merged.push(k);
+    }
+  }
+  return merged;
+}
+
+// 3-2 分型识别
+function findFractals(merged, gap) {
+  const res = [];
+  for (let i = gap; i < merged.length - gap; i++) {
+    const L = merged[i - gap], C = merged[i], R = merged[i + gap];
+    if (C.h > L.h && C.h > R.h) {
+      res.push({ type: 'top', idx: C.rawIdx, price: C.h });
+    } else if (C.l < L.l && C.l < R.l) {
+      res.push({ type: 'bot', idx: C.rawIdx, price: C.l });
+    }
+  }
+  return res;
+}
+
+// 3-3 笔识别
+function findBi(fractals, minLen) {
+  if (!fractals.length) return [];
+  const bis = [];
+  let last = fractals[0];
+  for (let i = 1; i < fractals.length; i++) {
+    const f = fractals[i];
+    if (f.type === last.type) {
+      if (f.type === 'top' && f.price >= last.price) last = f;
+      else if (f.type === 'bot' && f.price <= last.price) last = f;
+    } else {
+      if (f.idx - last.idx >= minLen) {
+        bis.push({ start: last, end: f });
+        last = f;
+      }
+    }
+  }
+  return bis;
+}
+
+// 3-4 线段识别
+function findDuan(bis) {
+  if (bis.length < 3) return [];
+  const duans = [];
+  let i = 0;
+  while (i <= bis.length - 3) {
+    const b0 = bis[i], b2 = bis[i + 2];
+    const upward = b0.start.type === 'bot';
+    const valid  = upward
+      ? b2.end.price > b0.start.price
+      : b2.end.price < b0.start.price;
+    if (valid) {
+      let j = i + 2;
+      while (j + 2 < bis.length) {
+        const nb = bis[j + 2];
+        const cont = upward
+          ? nb.end.price > bis[j].end.price
+          : nb.end.price < bis[j].end.price;
+        if (cont) j += 2; else break;
+      }
+      duans.push({ start: b0.start, end: bis[j].end });
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return duans;
+}
+
+// 3-5 中枢识别（连续3笔重叠区）
+function findZhongshu(bis) {
+  const zs = [];
+  let i = 0;
+  while (i + 2 < bis.length) {
+    const segs = [bis[i], bis[i+1], bis[i+2]];
+    const highs = segs.map(b => Math.max(b.start.price, b.end.price));
+    const lows  = segs.map(b => Math.min(b.start.price, b.end.price));
+    const ZH = Math.min(...highs);
+    const ZL = Math.max(...lows);
+    if (ZH > ZL) {
+      let j = i + 2;
+      while (j + 1 < bis.length) {
+        const bj = bis[j + 1];
+        const bjH = Math.max(bj.start.price, bj.end.price);
+        const bjL = Math.min(bj.start.price, bj.end.price);
+        if (bjH >= ZL && bjL <= ZH) j++;
+        else break;
+      }
+      zs.push({
+        ZH, ZL,
+        startIdx: bis[i].start.idx,
+        endIdx:   bis[j].end.idx,
+        startDate: kData[bis[i].start.idx].date,
+        endDate:   kData[bis[j].end.idx].date
+      });
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return zs;
+}
+
+// 3-6 背驰检测（简化：相邻同向笔MACD面积比较用成交量代替）
+function findBeichi(bis) {
+  const topBc = [], botBc = [];
+  for (let i = 2; i < bis.length; i += 2) {
+    const cur  = bis[i];
+    const prev = bis[i - 2];
+    const curVol  = kData.slice(cur.start.idx,  cur.end.idx  + 1).reduce((a,b) => a + b.v, 0);
+    const prevVol = kData.slice(prev.start.idx, prev.end.idx + 1).reduce((a,b) => a + b.v, 0);
+    const priceAmp  = Math.abs(cur.end.price  - cur.start.price);
+    const pPriceAmp = Math.abs(prev.end.price - prev.start.price);
+    if (cur.end.type === 'top' && priceAmp > pPriceAmp && curVol < prevVol * 0.85) {
+      topBc.push({ idx: cur.end.idx, price: cur.end.price, date: kData[cur.end.idx].date });
+    }
+    if (cur.end.type === 'bot' && priceAmp > pPriceAmp && curVol < prevVol * 0.85) {
+      botBc.push({ idx: cur.end.idx, price: cur.end.price, date: kData[cur.end.idx].date });
+    }
+  }
+  return { topBc, botBc };
+}
+
+// ═══════════════════════════════════════════
+//  4. 主计算入口
+// ═══════════════════════════════════════════
+function compute() {
+  const gap   = +document.getElementById('pGap').value;
+  const minBi = +document.getElementById('pMinBi').value;
+
+  const merged   = mergeKlines();
+  const fractals = findFractals(merged, gap);
+  const bis      = findBi(fractals, minBi);
+  const duans    = findDuan(bis);
+  const zsArr    = findZhongshu(bis);
+  const { topBc, botBc } = findBeichi(bis);
+
+  document.getElementById('sBi').textContent    = bis.length;
+  document.getElementById('sDuan').textContent  = duans.length;
+  document.getElementById('sZs').textContent    = zsArr.length;
+  document.getElementById('sTopBc').textContent = topBc.length;
+  document.getElementById('sBotBc').textContent = botBc.length;
+
+  return { bis, duans, zsArr, topBc, botBc };
+}
+
+function recompute() {
+  const r = compute();
+  renderCharts(r);
+}
+
+// ═══════════════════════════════════════════
+//  5. ECharts 渲染
+// ═══════════════════════════════════════════
+function renderCharts({ bis, duans, zsArr, topBc, botBc }) {
+  const dates  = kData.map(d => d.date);
+  const ohlc   = kData.map(d => [d.o, d.c, d.l, d.h]);
+  const vols   = kData.map(d => d.v);
+  const ma5    = calcMA(5);
+  const ma10   = calcMA(10);
+  const ma20   = calcMA(20);
+
+  const showBi   = document.getElementById('chkBi').checked;
+  const showDuan = document.getElementById('chkDuan').checked;
+  const showZs   = document.getElementById('chkZs').checked;
+  const showBc   = document.getElementById('chkBc').checked;
+  const showMa5  = document.getElementById('chkMa5').checked;
+  const showMa10 = document.getElementById('chkMa10').checked;
+  const showMa20 = document.getElementById('chkMa20').checked;
+
+  // ── 笔折线数据 ──
+  const biLineData = [];
+  if (showBi && bis.length) {
+    bis.forEach((b, i) => {
+      if (i === 0) biLineData.push([b.start.idx, b.start.price]);
+      biLineData.push([b.end.idx, b.end.price]);
+    });
+  }
+
+  // ── 线段折线数据 ──
+  const duanLineData = [];
+  if (showDuan && duans.length) {
+    duans.forEach((d, i) => {
+      if (i === 0) duanLineData.push([d.start.idx, d.start.price]);
+      duanLineData.push([d.end.idx, d.end.price]);
+    });
+  }
+
+  // ── 中枢 markArea ──
+  const zsMarkArea = [];
+  if (showZs) {
+    zsArr.forEach(z => {
+      zsMarkArea.push([
+        { xAxis: z.startDate, yAxis: z.ZL, itemStyle: { color: 'rgba(100,160,255,0.10)', borderColor: 'rgba(100,160,255,0.5)', borderWidth: 1 } },
+        { xAxis: z.endDate,   yAxis: z.ZH }
+      ]);
+    });
+  }
+
+  // ── 背驰 markPoint ──
+  const bcPoints = [];
+  if (showBc) {
+    topBc.forEach(p => bcPoints.push({
+      coord: [p.date, p.price],
+      value: '顶背',
+      itemStyle: { color: '#f85149' },
+      label: { color: '#f85149', fontSize: 10 }
+    }));
+    botBc.forEach(p => bcPoints.push({
+      coord: [p.date, p.price],
+      value: '底背',
+      itemStyle: { color: '#3fb950' },
+      label: { color: '#3fb950', fontSize: 10 }
+    }));
+  }
+
+  // ══════════════════════════════════════════
+  //  K线图 option
+  // ══════════════════════════════════════════
+  const kOption = {
+    backgroundColor: '#0d1117',
+    animation: false,
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross', lineStyle: { color: '#555' } },
+      backgroundColor: '#1c2128',
+      borderColor: '#30363d',
+      textStyle: { color: '#c9d1d9', fontSize: 12 },
+      formatter(params) {
+        const k = params.find(p => p.seriesName === 'K线');
+        if (!k) return '';
+        const d = kData[k.dataIndex];
+        const chg = ((d.c - d.o) / d.o * 100).toFixed(2);
+        return `<b>${d.date}</b><br>
+          开 ${d.o} &nbsp; 收 <b>${d.c}</b><br>
+          高 ${d.h} &nbsp; 低 ${d.l}<br>
+          涨跌 ${chg}%`;
+      }
+    },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: { left: 60, right: 20, top: 16, bottom: 0 },
+    xAxis: {
+      type: 'category',
+      data: dates,
+      axisLine:  { lineStyle: { color: '#30363d' } },
+      axisLabel: { color: '#8b949e', fontSize: 11, rotate: 30,
+        formatter: v => v.slice(5) },
+      splitLine: { show: false }
+    },
+    yAxis: {
+      type: 'value',
+      position: 'right',
+      scale: true,
+      axisLine:  { lineStyle: { color: '#30363d' } },
+      axisLabel: { color: '#8b949e', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#1e2530', type: 'dashed' } }
+    },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0], start: 0, end: 100 },
+      { type: 'slider',  xAxisIndex: [0], start: 0, end: 100,
+        height: 22, bottom: 2,
+        fillerColor: 'rgba(100,160,255,0.1)',
+        borderColor: '#30363d',
+        textStyle: { color: '#8b949e', fontSize: 10 } }
+    ],
+    series: [
+      // K线
+      {
+        name: 'K线', type: 'candlestick', data: ohlc,
+        itemStyle: {
+          color: '#f85149', color0: '#3fb950',
+          borderColor: '#f85149', borderColor0: '#3fb950'
+        },
+        markArea: zsMarkArea.length
+          ? { silent: true, data: zsMarkArea }
+          : undefined,
+        markPoint: bcPoints.length
+          ? { symbol: 'circle', symbolSize: 8,
+              label: { show: true, position: 'top', fontSize: 10 },
+              data: bcPoints }
+          : undefined
+      },
+      // MA5
+      {
+        name: 'MA5', type: 'line', data: ma5, smooth: false,
+        symbol: 'none', lineStyle: { color: '#e6a817', width: 1 },
+        visible: showMa5
+      },
+      // MA10
+      {
+        name: 'MA10', type: 'line', data: ma10, smooth: false,
+        symbol: 'none', lineStyle: { color: '#4d9de0', width: 1 },
+        visible: showMa10
+      },
+      // MA20
+      {
+        name: 'MA20', type: 'line', data: ma20, smooth: false,
+        symbol: 'none', lineStyle: { color: '#9b59b6', width: 1 },
+        visible: showMa20
+      },
+      // 笔
+      {
+        name: '笔', type: 'line',
+        data: biLineData.map(p => ({ value: [dates[p[0]], p[1]] })),
+        coordinateSystem: 'cartesian2d',
+        symbol: 'circle', symbolSize: 5,
+        lineStyle: { color: '#f85149', width: 1.5, type: 'solid' },
+        itemStyle: { color: '#f85149' },
+        zlevel: 5,
+        visible: showBi
+      },
+      // 线段
+      {
+        name: '线段', type: 'line',
+        data: duanLineData.map(p => ({ value: [dates[p[0]], p[1]] })),
+        symbol: 'circle', symbolSize: 7,
+        lineStyle: { color: '#3fb950', width: 2.5, type: 'solid' },
+        itemStyle: { color: '#3fb950' },
+        zlevel: 6,
+        visible: showDuan
+      }
+    ]
+  };
+
+  // ══════════════════════════════════════════
+  //  成交量图 option
+  // ══════════════════════════════════════════
+  const vOption = {
+    backgroundColor: '#0d1117',
+    animation: false,
+    tooltip: { trigger: 'axis', show: false },
+    axisPointer: { link: [{ xAxisIndex: 'all' }] },
+    grid: { left: 60, right: 20, top: 4, bottom: 28 },
+    xAxis: {
+      type: 'category', data: dates,
+      axisLine:  { lineStyle: { color: '#30363d' } },
+      axisLabel: { show: false },
+      splitLine: { show: false }
+    },
+    yAxis: {
+      type: 'value', position: 'right', scale: true,
+      axisLine:  { lineStyle: { color: '#30363d' } },
+      axisLabel: {
+        color: '#8b949e', fontSize: 10,
+        formatter: v => v >= 1e6 ? (v/1e6).toFixed(1)+'M'
+                      : v >= 1e3 ? (v/1e3).toFixed(0)+'K' : v
+      },
+      splitLine: { lineStyle: { color: '#1e2530', type: 'dashed' } }
+    },
+    dataZoom: [
+      { type: 'inside', xAxisIndex: [0], start: 0, end: 100 },
+      { type: 'slider',  xAxisIndex: [0], start: 0, end: 100,
+        height: 20, bottom: 2,
+        fillerColor: 'rgba(100,160,255,0.1)',
+        borderColor: '#30363d',
+        textStyle: { color: '#8b949e', fontSize: 10 } }
+    ],
+    series: [{
+      name: '成交量', type: 'bar',
+      data: vols.map((v, i) => ({
+        value: v,
+        itemStyle: { color: kData[i].c >= kData[i].o ? '#f85149' : '#3fb950' }
+      })),
+      barMaxWidth: 6
+    }]
+  };
+
+  // ── 渲染 ──
+  if (!kchart) {
+    kchart = echarts.init(document.getElementById('kc'), null, { renderer: 'canvas' });
+    vchart = echarts.init(document.getElementById('vc'), null, { renderer: 'canvas' });
+    // 联动
+    echarts.connect([kchart, vchart]);
+  }
+
+  // 处理 visible（ECharts 无 visible，用 show 控制）
+  kOption.series.forEach(s => {
+    if (s.visible === false) s.lineStyle = { ...s.lineStyle, opacity: 0 };
+    delete s.visible;
+  });
+
+  kchart.setOption(kOption, true);
+  vchart.setOption(vOption, true);
+}
+
+// ═══════════════════════════════════════════
+//  6. 响应式 resize
+// ═══════════════════════════════════════════
+window.addEventListener('resize', () => {
+  kchart && kchart.resize();
+  vchart && vchart.resize();
+});
+
+// ═══════════════════════════════════════════
+//  7. checkbox 联动
+// ═══════════════════════════════════════════
+['chkBi','chkDuan','chkZs','chkBc','chkMa5','chkMa10','chkMa20'].forEach(id => {
+  document.getElementById(id).addEventListener('change', recompute);
+});
+
+// ═══════════════════════════════════════════
+//  8. 启动
+// ═══════════════════════════════════════════
+(async () => {
+  await loadCSV();
+  const r = compute();
+  renderCharts(r);
+})();
+</script>
+</body>
+</html>
