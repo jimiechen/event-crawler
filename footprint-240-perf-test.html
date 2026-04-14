@@ -196,36 +196,41 @@ function renderFootprintItem(params, api) {
       });
 
       if (showText && cellH >= 11) {
-        const ty = rowYc + 4;
         const fs = Math.min(12, Math.max(9, cellH * 0.62));
         const fw = isMax ? 'bold' : 'normal';
+        const ty = rowYc;  // 配合 textVerticalAlign: 'middle'
+
+        // sell 侧左列
         children.push({ type: 'text', style: {
-          text: String(row.sell), x: sellX + 4, y: ty,
+          text: String(row.sell),
+          x: sellX + 4, y: ty,
           fill: '#ffecec', fontSize: fs, fontWeight: fw,
-          fontFamily: 'Consolas', textAlign: 'left'
+          fontFamily: 'Consolas',
+          textAlign: 'left', textVerticalAlign: 'middle'
         }});
+        // sell 侧右列（= buy 数值，镜像）
         children.push({ type: 'text', style: {
-          text: '×', x: sellX + sideW / 2, y: ty,
-          fill: '#2a3040', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
-        }});
-        children.push({ type: 'text', style: {
-          text: String(row.buy), x: sellX + sideW - 4, y: ty,
+          text: String(row.buy),
+          x: sellX + sideW - 4, y: ty,
           fill: '#ccc', fontSize: fs, fontWeight: fw,
-          fontFamily: 'Consolas', textAlign: 'right'
+          fontFamily: 'Consolas',
+          textAlign: 'right', textVerticalAlign: 'middle'
         }});
+        // buy 侧左列
         children.push({ type: 'text', style: {
-          text: String(row.buy), x: buyX + 4, y: ty,
+          text: String(row.buy),
+          x: buyX + 4, y: ty,
           fill: '#eaffec', fontSize: fs, fontWeight: fw,
-          fontFamily: 'Consolas', textAlign: 'left'
+          fontFamily: 'Consolas',
+          textAlign: 'left', textVerticalAlign: 'middle'
         }});
+        // buy 侧右列（= sell 数值，镜像）
         children.push({ type: 'text', style: {
-          text: '×', x: buyX + sideW / 2, y: ty,
-          fill: '#2a3040', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
-        }});
-        children.push({ type: 'text', style: {
-          text: String(row.sell), x: buyX + sideW - 4, y: ty,
+          text: String(row.sell),
+          x: buyX + sideW - 4, y: ty,
           fill: '#ccc', fontSize: fs, fontWeight: fw,
-          fontFamily: 'Consolas', textAlign: 'right'
+          fontFamily: 'Consolas',
+          textAlign: 'right', textVerticalAlign: 'middle'
         }});
       }
     });
@@ -257,15 +262,17 @@ function renderFootprintItem(params, api) {
     style: { fill: kColor, stroke: '#fff', lineWidth: 0.6 }
   });
 
-  // Delta 标签
+  // Delta 标签：固定挂在 grid 底边，不受价格轴影响
   if (showText) {
-    const yBottom = api.coord([ci, Y_MIN])[1];
     const dc = m.minute_delta > 0 ? C_BUY : C_SELL;
     children.push({ type: 'text', style: {
       text: (m.minute_delta > 0 ? '+' : '') + m.minute_delta,
-      x: sellX + sideW / 2, y: yBottom + 18,
-      fill: ca(dc, 1), fontSize: 11, fontWeight: 'bold',
-      fontFamily: 'Consolas', textAlign: 'center'
+      x: sellX + sideW,           // 列中心 X
+      y: cs.y + cs.height + 16,   // grid 底边往下 16px，不会被裁
+      fill: ca(dc, 1),
+      fontSize: 11, fontWeight: 'bold',
+      fontFamily: 'Consolas',
+      textAlign: 'center', textVerticalAlign: 'top'
     }});
   }
 
@@ -283,7 +290,7 @@ const chart = echarts.init(document.getElementById('chart'), null, {
 const option = {
   backgroundColor: '#0b0e14',
   animation: false,
-  grid: { left: 62, right: 16, top: 20, bottom: 80 },
+  grid: { left: 62, right: 16, top: 20, bottom: 100 },
   dataZoom: [
     {
       // 内置滚轮缩放 + 鼠标拖拽平移
