@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8" />
-  <title>Footprint 240根 — 固定列宽版</title>
+  <title>Footprint 240根 — dataZoom 交互版</title>
   <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -24,14 +24,8 @@
     }
     #perf .val  { color: #5a8fc0; }
     #perf .warn { color: #e24b4a; }
-    /* 关键：chart 容器横向可滚动，宽度由 JS 动态设置 */
-    #chart-wrap {
-      width: 100%;
-      overflow-x: auto;
-      overflow-y: hidden;
-    }
     #chart {
-      /* 高度固定，宽度由 JS 根据"每根固定像素"计算 */
+      width: 100%;
       height: calc(100vh - 80px);
       min-height: 500px;
     }
@@ -47,28 +41,21 @@
   <button id="btn-60"  onclick="setView(60)">60根</button>
   <button id="btn-all" class="active" onclick="setView(240)">全天240根</button>
   <span style="color:#1e2438;margin:0 4px">|</span>
-  <span style="color:#333;font-size:11px">列宽：</span>
-  <button onclick="setColW(80)">宽</button>
-  <button onclick="setColW(56)" class="active" id="btn-colw-56">中</button>
-  <button onclick="setColW(36)">窄</button>
+  <button onclick="chart.dispatchAction({type:'dataZoom',startValue:0,endValue:N-1})">重置</button>
   <div id="perf">
-    <span>列宽 <span id="p-colw" class="val">56px</span></span>
-    <span>可见 <span id="p-visible" class="val">--</span> 根</span>
+    <span>可见 <span id="p-visible" class="val">240</span> 根</span>
     <span>渲染 <span id="p-render" class="val">--</span> ms</span>
     <span>FPS <span id="p-fps" class="val">--</span></span>
   </div>
 </div>
 
-<div id="chart-wrap">
-  <div id="chart"></div>
-</div>
+<div id="chart"></div>
 
 <script>
 // ─────────────────────────────────────────────────────────────
 // 生成 240 根 1min 数据
 // ─────────────────────────────────────────────────────────────
 function generateDay() {
-  const minutes = [];
   let price = 18.80;
   const slots = [];
   for (let h = 9, m = 30; slots.length < 120; ) {
@@ -79,7 +66,7 @@ function generateDay() {
     slots.push(String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0'));
     m++; if (m === 60) { m = 0; h++; }
   }
-  slots.forEach((minute) => {
+  return slots.map(minute => {
     const trend = (Math.random() - 0.492) * 0.006;
     price = Math.max(17.50, Math.min(20.50, price + trend));
     price = Math.round(price * 100) / 100;
@@ -91,8 +78,7 @@ function generateDay() {
     const volume = Math.round(800 + Math.random() * 9000);
     const rowCount = 3 + Math.floor(Math.random() * 9);
     const pMin = Math.round(low * 100), pMax = Math.round(high * 100);
-    const rows = [];
-    const used = new Set();
+    const rows = [], used = new Set();
     for (let r = 0; r < rowCount; r++) {
       let p = pMin + Math.floor(Math.random() * (pMax - pMin + 1));
       if (used.has(p)) continue;
@@ -103,21 +89,15 @@ function generateDay() {
     }
     rows.sort((a, b) => b.price - a.price);
     price = close;
-    minutes.push({
-      minute, kline: { open, high, low, close, volume },
-      minute_delta: rows.reduce((s, r) => s + r.delta, 0),
-      rows
-    });
+    return { minute, kline: { open, high, low, close, volume },
+             minute_delta: rows.reduce((s, r) => s + r.delta, 0), rows };
   });
-  return minutes;
 }
 
 const DATA = generateDay();
 const N    = DATA.length;
 
-// ─────────────────────────────────────────────────────────────
 // 全局价格轴
-// ─────────────────────────────────────────────────────────────
 const priceSet = new Set();
 DATA.forEach(m => {
   let p = Math.round(m.kline.low * 100);
@@ -128,56 +108,55 @@ const ALL_PRICES = Array.from(priceSet).sort((a, b) => a - b);
 const Y_MIN = ALL_PRICES[0] - 0.02;
 const Y_MAX = ALL_PRICES[ALL_PRICES.length - 1] + 0.02;
 
-// ─────────────────────────────────────────────────────────────
 // 颜色
-// ─────────────────────────────────────────────────────────────
 const C_BUY  = { r: 46,  g: 204, b: 113 };
 const C_SELL = { r: 231, g: 76,  b: 60  };
 const C_NEUT = { r: 80,  g: 80,  b: 100 };
-
 function ca(c, a) {
   return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + a.toFixed(2) + ')';
 }
 
 // ─────────────────────────────────────────────────────────────
-// 固定列宽（核心）
-// 这个值不随 dataZoom 变化，renderItem 始终用它
-// ─────────────────────────────────────────────────────────────
-let FIXED_COL_W = 56;   // px，可由用户切换
-
-// ─────────────────────────────────────────────────────────────
-// renderItem：用固定列宽，不用坐标系算宽
+// renderItem：列宽由坐标系动态计算，但限制最小/最大值
 // ─────────────────────────────────────────────────────────────
 function renderFootprintItem(params, api) {
   const ci = params.dataIndex;
   const m  = DATA[ci];
 
-  // 当前分钟的 X 轴像素中心（由 ECharts 坐标系给出）
+  // ECharts 给出的当前列中心 X（会随 dataZoom 变化）
   const xCenter = api.coord([ci, Y_MIN])[0];
+  const cs      = params.coordSys;
 
-  // 可见性裁剪（用固定列宽判断）
-  const cs = params.coordSys;
-  if (xCenter + FIXED_COL_W / 2 < cs.x ||
-      xCenter - FIXED_COL_W / 2 > cs.x + cs.width) {
+  // 动态列宽：用相邻两点 X 距离，但限制在 [8, 300] 之间
+  let colW;
+  if (ci + 1 < N) {
+    colW = Math.abs(api.coord([ci + 1, Y_MIN])[0] - xCenter);
+  } else if (ci > 0) {
+    colW = Math.abs(xCenter - api.coord([ci - 1, Y_MIN])[0]);
+  } else {
+    colW = cs.width / N;
+  }
+  colW = Math.max(8, Math.min(300, colW));
+
+  // 视口裁剪
+  if (xCenter + colW / 2 < cs.x || xCenter - colW / 2 > cs.x + cs.width) {
     return { type: 'group', children: [] };
   }
 
   const children = [];
 
-  // ── 固定列宽三分区 ──────────────────────────
-  const colW    = FIXED_COL_W;
+  // 三列分区
   const candleW = colW * 0.14;
   const sideW   = colW * 0.43;
-
   const colLeft = xCenter - colW / 2;
   const sellX   = colLeft + candleW;
   const buyX    = colLeft + candleW + sideW;
 
-  // 缩放 LOD：列宽小于阈值时降级显示
+  // LOD：列宽决定显示层级
   const showText  = colW >= 52;
   const showCells = colW >= 8;
 
-  // 格子行高（由坐标系决定，和列宽无关）
+  // 格子行高
   let cellH = 14;
   if (ALL_PRICES.length >= 2) {
     const ya = api.coord([ci, ALL_PRICES[0]])[1];
@@ -187,51 +166,39 @@ function renderFootprintItem(params, api) {
 
   const maxAbs = Math.max(...m.rows.map(r => Math.abs(r.delta)), 1);
 
-  // ── Footprint 格子 ──────────────────────────
+  // Footprint 格子
   if (showCells) {
     m.rows.forEach(row => {
       const rowYc = api.coord([ci, row.price])[1];
       const ry    = rowYc - cellH / 2;
       const rh    = Math.max(cellH - 1, 1);
-
       const intensity = Math.abs(row.delta) / maxAbs;
       const alpha     = 0.22 + Math.pow(intensity, 0.65) * 0.68;
       const isMax     = Math.abs(row.delta) === maxAbs;
-
       const sellBg = row.delta < 0 ? C_SELL : row.delta > 0 ? C_BUY : C_NEUT;
       const buyBg  = row.delta > 0 ? C_BUY  : row.delta < 0 ? C_SELL : C_NEUT;
 
-      // 卖方格子
       children.push({
         type: 'rect',
         shape: { x: sellX, y: ry, width: sideW - 1, height: rh },
         style: {
-          fill:      ca(sellBg, alpha),
-          stroke:    isMax ? '#ffffff' : 'none',
-          lineWidth: 1,
-          shadowColor: isMax ? ca(sellBg, 0.5) : 'none',
-          shadowBlur:  isMax ? 4 : 0
+          fill: ca(sellBg, alpha),
+          stroke: isMax ? '#fff' : 'none', lineWidth: 1
         }
       });
-      // 买方格子
       children.push({
         type: 'rect',
         shape: { x: buyX, y: ry, width: sideW - 1, height: rh },
         style: {
-          fill:      ca(buyBg, alpha * 0.85),
-          stroke:    isMax ? '#ffffff' : 'none',
-          lineWidth: 1,
-          shadowColor: isMax ? ca(buyBg, 0.5) : 'none',
-          shadowBlur:  isMax ? 4 : 0
+          fill: ca(buyBg, alpha * 0.85),
+          stroke: isMax ? '#fff' : 'none', lineWidth: 1
         }
       });
 
-      // 数字（列宽和行高都够时才显示）
       if (showText && cellH >= 11) {
         const ty = rowYc + 4;
         const fs = Math.min(12, Math.max(9, cellH * 0.62));
         const fw = isMax ? 'bold' : 'normal';
-
         children.push({ type: 'text', style: {
           text: String(row.sell), x: sellX + 4, y: ty,
           fill: '#ffecec', fontSize: fs, fontWeight: fw,
@@ -239,15 +206,13 @@ function renderFootprintItem(params, api) {
         }});
         children.push({ type: 'text', style: {
           text: '×', x: sellX + sideW / 2, y: ty,
-          fill: '#2a3040', fontSize: fs,
-          fontFamily: 'Consolas', textAlign: 'center'
+          fill: '#2a3040', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
         }});
         children.push({ type: 'text', style: {
           text: String(row.buy), x: sellX + sideW - 4, y: ty,
           fill: '#ccc', fontSize: fs, fontWeight: fw,
           fontFamily: 'Consolas', textAlign: 'right'
         }});
-
         children.push({ type: 'text', style: {
           text: String(row.buy), x: buyX + 4, y: ty,
           fill: '#eaffec', fontSize: fs, fontWeight: fw,
@@ -255,8 +220,7 @@ function renderFootprintItem(params, api) {
         }});
         children.push({ type: 'text', style: {
           text: '×', x: buyX + sideW / 2, y: ty,
-          fill: '#2a3040', fontSize: fs,
-          fontFamily: 'Consolas', textAlign: 'center'
+          fill: '#2a3040', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
         }});
         children.push({ type: 'text', style: {
           text: String(row.sell), x: buyX + sideW - 4, y: ty,
@@ -267,18 +231,16 @@ function renderFootprintItem(params, api) {
     });
   }
 
-  // ── K线蜡烛 ─────────────────────────────────
+  // K 线蜡烛
   const { open, close, high, low } = m.kline;
-  const up     = close >= open;
-  const kc     = up ? C_BUY : C_SELL;
-  const kColor = ca(kc, 1);
-  const ccx    = colLeft + candleW / 2;
-  const bw     = Math.max(candleW * 0.62, 1.5);
-
-  const yOpen  = api.coord([ci, open])[1];
-  const yClose = api.coord([ci, close])[1];
-  const yHigh  = api.coord([ci, high])[1];
-  const yLow   = api.coord([ci, low])[1];
+  const up      = close >= open;
+  const kColor  = ca(up ? C_BUY : C_SELL, 1);
+  const ccx     = colLeft + candleW / 2;
+  const bw      = Math.max(candleW * 0.62, 1.5);
+  const yOpen   = api.coord([ci, open])[1];
+  const yClose  = api.coord([ci, close])[1];
+  const yHigh   = api.coord([ci, high])[1];
+  const yLow    = api.coord([ci, low])[1];
   const bodyTop = Math.min(yOpen, yClose);
   const bodyH   = Math.max(Math.abs(yClose - yOpen), 1.5);
 
@@ -295,7 +257,7 @@ function renderFootprintItem(params, api) {
     style: { fill: kColor, stroke: '#fff', lineWidth: 0.6 }
   });
 
-  // ── Delta 标签 ───────────────────────────────
+  // Delta 标签
   if (showText) {
     const yBottom = api.coord([ci, Y_MIN])[1];
     const dc = m.minute_delta > 0 ? C_BUY : C_SELL;
@@ -311,21 +273,6 @@ function renderFootprintItem(params, api) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// 计算 canvas 宽度 = 固定列宽 × 总根数 + padding
-// ─────────────────────────────────────────────────────────────
-const PADDING_L = 62, PADDING_R = 16;
-
-function calcCanvasWidth() {
-  return PADDING_L + N * FIXED_COL_W + PADDING_R;
-}
-
-function applyCanvasWidth() {
-  const w = calcCanvasWidth();
-  document.getElementById('chart').style.width = w + 'px';
-  chart.resize({ width: w });
-}
-
-// ─────────────────────────────────────────────────────────────
 // ECharts 初始化
 // ─────────────────────────────────────────────────────────────
 const chart = echarts.init(document.getElementById('chart'), null, {
@@ -333,105 +280,120 @@ const chart = echarts.init(document.getElementById('chart'), null, {
   useDirtyRect: true
 });
 
-function buildOption() {
-  return {
-    backgroundColor: '#0b0e14',
-    animation: false,
-    grid: { left: PADDING_L, right: PADDING_R, top: 20, bottom: 50 },
-    // ── 关键：不用 dataZoom，改用横向滚动 ──────
-    // dataZoom 会改变列的物理宽度，用容器滚动代替
-    xAxis: {
-      type: 'category',
-      data: DATA.map(m => m.minute),
-      axisLine:  { lineStyle: { color: '#1a1e2a' } },
-      axisLabel: {
-        color: '#333', fontFamily: 'Consolas', fontSize: 10,
-        interval: (idx, val) =>
-          val === '09:30' || val === '13:00' ||
-          val.endsWith(':00') || val.endsWith(':30'),
-        rotate: 0
-      },
-      splitLine: { show: false },
-      axisTick:  { show: false },
-      boundaryGap: true
+const option = {
+  backgroundColor: '#0b0e14',
+  animation: false,
+  grid: { left: 62, right: 16, top: 20, bottom: 80 },
+  dataZoom: [
+    {
+      // 内置滚轮缩放 + 鼠标拖拽平移
+      type: 'inside',
+      xAxisIndex: 0,
+      startValue: 0,
+      endValue: N - 1,
+      minValueSpan: 3,    // 最少显示 3 根
+      maxValueSpan: N,    // 最多显示全部
+      zoomOnMouseWheel: true,
+      moveOnMouseMove: true,
+      moveOnMouseWheel: false
     },
-    yAxis: {
-      type: 'value',
-      min: Y_MIN, max: Y_MAX,
-      axisLabel: {
-        color: '#2a3040', fontFamily: 'Consolas', fontSize: 10,
-        formatter: v => v.toFixed(2)
-      },
-      splitLine: { lineStyle: { color: '#111520', width: 0.5 } },
-      axisLine: { show: false }
+    {
+      // 底部滑块
+      type: 'slider',
+      xAxisIndex: 0,
+      startValue: 0,
+      endValue: N - 1,
+      minValueSpan: 3,
+      maxValueSpan: N,
+      height: 22,
+      bottom: 8,
+      borderColor: '#1a1e2a',
+      backgroundColor: '#0d1018',
+      fillerColor: 'rgba(30,48,80,0.6)',
+      handleStyle: { color: '#2a5080' },
+      textStyle: { color: '#333', fontSize: 10 },
+      dataBackground: {
+        lineStyle: { color: '#1a2030' },
+        areaStyle: { color: '#0d1018' }
+      }
+    }
+  ],
+  xAxis: {
+    type: 'category',
+    data: DATA.map(m => m.minute),
+    axisLine:  { lineStyle: { color: '#1a1e2a' } },
+    axisLabel: {
+      color: '#333', fontFamily: 'Consolas', fontSize: 10,
+      interval: (idx, val) =>
+        val === '09:30' || val === '13:00' ||
+        val.endsWith(':00') || val.endsWith(':30'),
     },
-    series: [{
-      type: 'custom',
-      renderItem: renderFootprintItem,
-      data: DATA.map((_, i) => [i, 0]),
-      encode: { x: 0 },
-      z: 10,
-      clip: false,
-      progressive: 0
-    }]
-  };
-}
+    splitLine: { show: false },
+    axisTick:  { show: false },
+    boundaryGap: true
+  },
+  yAxis: {
+    type: 'value',
+    min: Y_MIN, max: Y_MAX,
+    axisLabel: {
+      color: '#2a3040', fontFamily: 'Consolas', fontSize: 10,
+      formatter: v => v.toFixed(2)
+    },
+    splitLine: { lineStyle: { color: '#111520', width: 0.5 } },
+    axisLine: { show: false }
+  },
+  series: [{
+    type: 'custom',
+    renderItem: renderFootprintItem,
+    data: DATA.map((_, i) => [i, 0]),
+    encode: { x: 0 },
+    z: 10,
+    clip: true,
+    progressive: 0
+  }]
+};
 
-chart.setOption(buildOption());
-applyCanvasWidth();
+chart.setOption(option);
 
-// 初始滚动到最右侧（最新数据）
-setTimeout(() => {
-  const wrap = document.getElementById('chart-wrap');
-  wrap.scrollLeft = wrap.scrollWidth;
-}, 50);
+// 初始显示最后 60 根（最新数据）
+chart.dispatchAction({
+  type: 'dataZoom',
+  dataZoomIndex: 0,
+  startValue: Math.max(0, N - 60),
+  endValue: N - 1
+});
 
 // ─────────────────────────────────────────────────────────────
-// 视图切换：改变可见窗口（通过滚动位置）
+// 视图切换按钮
 // ─────────────────────────────────────────────────────────────
-let currentView = 240;
-
 function setView(n) {
-  currentView = n;
   document.querySelectorAll('.toolbar button[id^="btn-"]').forEach(b => b.classList.remove('active'));
-  const btn = document.getElementById('btn-' + (n === 240 ? 'all' : n));
+  const id = n === 240 ? 'btn-all' : 'btn-' + n;
+  const btn = document.getElementById(id);
   if (btn) btn.classList.add('active');
 
-  const wrap = document.getElementById('chart-wrap');
-  const wrapW = wrap.clientWidth;
+  const endVal   = N - 1;
+  const startVal = n === 240 ? 0 : Math.max(0, N - n);
 
-  if (n === 240) {
-    // 全天：canvas 宽度保持，滚到最右
-    applyCanvasWidth();
-    setTimeout(() => { wrap.scrollLeft = wrap.scrollWidth; }, 30);
-  } else {
-    // 指定根数：canvas 宽度 = 可见根数 × 列宽 + padding
-    // 同时把 canvas 宽度设为"刚好容纳 n 根"
-    const targetW = PADDING_L + n * FIXED_COL_W + PADDING_R;
-    const chartW  = Math.max(targetW, wrapW);
-    document.getElementById('chart').style.width = chartW + 'px';
-    chart.resize({ width: chartW });
-    // 滚到最右侧
-    setTimeout(() => { wrap.scrollLeft = wrap.scrollWidth; }, 30);
-  }
-
-  document.getElementById('p-visible').textContent = n === 240 ? '240' : n;
+  chart.dispatchAction({
+    type: 'dataZoom',
+    dataZoomIndex: 0,
+    startValue: startVal,
+    endValue: endVal
+  });
+  document.getElementById('p-visible').textContent = n === 240 ? N : n;
 }
 
 // ─────────────────────────────────────────────────────────────
-// 列宽切换
+// 监听 dataZoom 更新可见根数
 // ─────────────────────────────────────────────────────────────
-function setColW(w) {
-  FIXED_COL_W = w;
-  document.getElementById('p-colw').textContent = w + 'px';
-  // 重新计算 canvas 宽度并重绘
-  applyCanvasWidth();
-  chart.setOption(buildOption());
-  setTimeout(() => {
-    const wrap = document.getElementById('chart-wrap');
-    wrap.scrollLeft = wrap.scrollWidth;
-  }, 30);
-}
+chart.on('dataZoom', function(e) {
+  // 计算当前可见根数
+  const dz = chart.getOption().dataZoom[0];
+  const sv = Math.round(dz.startValue ?? 0);
+  const ev = Math.round(dz.endValue ?? N - 1);
+  document.getElementById('p-visible').textContent = ev - sv + 1;
+});
 
 // ─────────────────────────────────────────────────────────────
 // 性能监控
@@ -455,10 +417,7 @@ setInterval(() => {
   frameCount = 0;
 }, 1000);
 
-window.addEventListener('resize', () => {
-  applyCanvasWidth();
-  chart.resize();
-});
+window.addEventListener('resize', () => chart.resize());
 </script>
 </body>
 </html>
