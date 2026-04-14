@@ -28,6 +28,7 @@
       width: 100%;
       height: calc(100vh - 120px);
       min-height: 500px;
+      overflow: visible !important;
     }
     body.light-theme {
       background: #f5f5f0;
@@ -321,8 +322,14 @@ function renderFootprintItem(params, api) {
   if (showDelta) {
     const dc   = m.minute_delta >= 0 ? C_BUY : C_SELL;
     const dtxt = (m.minute_delta > 0 ? '+' : '') + m.minute_delta;
+    // 用 api.coord 把价格轴最小值映射到像素 Y，再往下偏移
+    const yMin = api.coord([ci, Y_MIN])[1]; // 先取个参考点
+    const gridBottom = cs.y + cs.height;           // grid 底边像素 Y
+    const canvasH    = cs.y + cs.height + (50); // 估算 canvas 底边
+
+    // 改为：直接用固定偏移，不依赖 cs
     const deltaX = xCenter;
-    const deltaY = cs.y + cs.height + 8;
+    const deltaY = gridBottom + 10;
     const pillW  = Math.max(Math.min(colW - 4, 56), 24);
     children.push({ type: 'rect',
       shape: { x: deltaX - pillW/2, y: deltaY, width: pillW, height: 13, r: 2 },
