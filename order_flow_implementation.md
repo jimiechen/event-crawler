@@ -17,7 +17,7 @@
 - **SellID**: 卖单编号
 - **Price**: 成交价格
 - **Volume**: 成交量（股或手）
-- **Side**: 方向（1: 主动买入, -1: 主动卖出, --1: 买单撤单, -11: 卖单撤单）
+- **Side**: 方向（1: 主动买入, -1: 主动卖出, -1: 买单撤单, -11: 卖单撤单）
 - **Channel**: 交易频道
 - **BizIndex**: 交易所成交编号
 
@@ -57,9 +57,19 @@
 - **BidOrderCount1-BidOrderCount12**: 买方各档挂单笔数
 - **AskOrderCount1-AskOrderCount12**: 卖方各档挂单笔数
 
+### 2.4 市场差异处理
+
+#### 2.4.1 沪深市场 Side 字段编码差异
+- **沪市**：没有直接的方向字段，需要通过 BuyID 和 SellID 的大小关系判断（BuyID > SellID 通常为主动买）
+- **深市**：直接提供方向字段，1 表示主动买入，-1 表示主动卖出
+
+#### 2.4.2 撤单数据处理
+- 撤单行为应该从 Order 表的 OrderType 字段识别（-1: 撤买, -11: 撤卖）
+- Trade 表中的撤单记录（如果存在）通常是交易所特殊格式，需要单独处理
+
 ## 3. 核心图表设计与数据流程
 
-### 3.1 订单流热力图
+### 3.1 订单流热力图 (Footprint Chart)
 
 #### 3.1.1 图表示意
 
@@ -76,29 +86,31 @@ graph TD
         C1[时间窗口: 5秒]
         C2[聚合主动买单量]
         C3[聚合主动卖单量]
+        C4[计算Delta: 买量-卖量]
     end
     
     C --> C1
     C1 --> C2
     C1 --> C3
-    C2 --> D
-    C3 --> D
+    C2 --> C4
+    C3 --> C4
+    C4 --> D
     
-    subgraph 热力图结构
-        E1[时间轴: 9:30-15:00]
-        E2[价格轴: 当前价±1%]
-        E3[热力值: 订单流强度]
+    subgraph 价格档位处理
+        E1[价格档位确定]
+        E2[动态粒度调整]
+        E3[价格范围: 当前价±1%]
     end
     
     E --> E1
-    E --> E2
+    E1 --> E2
     E --> E3
     
     subgraph 颜色映射规则
         F1[红色: 主动卖单占优]
         F2[绿色: 主动买单占优]
         F3[黄色: 买卖均衡]
-        F4[颜色深度: 订单流强度]
+        F4[颜色深度: Delta绝对值]
     end
     
     F --> F1
@@ -122,24 +134,47 @@ active_trades = trade_df[trade_df['Side'].isin([1, -1])].copy()
 
 # 转换时间格式
 active_trades['DealTime'] = pd.to_datetime(active_trades['DealTime'], format='%H:%M:%S.%f')
+
+# 按交易频道去重
+active_trades = active_trades.drop_duplicates(subset=['DealID', 'Channel'])
 ```
 
 **查询步骤2：按时间窗口聚合**
 
 ```python
-# 设置时间窗口（如5秒）
+# 设置时间窗口（可配置，如5秒）
 time_window = '5S'
 
 # 创建时间窗口分组
 active_trades['time_bin'] = active_trades['DealTime'].dt.floor(time_window)
 
+# 确定价格档位粒度（基于ATR或固定步长）
+def calculate_price_granularity(prices, method='fixed', atr_period=14, fixed_step=0.01):
+    """计算价格档位粒度"""
+    if method == 'fixed':
+        return fixed_step
+    else:  # ATR方法
+        import numpy as np
+        if len(prices) < atr_period:
+            return 0.01
+        # 简化ATR计算
+        returns = np.diff(prices)
+        atr = np.mean(np.abs(returns[-atr_period:]))
+        # 档位粒度取ATR的整数倍
+        return round(atr * 2, 2) if atr > 0.01 else 0.01
+
+# 计算价格档位粒度
+price_granularity = calculate_price_granularity(active_trades['Price'].values, method='fixed')
+
 # 按时间窗口和价格聚合
-aggregated = active_trades.groupby(['time_bin', 'Price']).agg({
+aggregated = active_trades.groupby(['time_bin', pd.cut(active_trades['Price'], bins=np.arange(active_trades['Price'].min(), active_trades['Price'].max() + price_granularity, price_granularity), include_lowest=True)]).agg({
     'Volume': 'sum',
-    'Side': lambda x: (x == 1).sum() - (x == -1).sum()  # 订单流强度
-}).rename(columns={'Side': 'order_flow_strength'})
+    'Side': lambda x: (x == 1).sum() - (x == -1).sum()  # Delta计算
+}).rename(columns={'Side': 'delta'})
 
 aggregated = aggregated.reset_index()
+# 提取价格区间中点作为档位价格
+aggregated['Price'] = aggregated['Price'].apply(lambda x: (x.left + x.right) / 2)
 ```
 
 **查询步骤3：构建热力图数据矩阵**
@@ -156,8 +191,7 @@ price_max = current_price * 1.01
 filtered = aggregated[(aggregated['Price'] >= price_min) & (aggregated['Price'] <= price_max)]
 
 # 创建价格网格
-price_step = 0.01  # 价格精度
-price_bins = np.arange(price_min, price_max + price_step, price_step)
+price_bins = np.arange(price_min, price_max + price_granularity, price_granularity)
 
 # 创建时间网格
 time_bins = filtered['time_bin'].unique()
@@ -171,7 +205,7 @@ for idx, row in filtered.iterrows():
     time_idx = time_bins.index(row['time_bin'])
     price_idx = np.searchsorted(price_bins, row['Price']) - 1
     if 0 <= price_idx < len(price_bins):
-        heatmap_matrix[time_idx, price_idx] = row['order_flow_strength']
+        heatmap_matrix[time_idx, price_idx] = row['delta']
 
 # 构建最终数据结构
 heatmap_data = {
@@ -181,7 +215,8 @@ heatmap_data = {
     'color_scale': {
         'min': heatmap_matrix.min(),
         'max': heatmap_matrix.max()
-    }
+    },
+    'price_granularity': price_granularity
 }
 ```
 
@@ -325,7 +360,8 @@ depth_chart_data = {
     'total_bid_volume': latest_snapshot['TotalBidVolume'],
     'total_ask_volume': latest_snapshot['TotalAskVolume'],
     'weighted_bid_price': latest_snapshot['WeightBidPrice'],
-    'weighted_ask_price': latest_snapshot['WeightAskPrice']
+    'weighted_ask_price': latest_snapshot['WeightAskPrice'],
+    'limitation': '基于Snapshot数据，反映静态盘口状态，非连续变化'
 }
 
 # 计算深度指标
@@ -359,7 +395,7 @@ graph TD
     D --> E[订单流时间序列图]
     
     subgraph 时间窗口处理
-        B1[时间窗口: 10秒]
+        B1[时间窗口: 可配置]
         B2[主动买单总量]
         B3[主动卖单总量]
         B4[净订单流]
@@ -411,8 +447,11 @@ trade_df = pd.read_csv('trade_data.csv')
 # 转换时间格式
 trade_df['DealTime'] = pd.to_datetime(trade_df['DealTime'], format='%H:%M:%S.%f')
 
-# 设置时间窗口（如10秒）
-time_window = '10S'
+# 按交易频道去重
+trade_df = trade_df.drop_duplicates(subset=['DealID', 'Channel'])
+
+# 设置时间窗口（可配置，根据标的活跃度调整）
+time_window = '10S'  # 对于活跃标的可使用更短窗口
 
 # 创建时间窗口分组
 trade_df['time_bin'] = trade_df['DealTime'].dt.floor(time_window)
@@ -495,6 +534,7 @@ time_series_chart_data = {
     'price_close': time_series_data['Price_close_price'].tolist(),
     'price_change_pct': time_series_data['price_change_pct'].tolist(),
     'total_volume': time_series_data['Volume_total_volume'].tolist(),
+    'time_window': time_window,
     'large_trade_markers': [
         {
             'time': t.strftime('%H:%M:%S'),
@@ -518,84 +558,98 @@ time_series_chart_data = {
 ### 4.1 订单流计算
 
 #### 4.1.1 主动买单与主动卖单识别
-- **主动买单**：Side = 1，表示以卖一价或更高价格买入
-- **主动卖单**：Side = -1，表示以买一价或更低价格卖出
-- **撤单**：Side = --1（买单撤单）或 -11（卖单撤单）
+- **深市**：直接使用 Side 字段（1: 主动买入, -1: 主动卖出）
+- **沪市**：通过 BuyID 和 SellID 的大小关系判断（BuyID > SellID 通常为主动买）
+- **撤单**：从 Order 表的 OrderType 字段识别（-1: 撤买, -11: 撤卖）
 
 #### 4.1.2 订单流强度计算
 - **订单流强度** = 主动买单量 - 主动卖单量
 - **净订单流** = 订单流强度 / 总成交量
+- **Delta** = 主动买单量 - 主动卖单量（用于热力图）
 
 #### 4.1.3 价格档位分析
 - **档位分布**：统计各价格档位的挂单量和成交情况
 - **深度变化**：计算不同时间点的市场深度变化
 - **流动性分析**：评估各价格档位的流动性
+- **价格档位粒度**：基于ATR或固定步长动态调整
 
 ### 4.2 图表数据处理
 
 #### 4.2.1 时间序列数据处理
-- **时间窗口**：设置固定时间窗口（如1秒、5秒、10秒）
+- **时间窗口**：可配置的时间窗口（如1秒、5秒、10秒），根据标的活跃度调整
 - **聚合计算**：在每个时间窗口内聚合订单流数据
 - **平滑处理**：对数据进行平滑处理，减少噪声
 
 #### 4.2.2 热力图生成
 - **价格-时间矩阵**：构建价格和时间的二维矩阵
-- **颜色映射**：根据订单流强度映射不同颜色（红色表示主动卖单，绿色表示主动买单）
-- **热力值计算**：根据订单流强度计算热力值
+- **颜色映射**：根据Delta的绝对值映射不同颜色（红色表示主动卖单，绿色表示主动买单）
+- **热力值计算**：根据Delta计算热力值
+- **价格档位合并**：根据ATR或用户设定动态合并价格档位
 
 ## 5. 系统架构设计
 
 ### 5.1 数据处理层
 - **数据解析模块**：解析CSV文件，提取结构化数据
-- **数据清洗模块**：处理异常数据，填充缺失值
+- **数据清洗模块**：处理异常数据，填充缺失值，按Channel去重
 - **数据存储模块**：将处理后的数据存储为高效格式（如Parquet）
+- **数据对齐模块**：处理不同时间精度数据的对齐
 
 ### 5.2 计算层
 - **订单流计算模块**：计算订单流强度、净订单流等指标
 - **市场深度分析模块**：分析各价格档位的挂单情况
-- **交易行为分析模块**：识别大额交易、频繁交易等行为
+- **交易行为分析模块**：识别大额交易、撤单等行为
+- **性能优化模块**：使用DuckDB或Polars进行列式计算加速
 
 ### 5.3 可视化层
-- **热力图生成模块**：生成订单流热力图
+- **热力图生成模块**：生成订单流热力图（使用ECharts custom系列）
 - **深度图生成模块**：生成市场深度图表
 - **时间序列图表模块**：生成订单流时间序列图表
+- **交互功能模块**：实现缩放、时间范围选择等交互功能
 
 ## 6. 技术栈选择
 
 ### 6.1 后端技术
-- **数据处理**：Python (Pandas, NumPy)
+- **数据处理**：Python (Pandas, NumPy, Polars/DuckDB)
 - **数据存储**：Parquet, SQLite
 - **计算引擎**：Dask (处理大规模数据)
+- **API框架**：FastAPI
 
 ### 6.2 前端技术
-- **图表库**：ECharts, D3.js
+- **图表库**：ECharts (使用custom系列实现Footprint Chart)
 - **前端框架**：Vue.js, React
 - **数据传输**：WebSocket, REST API
+- **渲染技术**：Canvas (高性能渲染)
 
 ### 6.3 工具库
 - **数据解析**：csv, pandas
 - **时间处理**：datetime, pytz
 - **数值计算**：numpy, scipy
+- **性能优化**：polars, duckdb
 
 ## 7. 实现步骤
 
 ### 7.1 数据预处理
 1. **数据加载**：读取CSV文件到内存或内存映射
-2. **数据清洗**：处理缺失值、异常值
+2. **数据清洗**：处理缺失值、异常值，按Channel去重
 3. **数据转换**：将字符串时间转换为时间戳
 4. **数据索引**：按时间排序，建立时间索引
+5. **市场识别**：区分沪深市场数据，应用不同的方向判断逻辑
 
 ### 7.2 订单流计算
 1. **逐笔成交分析**：识别主动买单和主动卖单
 2. **订单流强度计算**：计算每个时间窗口的订单流强度
 3. **市场深度分析**：分析各价格档位的挂单变化
 4. **交易行为识别**：识别大额交易、撤单等行为
+5. **价格档位确定**：基于ATR或固定步长动态调整价格档位粒度
 
 ### 7.3 可视化实现
 1. **热力图构建**：根据订单流强度构建价格-时间热力图
+   - 使用ECharts custom系列实现Footprint Chart
+   - 自定义渲染逻辑，在蜡烛图内部显示价格档位的买卖量
 2. **深度图绘制**：绘制买卖盘深度分布
 3. **时间序列图表**：绘制订单流强度时间序列
 4. **交互功能**：实现缩放、时间范围选择等交互功能
+5. **性能优化**：使用Canvas渲染，实现数据抽样和缓存
 
 ## 8. 性能优化
 
@@ -603,11 +657,15 @@ time_series_chart_data = {
 - **内存管理**：使用内存映射或分块处理大规模数据
 - **并行计算**：使用多线程或分布式计算处理数据
 - **缓存策略**：缓存计算结果，避免重复计算
+- **列式存储**：使用Parquet等列式存储格式
+- **加速引擎**：使用DuckDB或Polars进行列式计算加速
 
 ### 8.2 可视化优化
 - **数据抽样**：对大规模数据进行抽样处理
 - **数据压缩**：使用压缩格式传输数据
 - **渲染优化**：使用Canvas或WebGL进行高性能渲染
+- **按需加载**：实现数据的按需加载和懒渲染
+- **缓存机制**：缓存图表配置和计算结果
 
 ## 9. 功能特性
 
@@ -620,6 +678,8 @@ time_series_chart_data = {
 ### 9.2 辅助功能
 - **时间范围选择**：支持选择不同时间范围
 - **价格范围调整**：支持调整价格显示范围
+- **时间窗口配置**：根据标的活跃度调整时间窗口
+- **价格档位粒度调整**：手动调整价格档位粒度
 - **数据导出**：支持导出分析结果
 - **自定义指标**：支持自定义计算指标
 
@@ -638,13 +698,45 @@ SecuCode,TradingDay,TickTime,TickTimeDiff,Price,DealNum,Volume,Turnover,TotalDea
 ```
 
 ### 10.2 输出示例
-- **订单流热力图**：价格-时间矩阵，颜色表示订单流强度
+- **订单流热力图**：价格-时间矩阵，颜色表示Delta强度
 - **市场深度图**：买卖盘各档位的挂单量柱状图
 - **订单流时间序列**：订单流强度随时间变化的折线图
 - **交易行为分析**：大额交易、撤单等行为的标记和统计
 
-## 11. 结论
+## 11. 技术实现注意事项
+
+### 11.1 ECharts Footprint Chart 实现
+ECharts 原生不支持 Footprint Chart，需要使用 custom 系列自定义渲染：
+
+```javascript
+// ECharts custom系列实现Footprint Chart
+option = {
+    series: [{
+        type: 'custom',
+        renderItem: function(params, api) {
+            // 自定义渲染逻辑
+            // 1. 绘制蜡烛图
+            // 2. 在蜡烛内部按价格档位绘制买卖量热力图
+            // 3. 根据Delta值映射颜色
+        },
+        data: heatmap_data // 预处理的热力图数据
+    }]
+};
+```
+
+### 11.2 性能优化策略
+- **数据预处理**：预先计算聚合数据，存储为Parquet格式
+- **查询优化**：使用DuckDB进行SQL查询，处理大规模数据
+- **渲染优化**：使用Canvas直接绘制，避免DOM操作
+- **数据抽样**：根据屏幕分辨率动态调整数据点数量
+
+### 11.3 数据对齐处理
+- 使用 `merge_asof` 处理不同时间精度数据的对齐
+- 实现时间轴的统一坐标系统
+- 处理数据缺失时的填充策略
+
+## 12. 结论
 
 基于Level 2 CSV数据实现订单流图表是一个涉及数据处理、计算分析和可视化的综合性项目。通过合理的系统架构设计和算法实现，可以构建出功能强大、性能高效的订单流分析工具，为交易决策提供有力支持。
 
-该实现方案不仅可以用于离线数据分析，也可以扩展为实时订单流分析系统，为交易者提供更及时、更全面的市场信息。
+该实现方案不仅可以用于离线数据分析，也可以扩展为实时订单流分析系统，为交易者提供更及时、更全面的市场信息。通过解决沪深市场差异、价格档位粒度、Snapshot数据局限性和ECharts自定义渲染等关键问题，可以实现接近专业交易软件的订单流分析功能。
