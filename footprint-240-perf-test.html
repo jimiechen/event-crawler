@@ -26,7 +26,7 @@
     #perf .warn { color: #e24b4a; }
     #chart {
       width: 100%;
-      height: calc(100vh - 80px);
+      height: calc(100vh - 120px);
       min-height: 500px;
     }
     body.light-theme {
@@ -192,6 +192,11 @@ function renderFootprintItem(params, api) {
 
   const children = [];
 
+  // 主题文字颜色
+  const TC = currentTheme === 'light'
+    ? { sell: '#8b1a1a', buy: '#1a5c2a', muted: '#555' }
+    : { sell: '#ffecec', buy: '#eaffec', muted: '#aaa' };
+
   // 三列分区
   const candleW = colW * 0.14;
   const sideW   = colW * 0.43;
@@ -252,7 +257,7 @@ function renderFootprintItem(params, api) {
         children.push({ type: 'text', style: {
           text: String(row.sell),
           x: sellX + 4, y: ty,
-          fill: '#ffecec', fontSize: fs, fontWeight: fw,
+          fill: TC.sell, fontSize: fs, fontWeight: fw,
           fontFamily: 'Consolas',
           textAlign: 'left', textVerticalAlign: 'middle'
         }});
@@ -260,7 +265,7 @@ function renderFootprintItem(params, api) {
         children.push({ type: 'text', style: {
           text: String(row.buy),
           x: sellX + sideW - 4, y: ty,
-          fill: '#ccc', fontSize: fs, fontWeight: fw,
+          fill: TC.muted, fontSize: fs, fontWeight: fw,
           fontFamily: 'Consolas',
           textAlign: 'right', textVerticalAlign: 'middle'
         }});
@@ -268,7 +273,7 @@ function renderFootprintItem(params, api) {
         children.push({ type: 'text', style: {
           text: String(row.buy),
           x: buyX + 4, y: ty,
-          fill: '#eaffec', fontSize: fs, fontWeight: fw,
+          fill: TC.buy, fontSize: fs, fontWeight: fw,
           fontFamily: 'Consolas',
           textAlign: 'left', textVerticalAlign: 'middle'
         }});
@@ -276,7 +281,7 @@ function renderFootprintItem(params, api) {
         children.push({ type: 'text', style: {
           text: String(row.sell),
           x: buyX + sideW - 4, y: ty,
-          fill: '#ccc', fontSize: fs, fontWeight: fw,
+          fill: TC.muted, fontSize: fs, fontWeight: fw,
           fontFamily: 'Consolas',
           textAlign: 'right', textVerticalAlign: 'middle'
         }});
@@ -312,22 +317,20 @@ function renderFootprintItem(params, api) {
 
   // Delta 标签（独立条件，不依赖 showText）
   if (showDelta) {
-    const dc = m.minute_delta > 0 ? C_BUY : C_SELL;
-    const deltaX = xCenter;                    // 列中心
-    const deltaY = cs.y + cs.height + 14;      // grid 底边下方
-    
-    // 先画底色背景pill
+    const dc   = m.minute_delta >= 0 ? C_BUY : C_SELL;
     const dtxt = (m.minute_delta > 0 ? '+' : '') + m.minute_delta;
-    const pillW = Math.min(colW - 4, 60);
+    const deltaX = xCenter;
+    const deltaY = cs.y + cs.height + 8;
+    const pillW  = Math.max(Math.min(colW - 4, 56), 24);
     children.push({ type: 'rect',
-      shape: { x: deltaX - pillW/2, y: deltaY - 1, width: pillW, height: 14, r: 2 },
+      shape: { x: deltaX - pillW/2, y: deltaY, width: pillW, height: 13, r: 2 },
       style: { fill: ca(dc, 0.18), stroke: 'none' }
     });
     children.push({ type: 'text', style: {
       text: dtxt,
-      x: deltaX, y: deltaY + 7,
+      x: deltaX, y: deltaY + 6,
       fill: ca(dc, 1),
-      fontSize: Math.min(11, Math.max(8, colW * 0.18)),
+      fontSize: Math.min(11, Math.max(8, colW * 0.16)),
       fontWeight: 'bold', fontFamily: 'Consolas',
       textAlign: 'center', textVerticalAlign: 'middle'
     }});
@@ -347,7 +350,7 @@ const chart = echarts.init(document.getElementById('chart'), null, {
 const option = {
   backgroundColor: '#0b0e14',
   animation: false,
-  grid: { left: 62, right: 16, top: 20, bottom: 110 },
+  grid: { left: 62, right: 16, top: 20, bottom: 50 },
   dataZoom: [
     {
       // 内置滚轮缩放 + 鼠标拖拽平移
