@@ -26,7 +26,7 @@
     #perf .warn { color: #e24b4a; }
     #chart {
       width: 100%;
-      height: calc(100vh - 120px);
+      height: calc(100vh - 80px);
       min-height: 500px;
       overflow: visible !important;
     }
@@ -322,15 +322,11 @@ function renderFootprintItem(params, api) {
   if (showDelta) {
     const dc   = m.minute_delta >= 0 ? C_BUY : C_SELL;
     const dtxt = (m.minute_delta > 0 ? '+' : '') + m.minute_delta;
-    // 用 api.coord 把价格轴最小值映射到像素 Y，再往下偏移
-    const yMin = api.coord([ci, Y_MIN])[1]; // 先取个参考点
-    const gridBottom = cs.y + cs.height;           // grid 底边像素 Y
-    const canvasH    = cs.y + cs.height + (50); // 估算 canvas 底边
-
-    // 改为：直接用固定偏移，不依赖 cs
+    // Delta 放在当前列最低价格行的下方（grid 内部），不要放在 grid 底边外
+    const yLowestRow = api.coord([ci, m.rows[m.rows.length - 1].price])[1];
+    const deltaY = yLowestRow + 2;  // 紧贴最后一行格子底边，往下 2px
     const deltaX = xCenter;
-    const deltaY = gridBottom + 10;
-    const pillW  = Math.max(Math.min(colW - 4, 56), 24);
+    const pillW = colW - 2; // 和格子等宽
     children.push({ type: 'rect',
       shape: { x: deltaX - pillW/2, y: deltaY, width: pillW, height: 13, r: 2 },
       style: { fill: ca(dc, 0.18), stroke: 'none' }
@@ -359,7 +355,7 @@ const chart = echarts.init(document.getElementById('chart'), null, {
 const option = {
   backgroundColor: '#0b0e14',
   animation: false,
-  grid: { left: 62, right: 16, top: 20, bottom: 50 },
+  grid: { left: 62, right: 16, top: 20, bottom: 30 },
   dataZoom: [
     {
       // 内置滚轮缩放 + 鼠标拖拽平移
