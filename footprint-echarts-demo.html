@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>Footprint — ECharts custom 实现</title>
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #141420; color: #e0e0e0; font-family: Consolas, monospace; padding: 16px; }
+    h2   { color: #555; font-size: 12px; font-weight: normal; margin-bottom: 10px; }
+    #chart { width: 100%; height: 560px; }
+    .legend { margin-top: 8px; display: flex; gap: 16px; font-size: 11px; color: #444; }
+    .ld { width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+          margin-right: 4px; vertical-align: middle; }
+  </style>
+</head>
+<body>
+
+<h2>605299.SH &nbsp;|&nbsp; 2026-04-10 &nbsp;|&nbsp; Footprint 订单流 — ECharts custom [DEMO]</h2>
+<div id="chart"></div>
+<div class="legend">
+  <span><span class="ld" style="background:#e24b4a"></span>卖方（中列 sell×buy）</span>
+  <span><span class="ld" style="background:#1d9e75"></span>买方（右列 buy×sell）</span>
+  <span>底部数字 = 分钟 Delta</span>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// MOCK 数据
+// ─────────────────────────────────────────────
+const MOCK_MINUTES = [
+  {
+    minute: "09:30", minute_delta: -87,
+    kline: { open: 18.80, high: 18.83, low: 18.77, close: 18.78, volume: 3420 },
+    rows: [
+      { price: 18.83, sell: 8,   buy: 22,  delta: 14  },
+      { price: 18.82, sell: 87,  buy: 79,  delta: -8  },
+      { price: 18.81, sell: 198, buy: 170, delta: -28 },
+      { price: 18.80, sell: 59,  buy: 56,  delta: -3  },
+      { price: 18.79, sell: 83,  buy: 66,  delta: -17 },
+      { price: 18.78, sell: 28,  buy: 22,  delta: -6  },
+      { price: 18.77, sell: 23,  buy: 18,  delta: -5  },
+    ]
+  },
+  {
+    minute: "09:31", minute_delta: 132,
+    kline: { open: 18.78, high: 18.85, low: 18.77, close: 18.84, volume: 4820 },
+    rows: [
+      { price: 18.85, sell: 22,  buy: 64,  delta: 42  },
+      { price: 18.84, sell: 31,  buy: 128, delta: 97  },
+      { price: 18.83, sell: 18,  buy: 52,  delta: 34  },
+      { price: 18.82, sell: 45,  buy: 38,  delta: -7  },
+      { price: 18.81, sell: 12,  buy: 9,   delta: -3  },
+      { price: 18.80, sell: 9,   buy: 18,  delta: 9   },
+      { price: 18.77, sell: 6,   buy: 2,   delta: -4  },
+    ]
+  },
+  {
+    minute: "09:32", minute_delta: 55,
+    kline: { open: 18.84, high: 18.87, low: 18.83, close: 18.86, volume: 2910 },
+    rows: [
+      { price: 18.87, sell: 15,  buy: 28,  delta: 13  },
+      { price: 18.86, sell: 72,  buy: 98,  delta: 26  },
+      { price: 18.85, sell: 44,  buy: 52,  delta: 8   },
+      { price: 18.84, sell: 38,  buy: 46,  delta: 8   },
+      { price: 18.83, sell: 19,  buy: 11,  delta: -8  },
+    ]
+  },
+  {
+    minute: "09:33", minute_delta: -63,
+    kline: { open: 18.86, high: 18.87, low: 18.82, close: 18.83, volume: 3650 },
+    rows: [
+      { price: 18.87, sell: 28,  buy: 19,  delta: -9  },
+      { price: 18.86, sell: 91,  buy: 72,  delta: -19 },
+      { price: 18.85, sell: 56,  buy: 48,  delta: -8  },
+      { price: 18.84, sell: 38,  buy: 29,  delta: -9  },
+      { price: 18.83, sell: 42,  buy: 24,  delta: -18 },
+      { price: 18.82, sell: 15,  buy: 11,  delta: -4  },
+    ]
+  },
+  {
+    minute: "09:34", minute_delta: 109,
+    kline: { open: 18.83, high: 18.86, low: 18.82, close: 18.85, volume: 3180 },
+    rows: [
+      { price: 18.86, sell: 18,  buy: 55,  delta: 37  },
+      { price: 18.85, sell: 25,  buy: 91,  delta: 66  },
+      { price: 18.84, sell: 31,  buy: 34,  delta: 3   },
+      { price: 18.83, sell: 22,  buy: 16,  delta: -6  },
+      { price: 18.82, sell: 9,   buy: 10,  delta: 1   },
+    ]
+  }
+];
+
+// ─────────────────────────────────────────────
+// 颜色工具（修正版：直接用数字参数）
+// ─────────────────────────────────────────────
+const C_SELL = { r: 226, g: 75,  b: 74  };
+const C_BUY  = { r: 29,  g: 158, b: 117 };
+const C_NEUT = { r: 80,  g: 80,  b: 95  };
+
+function ca(c, a) {
+  return 'rgba(' + c.r + ',' + c.g + ',' + c.b + ',' + a.toFixed(2) + ')';
+}
+
+function deltaColor(delta) {
+  if (delta > 0) return C_BUY;
+  if (delta < 0) return C_SELL;
+  return C_NEUT;
+}
+
+// ─────────────────────────────────────────────
+// 全局价格轴
+// ─────────────────────────────────────────────
+const priceSet = new Set();
+MOCK_MINUTES.forEach(m => {
+  let p = Math.round(m.kline.low * 100);
+  const hi = Math.round(m.kline.high * 100);
+  while (p <= hi) { priceSet.add(p / 100); p++; }
+  m.rows.forEach(r => priceSet.add(Math.round(r.price * 100) / 100));
+});
+const ALL_PRICES = Array.from(priceSet).sort((a, b) => a - b);
+const Y_MIN = ALL_PRICES[0] - 0.01;
+const Y_MAX = ALL_PRICES[ALL_PRICES.length - 1] + 0.01;
+
+// ─────────────────────────────────────────────
+// renderItem：每个 data item = 一整根分钟蜡烛
+// params.data = [minuteIndex, minuteObject]
+// ─────────────────────────────────────────────
+function renderFootprintItem(params, api) {
+  const ci = params.dataIndex;          // 分钟索引
+  const m  = MOCK_MINUTES[ci];          // 直接从全局取，避免序列化问题
+
+  const children = [];
+
+  // ── 计算列宽（用相邻两点的像素距离）────────
+  const p0 = api.coord([0, Y_MIN]);
+  const p1 = api.coord([1, Y_MIN]);
+  const colPxW = Math.abs(p1[0] - p0[0]) * 0.90;
+
+  // 三列比例：蜡烛 15% | 卖方 42.5% | 买方 42.5%
+  const candleW = colPxW * 0.15;
+  const sideW   = colPxW * 0.425;
+
+  // 当前分钟列的中心 X
+  const xc = api.coord([ci, Y_MIN])[0];
+  const colLeft  = xc - colPxW / 2;
+  const candleX  = colLeft;                    // 蜡烛列左边
+  const sellX    = colLeft + candleW;          // 卖方列左边
+  const buyX     = colLeft + candleW + sideW;  // 买方列左边
+
+  // ── 每行格子高度（用相邻两个价格的像素距离）
+  let cellH = 18; // fallback
+  if (ALL_PRICES.length >= 2) {
+    const ya = api.coord([ci, ALL_PRICES[0]])[1];
+    const yb = api.coord([ci, ALL_PRICES[1]])[1];
+    cellH = Math.abs(yb - ya);
+  }
+
+  const maxAbs = Math.max(...m.rows.map(r => Math.abs(r.delta)), 1);
+
+  // ── Footprint 格子 ──────────────────────────
+  m.rows.forEach(row => {
+    const rowYcenter = api.coord([ci, row.price])[1];
+    const ry  = rowYcenter - cellH / 2;
+    const rh  = cellH - 1;
+
+    const intensity = Math.abs(row.delta) / maxAbs;
+    const alpha     = 0.15 + intensity * 0.75;
+    const isMax     = Math.abs(row.delta) === maxAbs;
+
+    const sellBg = deltaColor(row.delta);
+    const buyBg  = row.delta > 0 ? C_BUY : row.delta < 0 ? C_SELL : C_NEUT;
+
+    // 卖方格子（中列）
+    children.push({
+      type: 'rect',
+      shape: { x: sellX, y: ry, width: sideW - 1, height: rh },
+      style: {
+        fill:        ca(sellBg, alpha),
+        stroke:      isMax ? ca(sellBg, 0.9) : 'transparent',
+        lineWidth:   1.5
+      }
+    });
+
+    // 买方格子（右列）
+    children.push({
+      type: 'rect',
+      shape: { x: buyX, y: ry, width: sideW - 1, height: rh },
+      style: {
+        fill:      ca(buyBg, alpha * 0.85),
+        stroke:    isMax ? ca(buyBg, 0.9) : 'transparent',
+        lineWidth: 1.5
+      }
+    });
+
+    const textY = rowYcenter + 4;
+    const fs    = Math.max(9, Math.min(11, cellH * 0.58));
+
+    // 卖方文字：sell × buy
+    children.push({ type: 'text', style: {
+      text: String(row.sell), x: sellX + 4, y: textY,
+      fill: ca(C_SELL, 0.95), fontSize: fs, fontFamily: 'Consolas', textAlign: 'left'
+    }});
+    children.push({ type: 'text', style: {
+      text: '×', x: sellX + sideW / 2, y: textY,
+      fill: '#2a2a40', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
+    }});
+    children.push({ type: 'text', style: {
+      text: String(row.buy), x: sellX + sideW - 4, y: textY,
+      fill: '#999', fontSize: fs, fontFamily: 'Consolas', textAlign: 'right'
+    }});
+
+    // 买方文字：buy × sell
+    children.push({ type: 'text', style: {
+      text: String(row.buy), x: buyX + 4, y: textY,
+      fill: ca(C_BUY, 0.95), fontSize: fs, fontFamily: 'Consolas', textAlign: 'left'
+    }});
+    children.push({ type: 'text', style: {
+      text: '×', x: buyX + sideW / 2, y: textY,
+      fill: '#2a2a40', fontSize: fs, fontFamily: 'Consolas', textAlign: 'center'
+    }});
+    children.push({ type: 'text', style: {
+      text: String(row.sell), x: buyX + sideW - 4, y: textY,
+      fill: '#999', fontSize: fs, fontFamily: 'Consolas', textAlign: 'right'
+    }});
+  });
+
+  // ── K线蜡烛（左列）──────────────────────────
+  const { open, close, high, low } = m.kline;
+  const up     = close >= open;
+  const kc     = up ? C_BUY : C_SELL;
+  const kColor = ca(kc, 1);
+  const ccx    = candleX + candleW / 2;
+  const bw     = candleW * 0.6;
+
+  const yOpen  = api.coord([ci, open])[1];
+  const yClose = api.coord([ci, close])[1];
+  const yHigh  = api.coord([ci, high])[1];
+  const yLow   = api.coord([ci, low])[1];
+
+  const bodyTop = Math.min(yOpen, yClose);
+  const bodyH   = Math.max(Math.abs(yClose - yOpen), 2);
+
+  // 上影线
+  children.push({ type: 'line',
+    shape: { x1: ccx, y1: yHigh, x2: ccx, y2: bodyTop },
+    style: { stroke: kColor, lineWidth: 1.5 }
+  });
+  // 下影线
+  children.push({ type: 'line',
+    shape: { x1: ccx, y1: bodyTop + bodyH, x2: ccx, y2: yLow },
+    style: { stroke: kColor, lineWidth: 1.5 }
+  });
+  // 实体
+  children.push({ type: 'rect',
+    shape: { x: ccx - bw / 2, y: bodyTop, width: bw, height: bodyH },
+    style: { fill: kColor, stroke: 'none' }
+  });
+
+  // ── 分钟 Delta（卖方列底部）────────────────
+  const yBottom = api.coord([ci, Y_MIN])[1];
+  const dc = m.minute_delta > 0 ? C_BUY : C_SELL;
+  children.push({ type: 'text', style: {
+    text: (m.minute_delta > 0 ? '+' : '') + m.minute_delta,
+    x: sellX + sideW / 2,
+    y: yBottom + 22,
+    fill: ca(dc, 1),
+    fontSize: 12,
+    fontWeight: 'bold',
+    fontFamily: 'Consolas',
+    textAlign: 'center'
+  }});
+
+  // ── 列左侧分隔线 ────────────────────────────
+  const yTop = api.coord([ci, Y_MAX])[1];
+  children.push({ type: 'line',
+    shape: { x1: colLeft - 1, y1: yTop, x2: colLeft - 1, y2: yBottom + 30 },
+    style: { stroke: '#1e1e32', lineWidth: 1 }
+  });
+
+  return { type: 'group', children };
+}
+
+// ─────────────────────────────────────────────
+// ECharts 初始化
+// ─────────────────────────────────────────────
+const chart = echarts.init(document.getElementById('chart'), null, { renderer: 'canvas' });
+
+chart.setOption({
+  backgroundColor: '#141420',
+  animation: false,
+  grid: { left: 58, right: 16, top: 24, bottom: 50 },
+  xAxis: {
+    type: 'category',
+    data: MOCK_MINUTES.map(m => m.minute),
+    axisLine:  { lineStyle: { color: '#2a2a3e' } },
+    axisLabel: { color: '#555', fontFamily: 'Consolas', fontSize: 11 },
+    splitLine: { show: false },
+    axisTick:  { show: false },
+    boundaryGap: true
+  },
+  yAxis: {
+    type: 'value',
+    min: Y_MIN,
+    max: Y_MAX,
+    axisLabel: {
+      color: '#3a3a55',
+      fontFamily: 'Consolas',
+      fontSize: 10,
+      formatter: v => v.toFixed(2)
+    },
+    splitLine: { lineStyle: { color: '#1c1c2e', width: 0.5 } },
+    axisLine: { show: false }
+  },
+  series: [{
+    type: 'custom',
+    renderItem: renderFootprintItem,
+    // data 只需要分钟索引，实际数据从全局 MOCK_MINUTES 取
+    data: MOCK_MINUTES.map((_, i) => [i, 0]),
+    encode: { x: 0 },
+    z: 10,
+    clip: false
+  }]
+});
+
+window.addEventListener('resize', () => chart.resize());
+</script>
+</body>
+</html>
